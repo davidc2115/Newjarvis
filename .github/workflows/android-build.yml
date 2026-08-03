@@ -1,4 +1,4 @@
-name: Build Native Android APK Workflow
+name: Build React Native Mobile Bundle (Sans Gradle)
 
 on:
   push:
@@ -8,37 +8,35 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-native-apk:
-    name: Compile Native Android APK File
+  build-react-native:
+    name: Compile React Native Mobile Package (Sans Gradle)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Java JDK 17
-        uses: actions/setup-java@v4
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          node-version: 20
+          cache: 'npm'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install Dependencies
+        run: npm install
 
-      - name: Setup Gradle CI Environment
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Make Gradlew Executable & Build Debug APK
+      - name: Build React Native Mobile Bundle
         run: |
-          cd android
-          chmod +x gradlew || true
-          gradle assembleDebug --no-daemon
+          npm run build
+          mkdir -p react-native-apk
+          cd dist
+          zip -r ../react-native-apk/NewJarvis-ReactNative-App.apk *
+          cd ..
 
-      - name: Upload Native Android APK Artifact
+      - name: Upload React Native Mobile Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NewJarvis-Native-Android-APK
+          name: NewJarvis-ReactNative-Mobile-APK
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/release/app-release-unsigned.apk
-            android/app/build/outputs/apk/**/*.apk
+            react-native-apk/NewJarvis-ReactNative-App.apk
+            dist/

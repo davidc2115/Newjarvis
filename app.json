@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "NewJarvis Mobile",
+    "slug": "newjarvis-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=512&q=80",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=512&q=80",
+      "resizeMode": "contain",
+      "backgroundColor": "#050b14"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.newjarvis.mobile"
+    }
+  }
+}
