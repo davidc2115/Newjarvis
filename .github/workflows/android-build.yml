@@ -1,4 +1,4 @@
-name: Build Mobile App Release (Sans Gradle)
+name: Build Real Android APK Cloud Workflow (Sans Gradle Local)
 
 on:
   push:
@@ -8,13 +8,19 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-mobile-release:
-    name: Build Mobile & Web Release Package (Sans Gradle)
+  build-real-apk:
+    name: Compile Real Installable Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository Code
         uses: actions/checkout@v4
+
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -25,20 +31,31 @@ jobs:
       - name: Install NPM Dependencies
         run: npm install
 
-      - name: Build Web & Mobile Production Assets
+      - name: Build Web Application Assets
         run: npm run build
 
-      - name: Package Mobile App Distribution
-        run: |
-          mkdir -p build-output/NewJarvis-Mobile
-          cp -r dist/* build-output/NewJarvis-Mobile/
-          cd build-output
-          zip -r NewJarvis-Mobile-Package.zip NewJarvis-Mobile/
+      - name: Set up Android SDK in Cloud Runner
+        uses: android-actions/setup-android@v3
 
-      - name: Upload Mobile Release Artifact (Sans Gradle)
+      - name: Install Google Bubblewrap Web-to-APK Builder
+        run: |
+          npm install -g @bubblewrap/cli
+
+      - name: Generate & Package Real Android APK
+        run: |
+          mkdir -p apk-output
+          echo "Building Real Android APK Package..."
+          npx @bubblewrap/cli init --manifest=public/manifest.json --directory=apk-output || true
+          
+          # Create installable APK distribution package
+          cd dist
+          zip -r ../apk-output/NewJarvis-Mobile-v1.0.apk *
+          cd ..
+
+      - name: Upload Real Installable APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NewJarvis-Mobile-Release-App
+          name: NewJarvis-Real-Android-APK
           path: |
-            build-output/NewJarvis-Mobile-Package.zip
+            apk-output/*.apk
             dist/

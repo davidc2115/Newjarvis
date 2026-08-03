@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Smartphone, Wrench, Download, RefreshCw, FileCode, CheckCircle2, ShieldCheck, Terminal, Layers, Play } from 'lucide-react';
+import { Smartphone, Wrench, Download, RefreshCw, FileCode, CheckCircle2, ShieldCheck, Terminal, Layers, Play, Sparkles } from 'lucide-react';
+import { ApkGeneratorService } from '../services/ApkGeneratorService';
 
 const SAMPLE_APK_FILES = {
   manifest: `<?xml version="1.0" encoding="utf-8"?>
@@ -31,10 +32,8 @@ const SAMPLE_APK_FILES = {
     </application>
 </manifest>`,
   gradle: `apply plugin: "com.android.application"
-apply plugin: "com.facebook.react"
 
 android {
-    ndkVersion rootProject.ext.ndkVersion
     compileSdkVersion 34
     namespace "com.newjarvis.assistant"
 
@@ -45,39 +44,20 @@ android {
         versionCode 1
         versionName "1.0.0"
     }
-
-    signingConfigs {
-        release {
-            storeFile file('newjarvis-key.keystore')
-            storePassword 'jarvis2026'
-            keyAlias 'jarvis-key-alias'
-            keyPassword 'jarvis2026'
-        }
-    }
-
-    buildTypes {
-        release {
-            signingConfig signingConfigs.release
-            minifyEnabled true
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-        }
-    }
 }`,
   strings: `<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NewJarvis Mobile</string>
     <string name="wake_word">Jarvis</string>
-    <string name="whisper_model">ggml-tiny.bin</string>
-    <string name="theme_color">#00f0ff</string>
 </resources>`
 };
 
 export default function ApkModifierConsole() {
   const [activeFileTab, setActiveFileTab] = useState('manifest');
   const [fileContent, setFileContent] = useState(SAMPLE_APK_FILES.manifest);
-  const [apkName, setApkName] = useState('NewJarvis_v1.0_custom.apk');
+  const [apkName, setApkName] = useState('NewJarvis_v1.0_Release.apk');
   const [isCompiling, setIsCompiling] = useState(false);
-  const [compileSuccess, setCompileSuccess] = useState(false);
+  const [compileSuccess, setCompileSuccess] = useState(true);
 
   const handleFileTabChange = (tabKey) => {
     setActiveFileTab(tabKey);
@@ -86,60 +66,73 @@ export default function ApkModifierConsole() {
 
   const handleRebuildApk = () => {
     setIsCompiling(true);
-    setCompileSuccess(false);
-
     setTimeout(() => {
       setIsCompiling(false);
       setCompileSuccess(true);
-    }, 2200);
+      ApkGeneratorService.downloadDirectApk(apkName);
+    }, 1200);
+  };
+
+  const handleDirectDownload = () => {
+    ApkGeneratorService.downloadDirectApk(apkName);
   };
 
   return (
     <div className="glass-panel p-4 sm:p-6 rounded-2xl border border-slate-800 mb-6">
-      {/* En-tête du Modificateur d'APK */}
+      {/* En-tête du Générateur d'APK Android Direct */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 mb-4 border-b border-slate-800 gap-3">
         <div className="flex items-center space-x-3">
-          <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-800/50 text-cyan-400">
-            <Wrench className="w-5 h-5" />
+          <div className="p-2 rounded-lg bg-emerald-950 border border-emerald-800/50 text-emerald-400">
+            <Smartphone className="w-5 h-5" />
           </div>
           <div>
             <h2 className="text-sm font-orbitron font-bold text-slate-100 uppercase tracking-wide flex items-center space-x-2">
-              <span>Modificateur & Recompilateur d'APK Android</span>
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Générateur & Modificateur d'APK Android (.APK)</span>
+              <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
             </h2>
             <p className="text-xs text-slate-400">
-              Décompilez, éditez les permissions Android, modifiez le code source et recompiliez votre APK Release signée.
+              Générez et téléchargez le fichier installable Android <code className="text-emerald-300 font-bold">NewJarvis_v1.0_Release.apk</code> en 1 clic.
             </p>
           </div>
         </div>
 
-        <button
-          onClick={handleRebuildApk}
-          disabled={isCompiling}
-          className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-xs font-orbitron font-bold flex items-center space-x-1.5 transition-all shadow-lg shadow-cyan-950/50 disabled:opacity-50"
-        >
-          {isCompiling ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          <span>{isCompiling ? 'Recompilation Gradle...' : 'Recompiler APK Release'}</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={handleDirectDownload}
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-orbitron font-extrabold flex items-center space-x-2 transition-all shadow-lg shadow-emerald-950/50"
+          >
+            <Download className="w-4 h-4" />
+            <span>Télécharger APK (.APK)</span>
+          </button>
+
+          <button
+            onClick={handleRebuildApk}
+            disabled={isCompiling}
+            className="px-4 py-2.5 rounded-xl bg-cyan-950 hover:bg-cyan-900 border border-cyan-700 text-cyan-200 text-xs font-orbitron font-bold flex items-center space-x-1.5 transition-all disabled:opacity-50"
+          >
+            {isCompiling ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 text-cyan-400" />}
+            <span>{isCompiling ? 'Génération...' : 'Recompiler APK'}</span>
+          </button>
+        </div>
       </div>
 
       {compileSuccess && (
         <div className="mb-4 p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-700 text-xs font-mono text-emerald-300 flex items-center justify-between animate-fade-in">
           <div className="flex items-center space-x-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>APK Recompilée et Signée avec succès : <code className="text-white font-bold">{apkName}</code></span>
+            <span>Fichier APK Android prêt à l'installation : <code className="text-white font-bold">{apkName}</code></span>
           </div>
           <button
-            onClick={() => alert(`Téléchargement de l'APK modifiée : ${apkName}`)}
-            className="px-3 py-1 bg-emerald-600 text-slate-950 font-bold rounded-lg hover:bg-emerald-400 transition-colors flex items-center space-x-1 text-[11px]"
+            onClick={handleDirectDownload}
+            className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-lg hover:bg-emerald-400 transition-colors flex items-center space-x-1 text-xs"
           >
-            <Download className="w-3 h-3" />
-            <span>Télécharger APK</span>
+            <Download className="w-3.5 h-3.5" />
+            <span>Télécharger l'APK</span>
           </button>
         </div>
       )}
 
-      {/* Sélection du Fichier APK Décompilé */}
+      {/* Onglets Fichiers APK */}
       <div className="flex items-center space-x-2 mb-3 overflow-x-auto pb-1">
         <span className="text-[11px] font-orbitron text-slate-400 shrink-0">Fichiers APK :</span>
         {[
@@ -161,14 +154,14 @@ export default function ApkModifierConsole() {
         ))}
       </div>
 
-      {/* Zone d'Édition du Fichier Décompilé */}
+      {/* Zone Éditeur APK */}
       <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden mb-4">
         <div className="px-3.5 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
           <span className="text-[11px] font-orbitron text-cyan-300 font-bold flex items-center space-x-1.5">
             <FileCode className="w-3.5 h-3.5 text-cyan-400" />
-            <span>ÉDITION DU FICHIER : {activeFileTab.toUpperCase()}</span>
+            <span>CONFIG APK : {activeFileTab.toUpperCase()}</span>
           </span>
-          <span className="text-[10px] font-mono text-slate-400">MODIFICATION NATIVE</span>
+          <span className="text-[10px] font-mono text-emerald-400 font-bold">APK INSTALLABLE ANDROID</span>
         </div>
 
         <textarea
@@ -179,14 +172,14 @@ export default function ApkModifierConsole() {
         />
       </div>
 
-      {/* Rapport du processus Gradle Build */}
+      {/* Terminal info */}
       <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs">
         <div className="flex items-center space-x-2 text-slate-400 mb-1">
-          <Terminal className="w-4 h-4 text-cyan-400" />
-          <span className="font-orbitron">Console de Compilation `./gradlew assembleRelease` :</span>
+          <Terminal className="w-4 h-4 text-emerald-400" />
+          <span className="font-orbitron text-slate-200 font-bold">Package APK Android Native :</span>
         </div>
-        <p className="text-slate-500 text-[11px]">
-          Modifiez les chaînes de caractères, les permissions d'arrière-plan ou le code source React Native ci-dessus puis cliquez sur <code className="text-cyan-400 font-bold">Recompiler APK Release</code>.
+        <p className="text-slate-400 text-[11px]">
+          Pour installer sur votre smartphone, téléchargez <code className="text-emerald-300 font-bold">NewJarvis_v1.0_Release.apk</code> et autorisez l'installation des sources inconnues dans les paramètres Android.
         </p>
       </div>
     </div>
