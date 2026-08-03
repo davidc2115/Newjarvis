@@ -1,4 +1,4 @@
-name: Build Android APK (Gradle System Build)
+name: Build Installable Android APK (Gradle 8 Canonical Build)
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-apk:
-    name: Build Installable Android APK
+    name: Compile Installable Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -28,13 +28,13 @@ jobs:
       - name: Setup Gradle System Compiler
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Compile Android Debug APK with System Gradle
+      - name: Compile Android Debug APK
         run: |
           cd android
-          gradle assembleDebug --no-daemon
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload Installable APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NewJarvis-Installable-Android-APK
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
