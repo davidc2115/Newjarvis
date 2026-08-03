@@ -16,6 +16,11 @@ jobs:
       - name: Checkout Code Repository
         uses: actions/checkout@v4
 
+      - name: Force Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Set up Java JDK 17
         uses: actions/setup-java@v4
         with:
