@@ -1,4 +1,4 @@
-name: Build Android APK (Official Android Action)
+name: Build Android APK (Gradle System Build)
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-apk:
-    name: Build Installable Android APK File
+    name: Build Installable Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -25,20 +25,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept Android SDK Licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+      - name: Setup Gradle System Compiler
+        uses: gradle/actions/setup-gradle@v3
 
-      - name: Fix Line Endings & Executable Permissions for Gradle
+      - name: Compile Android Debug APK with System Gradle
         run: |
           cd android
-          sed -i 's/\r$//' gradlew || true
-          chmod +x gradlew || true
-
-      - name: Build Android APK with Official Action
-        uses: android-actions/build-apk@v2
-        with:
-          gradle-command: assembleDebug
-          project-path: android
+          gradle assembleDebug --no-daemon
 
       - name: Upload Installable APK Artifact
         uses: actions/upload-artifact@v4
