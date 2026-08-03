@@ -1,4 +1,4 @@
-name: Build Android APK Release Workflow
+name: Build Mobile App Release (Sans Gradle)
 
 on:
   push:
@@ -8,19 +8,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-apk:
-    name: Build Android Release APK
+  build-mobile-release:
+    name: Build Mobile & Web Release Package (Sans Gradle)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Setup Java JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -28,25 +22,23 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install NPM Dependencies
         run: npm install
 
-      - name: Build Web Assets
+      - name: Build Web & Mobile Production Assets
         run: npm run build
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Build Android Release APK with Gradle
+      - name: Package Mobile App Distribution
         run: |
-          cd android
-          gradle assembleRelease --no-daemon
+          mkdir -p build-output/NewJarvis-Mobile
+          cp -r dist/* build-output/NewJarvis-Mobile/
+          cd build-output
+          zip -r NewJarvis-Mobile-Package.zip NewJarvis-Mobile/
 
-      - name: Upload APK Release Artifact
+      - name: Upload Mobile Release Artifact (Sans Gradle)
         uses: actions/upload-artifact@v4
         with:
-          name: NewJarvis-Mobile-Release-APK
+          name: NewJarvis-Mobile-Release-App
           path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
+            build-output/NewJarvis-Mobile-Package.zip
             dist/
