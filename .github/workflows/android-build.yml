@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-apk:
-    name: Build Android Release APK & Deployment
+    name: Build Android Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -28,34 +28,25 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Install NPM Dependencies
+      - name: Install Dependencies
         run: npm install
 
       - name: Build Web Assets
         run: npm run build
 
-      - name: Grant Execute Permission for Gradle
-        run: |
-          if [ -f "android/gradlew" ]; then
-            chmod +x android/gradlew
-          fi
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
-      - name: Build Android Release APK via Gradle Cloud CI
+      - name: Build Android Release APK with Gradle
         run: |
-          if [ -d "android" ]; then
-            cd android
-            ./gradlew assembleRelease --no-daemon
-          else
-            echo "Packaging release distribution..."
-            mkdir -p build-output
-            cp -r dist/* build-output/
-          fi
+          cd android
+          gradle assembleRelease --no-daemon
 
-      - name: Upload APK Artifact for Smartphone Download
+      - name: Upload APK Release Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NewJarvis-Mobile-Release-APK
           path: |
             android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/debug/*.apk
             dist/
-            build-output/

@@ -1,0 +1,8 @@
+{
+  "appId": "com.newjarvis.app",
+  "appName": "NewJarvis Mobile",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
