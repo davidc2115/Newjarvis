@@ -1,4 +1,4 @@
-name: Build Installable Android APK (Gradle 8 Canonical Build)
+name: Build Installable Android APK
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-apk:
-    name: Compile Installable Android APK
+    name: Compile Installable Android APK File
     runs-on: ubuntu-latest
 
     steps:
@@ -22,21 +22,16 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Node.js 22 LTS
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Gradle System Compiler
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Compile Android Debug APK
+      - name: Fix Line Endings and Permissions for Gradlew
         run: |
           cd android
-          gradle assembleDebug --no-daemon --stacktrace
+          sed -i 's/\r$//' gradlew || true
+          chmod +x gradlew || true
+
+      - name: Build Android Debug APK with Gradlew
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload Installable APK Artifact
         uses: actions/upload-artifact@v4
