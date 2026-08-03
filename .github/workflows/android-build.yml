@@ -29,23 +29,11 @@ jobs:
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
 
-      - name: Generate Gradle Wrapper JAR via system gradle
-        run: |
-          mkdir -p android/gradle/wrapper
-          # Use system gradle to generate wrapper jar
-          cd android
-          gradle wrapper --gradle-version 8.4 --distribution-type bin 2>/dev/null || true
-          # Fallback: download jar directly
-          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            curl -fsSL "https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar" \
-              -o gradle/wrapper/gradle-wrapper.jar
-          fi
-          ls -la gradle/wrapper/
-
       - name: Fix Gradlew Permissions
         run: |
           sed -i 's/\r$//' android/gradlew
           chmod +x android/gradlew
+          ls -la android/gradle/wrapper/
 
       - name: Build Debug APK
         run: |
