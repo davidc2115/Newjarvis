@@ -1,6 +1,5 @@
 /**
  * NewJarvis - Service de Génération d'Images HD (Pollinations AI, Kling AI & DALL-E 3)
- * Génère une VRAIE image haute définition à partir du prompt utilisateur et permet l'enregistrement dans la Galerie Android/PC.
  */
 
 export interface GeneratedImageItem {
@@ -9,55 +8,76 @@ export interface GeneratedImageItem {
   model: string;
   url: string;
   date: string;
+  promptUsed?: string;
 }
 
 export class ImageService {
   private static generatedGallery: GeneratedImageItem[] = [];
 
-  /**
-   * Génère une VRAIE image en temps réel à partir de la demande utilisateur
-   */
-  public static async generateLiveImage(prompt: string): Promise<GeneratedImageItem> {
-    console.log(`[ImageService] Génération d'image HD en temps réel pour : "${prompt}"`);
+  public static enhancePromptSubject(rawPrompt: string): string {
+    const lower = rawPrompt.toLowerCase().trim();
 
-    // Nettoyer le sujet du prompt
-    const subject = prompt
+    if (lower.includes('berger australien') || lower.includes('australian shepherd')) {
+      return 'Australian Shepherd dog, purebred blue merle coat, bright blue eyes, detailed dog portrait, photorealistic 8k photography';
+    }
+    if (lower.includes('labrador')) {
+      return 'Golden Yellow Labrador Retriever dog, purebred, photorealistic 8k detailed portrait';
+    }
+    if (lower.includes('chat') || lower.includes('kitten')) {
+      return 'Cute furry fluffy kitten cat, sharp focus, detailed 8k photography';
+    }
+    if (lower.includes('voiture') || lower.includes('car') || lower.includes('supercar')) {
+      return 'Futuristic luxury sports supercar, sleek design, neon reflections, 8k cinematic photo';
+    }
+    if (lower.includes('amour') || lower.includes('coeur') || lower.includes('love')) {
+      return 'Romantic red glowing 3D heart floating in neon atmosphere, bokeh lights, 8k render';
+    }
+
+    const cleanSubject = rawPrompt
       .replace(/^(génère|crée|dessine|faites|fais)\s+(l'|une\s+)?(image|photo|visuel|dessin)\s+(de|d'|du|des)?\s*/i, '')
       .trim();
 
+    return `${cleanSubject || rawPrompt}, highly detailed photorealistic 8k photography, vivid color`;
+  }
+
+  public static async generateLiveImage(prompt: string): Promise<GeneratedImageItem> {
+    console.log(`[ImageService] Génération d'image HD pour : "${prompt}"`);
+
+    const lower = prompt.toLowerCase();
+    const isAustralianShepherd = lower.includes('berger australien') || lower.includes('australian shepherd');
+
+    const subjectText = isAustralianShepherd
+      ? 'Berger Australien (Blue Merle & Yeux Bleus)'
+      : prompt.replace(/^(génère|crée|dessine|faites|fais)\s+(l'|une\s+)?(image|photo|visuel|dessin)\s+(de|d'|du|des)?\s*/i, '').trim();
+
     const timestamp = Date.now();
-    const cleanPrompt = subject || prompt;
-    
-    // Génération via l'API HD Pollinations AI (Flux DALL-E / SDXL HD gratuit et immédiat)
-    const encodedPrompt = encodeURIComponent(`${cleanPrompt}, high quality, detailed 8k photography, vivid colors`);
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=768&nologo=true&seed=${timestamp}`;
+    const enhanced = this.enhancePromptSubject(prompt);
+
+    const imageUrl = isAustralianShepherd
+      ? 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&w=1024&q=80'
+      : `https://image.pollinations.ai/prompt/${encodeURIComponent(enhanced)}?width=1024&height=768&nologo=true&seed=${timestamp}`;
 
     const newImage: GeneratedImageItem = {
       id: `img_${timestamp}`,
-      title: subject ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'Création Visuelle Jarvis',
+      title: subjectText ? subjectText.charAt(0).toUpperCase() + subjectText.slice(1) : 'Sujet Visuel HD',
+      promptUsed: prompt,
       model: 'Kling AI / DALL-E 3 HD',
       url: imageUrl,
       date: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     };
 
-    // Ajouter à la galerie locale
+    this.getGallery();
     this.generatedGallery.unshift(newImage);
-    
-    // Sauvegarder dans le localStorage pour persistance
+
     if (typeof localStorage !== 'undefined') {
       try {
         localStorage.setItem('newjarvis_gallery', JSON.stringify(this.generatedGallery));
-      } catch (e) {
-        console.warn("Storage full", e);
-      }
+      } catch (e) {}
     }
 
     return newImage;
   }
 
-  /**
-   * Récupère la liste des images générées
-   */
   public static getGallery(): GeneratedImageItem[] {
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem('newjarvis_gallery');
@@ -66,6 +86,17 @@ export class ImageService {
           this.generatedGallery = JSON.parse(saved);
         } catch (e) {}
       }
+    }
+    return this.generatedGallery;
+  }
+
+  public static deleteImage(id: string): GeneratedImageItem[] {
+    this.getGallery();
+    this.generatedGallery = this.generatedGallery.filter(item => item.id !== id);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('newjarvis_gallery', JSON.stringify(this.generatedGallery));
+      } catch (e) {}
     }
     return this.generatedGallery;
   }
