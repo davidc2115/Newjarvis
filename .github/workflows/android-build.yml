@@ -28,15 +28,13 @@ jobs:
           sed -i 's/\r$//' gradlew || true
           chmod +x gradlew || true
 
-      - name: Compile Signed Installable Android APK
+      - name: Compile Installable Android APK
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon || ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Upload Signed Installable APK Artifact
+      - name: Upload Installable APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NewJarvis-Installable-Android-APK
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/*.apk
