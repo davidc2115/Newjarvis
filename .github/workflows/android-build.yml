@@ -22,13 +22,19 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK Licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
       - name: Fix Line Endings & Executable Permissions for Gradle
         run: |
           cd android
-          sed -i 's/\r$//' gradlew
-          chmod +x gradlew
+          sed -i 's/\r$//' gradlew || true
+          chmod +x gradlew || true
 
-      - name: Build Android APK with Official Android Action
+      - name: Build Android APK with Official Action
         uses: android-actions/build-apk@v2
         with:
           gradle-command: assembleDebug
