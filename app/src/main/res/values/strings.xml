@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AI DApp Developer</string>
+    
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_ai_models">AI Models</string>
+    <string name="nav_github">GitHub</string>
+    <string name="nav_terminal">Terminal</string>
+    <string name="nav_dapp_templates">DApp Templates</string>
+    <string name="nav_settings">Settings</string>
+    
+    <!-- AI Models -->
+    <string name="ai_models_title">AI Models</string>
+    <string name="ai_models_load">Load Model</string>
+    <string name="ai_models_unload">Unload</string>
+    <string name="ai_models_generating">Generating…</string>
+    <string name="ai_models_generate">Generate</string>
+    <string name="ai_models_prompt">Enter prompt</string>
+    <string name="ai_models_no_model">No model loaded</string>
+    
+    <!-- GitHub -->
+    <string name="github_title">GitHub Integration</string>
+    <string name="github_connect">Connect GitHub</string>
+    <string name="github_authenticating">Authenticating…</string>
+    <string name="github_auth_error">Authentication Error</string>
+    <string name="github_token">Personal Access Token</string>
+    <string name="github_token_hint">Enter your GitHub personal access token</string>
+    <string name="github_repos">Repositories</string>
+    <string name="github_clone">Clone</string>
+    <string name="github_open">Open</string>
+    <string name="github_new_repo">New Repo</string>
+    <string name="github_refresh">Refresh</string>
+    
+    <!-- Terminal -->
+    <string name="terminal_title">AI Terminal</string>
+    <string name="terminal_execute">Execute</string>
+    <string name="terminal_clear">Clear</string>
+    <string name="terminal_prompt">Enter command</string>
+    <string name="terminal_ai_assist">AI Assist</string>
+    <string name="terminal_no_commands">No commands executed yet</string>
+    
+    <!-- DApp Templates -->
+    <string name="dapp_templates_title">DApp Templates</string>
+    <string name="dapp_templates_filter">Filter by Platform</string>
+    <string name="dapp_templates_all">All</string>
+    <string name="dapp_templates_android">Android</string>
+    <string name="dapp_templates_ios">iOS</string>
+    <string name="dapp_templates_windows">Windows</string>
+    <string name="dapp_templates_cross_platform">Cross-Platform</string>
+    <string name="dapp_templates_create">Create Custom</string>
+    <string name="dapp_templates_description">Description</string>
+    <string name="dapp_templates_generate">Generate</string>
+    
+    <!-- DApp Editor -->
+    <string name="dapp_editor_title">DApp Editor</string>
+    <string name="dapp_editor_files">Files</string>
+    <string name="dapp_editor_enhance">AI Enhance</string>
+    <string name="dapp_editor_export">Export</string>
+    <string name="dapp_editor_select_file">Select a file to edit</string>
+    <string name="dapp_editor_enhancements">Enhancements</string>
+    <string name="dapp_editor_enhance_hint">e.g., Add error handling, improve performance</string>
+    
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_dark_mode">Dark Mode</string>
+    <string name="settings_dark_mode_desc">Enable dark theme</string>
+    <string name="settings_ai">AI Settings</string>
+    <string name="settings_ai_assist">AI Assistance</string>
+    <string name="settings_ai_assist_desc">Enable AI-powered suggestions</string>
+    <string name="settings_model_storage">Model Storage</string>
+    <string name="settings_model_storage_desc">Manage downloaded AI models</string>
+    <string name="settings_ai_performance">AI Performance</string>
+    <string name="settings_ai_performance_desc">Adjust AI model performance settings</string>
+    <string name="settings_github">GitHub Settings</string>
+    <string name="settings_github_token">GitHub Token</string>
+    <string name="settings_github_token_desc">Manage your GitHub authentication</string>
+    <string name="settings_default_branch">Default Branch</string>
+    <string name="settings_default_branch_desc">Set default branch for new repositories</string>
+    <string name="settings_terminal">Terminal Settings</string>
+    <string name="settings_auto_suggestions">Auto AI Suggestions</string>
+    <string name="settings_auto_suggestions_desc">Show AI suggestions while typing commands</string>
+    <string name="settings_shell_prefs">Shell Preferences</string>
+    <string name="settings_shell_prefs_desc">Configure shell behavior</string>
+    <string name="settings_storage">Storage</string>
+    <string name="settings_auto_save">Auto Save</string>
+    <string name="settings_auto_save_desc">Automatically save project changes</string>
+    <string name="settings_clear_cache">Clear Cache</string>
+    <string name="settings_clear_cache_desc">Clear temporary files and cache</string>
+    <string name="settings_storage_usage">Storage Usage</string>
+    <string name="settings_storage_usage_desc">View and manage storage</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_enable_notifications">Enable Notifications</string>
+    <string name="settings_enable_notifications_desc">Receive push notifications</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_license">License</string>
+    <string name="settings_github_repo">GitHub Repository</string>
+    <string name="settings_sign_out">Sign Out</string>
+    
+    <!-- Common -->
+    <string name="common_back">Back</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_ok">OK</string>
+    <string name="common_save">Save</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_edit">Edit</string>
+    <string name="common_loading">Loading…</string>
+    <string name="common_error">Error</string>
+    <string name="common_success">Success</string>
+</resources>
