@@ -427,6 +427,72 @@ object Prefs {
     fun saveObsidianVaultPath(context: Context, path: String) =
         prefs(context).edit().putString(KEY_OBSIDIAN_VAULT_PATH, path).apply()
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // HOME ASSISTANT (domotique)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getHaUrl(context: Context): String =
+        prefs(context).getString("ha_url", "") ?: ""
+
+    fun saveHaUrl(context: Context, url: String) {
+        prefs(context).edit().putString("ha_url", url.trim().trimEnd('/')).apply()
+    }
+
+    fun getHaToken(context: Context): String =
+        prefs(context).getString("ha_token", "") ?: ""
+
+    fun saveHaToken(context: Context, token: String) {
+        prefs(context).edit().putString("ha_token", token.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // RÉSEAU LOCAL — appareils enregistrés (pour Wake-on-LAN rapide)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    data class SavedDevice(val name: String, val mac: String, val ip: String = "")
+
+    fun getSavedNetworkDevices(context: Context): List<SavedDevice> {
+        val json = prefs(context).getString("network_saved_devices", "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map {
+                val o = arr.getJSONObject(it)
+                SavedDevice(o.optString("name"), o.optString("mac"), o.optString("ip", ""))
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun saveNetworkDevice(context: Context, device: SavedDevice) {
+        val list = getSavedNetworkDevices(context).filter { it.name != device.name }.toMutableList()
+        list.add(device)
+        val arr = JSONArray()
+        list.forEach { d ->
+            arr.put(JSONObject().put("name", d.name).put("mac", d.mac).put("ip", d.ip))
+        }
+        prefs(context).edit().putString("network_saved_devices", arr.toString()).apply()
+    }
+
+    fun removeNetworkDevice(context: Context, name: String) {
+        val list = getSavedNetworkDevices(context).filter { it.name != name }
+        val arr = JSONArray()
+        list.forEach { d ->
+            arr.put(JSONObject().put("name", d.name).put("mac", d.mac).put("ip", d.ip))
+        }
+        prefs(context).edit().putString("network_saved_devices", arr.toString()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // GÉNÉRATION VIDÉO (Replicate) & SITES WEB
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** Jeton API Replicate (replicate.com/account/api-tokens) pour la génération vidéo IA. */
+    fun getReplicateToken(context: Context): String =
+        prefs(context).getString("replicate_token", "") ?: ""
+
+    fun saveReplicateToken(context: Context, token: String) {
+        prefs(context).edit().putString("replicate_token", token.trim()).apply()
+    }
+
     // ─── Interne ──────────────────────────────────────────────────────────────
 
     private fun prefs(context: Context) =

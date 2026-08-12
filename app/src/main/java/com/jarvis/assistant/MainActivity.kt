@@ -132,6 +132,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             startActivity(Intent(this, ObsidianActivity::class.java))
         }
 
+        // Bouton Maison connectée (Home Assistant, réseau local, musique, génération)
+        findViewById<android.view.View?>(R.id.smartHomeButton)?.setOnClickListener {
+            startActivity(Intent(this, SmartHomeActivity::class.java))
+        }
+
         menuButton.setOnClickListener {
             refreshConversationList()
             drawerLayout.openDrawer(Gravity.START)

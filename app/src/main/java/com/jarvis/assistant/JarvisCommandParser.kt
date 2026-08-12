@@ -35,7 +35,8 @@ object JarvisCommandParser {
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact",
         "github_list_repos", "github_read_file",
-        "search_contact_profile", "list_contacts_by_category"
+        "search_contact_profile", "list_contacts_by_category",
+        "ha_status", "network_scan"
     )
 
     /**
@@ -350,6 +351,50 @@ object JarvisCommandParser {
                 pendingImageBase64 = result.base64
                 pendingImageMime = result.mime
                 result.message
+            }
+            "generate_video" -> {
+                val prompt = json.optString("prompt", "")
+                VideoGenController.generateVideo(context, prompt).message
+            }
+            "generate_website" -> {
+                val description = json.optString("description", "").ifBlank { json.optString("prompt", "") }
+                WebsiteGenController.generateWebsite(context, description).message
+            }
+
+            "ha_status" -> HomeAssistantController.summarize(context, json.optString("filter", ""))
+            "ha_turn_on" -> {
+                val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val entity = HomeAssistantController.findEntity(context, name)
+                if (entity == null) "❌ Aucun appareil Home Assistant trouvé pour « $name »."
+                else HomeAssistantController.turnOn(context, entity.entityId).message
+            }
+            "ha_turn_off" -> {
+                val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val entity = HomeAssistantController.findEntity(context, name)
+                if (entity == null) "❌ Aucun appareil Home Assistant trouvé pour « $name »."
+                else HomeAssistantController.turnOff(context, entity.entityId).message
+            }
+            "ha_toggle" -> {
+                val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val entity = HomeAssistantController.findEntity(context, name)
+                if (entity == null) "❌ Aucun appareil Home Assistant trouvé pour « $name »."
+                else HomeAssistantController.toggle(context, entity.entityId).message
+            }
+
+            "network_scan" -> {
+                val devices = NetworkController.scanNetwork(context)
+                NetworkController.formatScanResult(devices)
+            }
+            "wake_on_lan" -> {
+                val mac = json.optString("mac", "")
+                val deviceName = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val resolvedMac = mac.ifBlank {
+                    Prefs.getSavedNetworkDevices(context).firstOrNull {
+                        it.name.equals(deviceName, ignoreCase = true)
+                    }?.mac ?: ""
+                }
+                if (resolvedMac.isBlank()) "❌ Adresse MAC inconnue. Précise l'adresse MAC ou enregistre d'abord l'appareil dans 🏠 → Réseau local."
+                else NetworkController.sendWakeOnLan(context, resolvedMac)
             }
 
             else -> "❌ Commande système inconnue : « $action »."

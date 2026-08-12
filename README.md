@@ -6,6 +6,34 @@
 
 ---
 
+## 🆕 Nouveautés v3 — Maison connectée & création IA
+
+| Fonctionnalité | Détail |
+|---|---|
+| **🏠 Home Assistant** | Contrôle lumières, prises, volets, chauffage, serrures, media players... via l'API REST Home Assistant (jeton d'accès à long terme) |
+| **📡 Réseau local** | Scan des appareils connectés au Wi-Fi (PC, TV, imprimante, box, caméras...) + réveil à distance (Wake-on-LAN) |
+| **🎵 Musique** | Écran dédié pour lire/contrôler les fichiers audio du téléphone (en plus des commandes vocales déjà existantes) |
+| **🎬 Génération vidéo** | Texte → vidéo courte via l'API Replicate (jeton utilisateur requis, facturé à l'usage par Replicate) |
+| **🌐 Génération de site web** | Génère un site complet (HTML/CSS/JS en un seul fichier) à partir d'une description, réutilise le provider IA déjà configuré |
+| **🎨 Écran Génération** | Interface unique pour lancer images / vidéos / sites sans passer par le chat |
+
+Accès : bouton 🏠 dans la barre du haut (écran de chat) → **Maison connectée**.
+Toutes ces actions restent aussi utilisables en langage naturel dans le chat ou à la voix
+(« allume la lumière du salon », « scanne le réseau », « génère un site pour mon restaurant »...).
+
+### Configurer Home Assistant
+
+1. Dans Home Assistant : Profil (bas de la barre latérale) → **Sécurité** → **Jetons d'accès à long terme** → Créer un jeton.
+2. Dans JARVIS : 🏠 → **Home Assistant** → renseigne l'URL (ex: `http://192.168.1.50:8123`, même Wi-Fi que le téléphone) et colle le jeton → **Enregistrer**.
+
+### Configurer la génération vidéo (optionnel)
+
+1. Crée un compte sur [replicate.com](https://replicate.com) → **Account → API tokens**.
+2. Dans JARVIS : 🏠 → **Génération** → colle le jeton dans le champ vidéo.
+3. Facturé à l'usage par Replicate (quelques centimes par vidéo selon le modèle) — pas d'abonnement JARVIS.
+
+---
+
 ## 🆕 Nouveautés v2
 
 | Fonctionnalité | Détail |
@@ -88,23 +116,38 @@ PC et téléphone doivent être sur le même Wi-Fi.
 
 ```
 APK-DEV/
-├── .github/workflows/build.yml     → CI/CD build APK
+├── .github/workflows/build.yml       → CI/CD build APK (inchangé)
 ├── app/
-│   ├── build.gradle                → dépendances (MediaPipe, llama-android, ONNX)
+│   ├── build.gradle                  → dépendances (MediaPipe, llama-android, ONNX, OkHttp...)
 │   └── src/main/
 │       ├── AndroidManifest.xml
 │       └── java/com/jarvis/assistant/
-│           ├── Provider.kt         → 14 providers (cloud + local)
-│           ├── Prefs.kt            → stockage multi-clés par provider
-│           ├── ApiClient.kt        → routing IA (cloud + SerpAPI + local)
-│           ├── LocalLlmManager.kt  → backend TASK/GGUF/ONNX
-│           ├── ModelDownloader.kt  → catalogue + téléchargement multi-format
-│           ├── SettingsActivity.kt → UI 3 onglets
-│           ├── MainActivity.kt     → chat + micro
+│           ├── Provider.kt           → providers IA (cloud + local)
+│           ├── Prefs.kt              → stockage clés API, HA, réseau, génération
+│           ├── ApiClient.kt          → routing IA + prompt système (commandes JARVIS_CMD)
+│           ├── JarvisCommandParser.kt→ exécution des commandes système émises par l'IA
+│           ├── LocalLlmManager.kt    → backend TASK/GGUF/ONNX
+│           ├── ModelDownloader.kt    → catalogue + téléchargement multi-format
+│           ├── SettingsActivity.kt   → UI Config / Clés API / Local
+│           ├── MainActivity.kt       → chat + micro
 │           ├── VoiceModeActivity.kt
-│           ├── ChatAdapter.kt
-│           └── OrbView.kt
-├── settings.gradle                 → + JitPack (llama-android)
+│           ├── ChatAdapter.kt / OrbView.kt / MarkdownUtils.kt
+│           │
+│           ├── SmartHomeActivity.kt  → 🆕 hub Maison connectée
+│           ├── HomeAssistantController.kt / HomeAssistantActivity.kt  → 🆕 domotique
+│           ├── NetworkController.kt / NetworkActivity.kt              → 🆕 scan Wi-Fi + Wake-on-LAN
+│           ├── MusicActivity.kt (+ MediaController.kt existant)       → 🆕 écran musique
+│           ├── GenerationActivity.kt                                  → 🆕 hub génération
+│           ├── ImageGenController.kt   → génération image (Gemini/OpenAI/HF/local)
+│           ├── VideoGenController.kt   → 🆕 génération vidéo (Replicate)
+│           ├── WebsiteGenController.kt → 🆕 génération de sites web
+│           │
+│           ├── PhoneController.kt / SmsController.kt / ContactsController.kt
+│           ├── CalendarController.kt / EmailController.kt / StorageController.kt
+│           ├── LocationController.kt / BluetoothController.kt / WifiController.kt
+│           ├── GitHubController.kt / GitHubActivity.kt
+│           └── ObsidianController.kt / ObsidianActivity.kt
+├── settings.gradle                   → + JitPack (llama-android)
 └── README.md
 ```
 
@@ -122,3 +165,10 @@ APK-DEV/
 - 📥 Téléchargement de modèles directement depuis l'app
 - 🎨 Interface sombre façon Iron Man (thème JARVIS)
 - 🎨 Couleur de l'orbe personnalisable (6 couleurs)
+- 🏠 Intégration Home Assistant (lumières, prises, volets, chauffage, serrures, media players)
+- 📡 Scan des appareils connectés au Wi-Fi + réveil à distance (Wake-on-LAN)
+- 🎬 Génération vidéo IA (texte → vidéo, via Replicate)
+- 🌐 Génération de sites web complets à partir d'une description
+- 📱 Contrôle étendu du téléphone : appels, SMS, contacts, agenda, emails, fichiers, notifications, localisation, Bluetooth, Wi-Fi
+- 🐙 Intégration GitHub (créer dépôts, fichiers, branches, pull requests)
+- 🧠 Second Brain façon Obsidian intégré à l'app

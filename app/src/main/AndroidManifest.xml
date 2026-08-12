@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <!-- ── Audio / Micro ─────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -135,6 +136,36 @@
             android:name=".ObsidianActivity"
             android:exported="false"
             android:label="🧠 Second Brain — Obsidian"
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
+            android:name=".SmartHomeActivity"
+            android:exported="false"
+            android:label="🏠 Maison connectée"
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
+            android:name=".HomeAssistantActivity"
+            android:exported="false"
+            android:label="Home Assistant"
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
+            android:name=".NetworkActivity"
+            android:exported="false"
+            android:label="Réseau local"
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
+            android:name=".MusicActivity"
+            android:exported="false"
+            android:label="Musique"
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
+            android:name=".GenerationActivity"
+            android:exported="false"
+            android:label="Génération IA"
             android:theme="@style/Theme.Jarvis" />
 
 
