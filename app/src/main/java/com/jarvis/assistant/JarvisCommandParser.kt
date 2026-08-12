@@ -345,19 +345,47 @@ object JarvisCommandParser {
             }
 
             "generate_image" -> {
+                // L'image reste générée immédiatement (pas en arrière-plan) : c'est le cas le
+                // plus rapide (quelques secondes via Gemini/OpenAI) et JARVIS l'affiche tout de
+                // suite dans le chat. Voir generate_video/generate_website pour le mode différé.
+                // Toujours enregistrée dans l'historique (🎨 Génération) pour rester cohérent
+                // avec les générations lancées en arrière-plan.
                 val prompt = json.optString("prompt", "")
+                val recordId = "${System.currentTimeMillis()}_${(0..9999).random()}"
+                Prefs.addGenerationRecord(
+                    context,
+                    Prefs.GenerationRecord(id = recordId, type = "image", prompt = prompt, status = "pending", timestamp = System.currentTimeMillis())
+                )
                 val result = ImageGenController.generateImage(context, prompt)
+                Prefs.updateGenerationRecord(context, recordId) { record ->
+                    record.copy(
+                        status = if (result.base64 != null) "success" else "failed",
+                        resultPath = result.savedPath,
+                        errorMessage = if (result.base64 == null) result.message else null
+                    )
+                }
                 pendingImageBase64 = result.base64
                 pendingImageMime = result.mime
                 result.message
             }
             "generate_video" -> {
                 val prompt = json.optString("prompt", "")
-                VideoGenController.generateVideo(context, prompt).message
+                if (prompt.isBlank()) "❌ Aucune description de vidéo fournie."
+                else {
+                    GenerationService.enqueue(context, "video", prompt)
+                    "🎬 Génération de la vidéo lancée en arrière-plan (1 à 3 minutes). " +
+                        "Tu peux continuer à utiliser JARVIS ou fermer l'app — une notification " +
+                        "t'avertira dès que c'est prêt (ou en cas d'échec)."
+                }
             }
             "generate_website" -> {
                 val description = json.optString("description", "").ifBlank { json.optString("prompt", "") }
-                WebsiteGenController.generateWebsite(context, description).message
+                if (description.isBlank()) "❌ Aucune description de site fournie."
+                else {
+                    GenerationService.enqueue(context, "website", description)
+                    "🌐 Génération du site lancée en arrière-plan. Une notification t'avertira " +
+                        "dès que c'est prêt (ou en cas d'échec)."
+                }
             }
 
             "ha_status" -> HomeAssistantController.summarize(context, json.optString("filter", ""))

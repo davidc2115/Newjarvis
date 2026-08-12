@@ -398,7 +398,7 @@ object Prefs {
     }
 
     fun getOrbStyle(context: Context): String =
-        prefs(context).getString(KEY_ORB_STYLE, "PULSE") ?: "PULSE"
+        prefs(context).getString(KEY_ORB_STYLE, "NETWORK_SPHERE") ?: "NETWORK_SPHERE"
 
     fun saveOrbStyle(context: Context, style: String) {
         prefs(context).edit().putString(KEY_ORB_STYLE, style).apply()
@@ -525,6 +525,71 @@ object Prefs {
 
     fun saveReplicateToken(context: Context, token: String) {
         prefs(context).edit().putString("replicate_token", token.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // HISTORIQUE DES GÉNÉRATIONS (image / vidéo / site web)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    data class GenerationRecord(
+        val id: String,
+        val type: String,          // "image" | "video" | "website"
+        val prompt: String,
+        val status: String,        // "pending" | "success" | "failed"
+        val timestamp: Long,
+        val resultPath: String? = null,
+        val errorMessage: String? = null
+    ) {
+        fun toJson(): JSONObject = JSONObject().apply {
+            put("id", id); put("type", type); put("prompt", prompt)
+            put("status", status); put("timestamp", timestamp)
+            put("resultPath", resultPath ?: ""); put("errorMessage", errorMessage ?: "")
+        }
+        companion object {
+            fun fromJson(j: JSONObject) = GenerationRecord(
+                id = j.optString("id"),
+                type = j.optString("type"),
+                prompt = j.optString("prompt"),
+                status = j.optString("status", "pending"),
+                timestamp = j.optLong("timestamp", System.currentTimeMillis()),
+                resultPath = j.optString("resultPath", "").ifBlank { null },
+                errorMessage = j.optString("errorMessage", "").ifBlank { null }
+            )
+        }
+    }
+
+    private const val MAX_GENERATION_HISTORY = 100
+
+    /** Les plus récentes en premier. */
+    fun getGenerationHistory(context: Context): List<GenerationRecord> {
+        val json = prefs(context).getString("generation_history", "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { GenerationRecord.fromJson(arr.getJSONObject(it)) }
+                .sortedByDescending { it.timestamp }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun addGenerationRecord(context: Context, record: GenerationRecord) {
+        val list = getGenerationHistory(context).toMutableList()
+        list.add(0, record)
+        writeGenerationHistory(context, list.take(MAX_GENERATION_HISTORY))
+    }
+
+    /** Met à jour l'enregistrement identifié par [id] (ex: passage pending → success/failed). */
+    fun updateGenerationRecord(context: Context, id: String, transform: (GenerationRecord) -> GenerationRecord) {
+        val list = getGenerationHistory(context).map { if (it.id == id) transform(it) else it }
+        writeGenerationHistory(context, list)
+    }
+
+    fun removeGenerationRecord(context: Context, id: String) {
+        writeGenerationHistory(context, getGenerationHistory(context).filter { it.id != id })
+    }
+
+    private fun writeGenerationHistory(context: Context, list: List<GenerationRecord>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(it.toJson()) }
+        prefs(context).edit().putString("generation_history", arr.toString()).apply()
     }
 
     // ─── Interne ──────────────────────────────────────────────────────────────

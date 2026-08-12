@@ -59,11 +59,13 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Déclenché par le mot-clé d'activation ("Jarvis") : toujours l'animation
         // "sphère réseau" façon Obsidian, même si l'utilisateur a choisi le style
         // pulsation par défaut ailleurs — c'est le rendu demandé pour ce cas précis.
-        val triggeredByWakeword = intent.getBooleanExtra(EXTRA_TRIGGERED_BY_WAKEWORD, false)
-        orbView.visualStyle = if (triggeredByWakeword || Prefs.getOrbStyle(this) == "NETWORK_SPHERE") {
-            OrbView.VisualStyle.NETWORK_SPHERE
-        } else {
+        // Même style d'orbe partout : mode vocal manuel (bouton micro) et
+        // détection par mot d'activation affichent désormais exactement la même
+        // animation, pilotée uniquement par la préférence utilisateur.
+        orbView.visualStyle = if (Prefs.getOrbStyle(this) == "PULSE") {
             OrbView.VisualStyle.PULSE
+        } else {
+            OrbView.VisualStyle.NETWORK_SPHERE
         }
         tts = TextToSpeech(this, this)
 

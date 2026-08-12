@@ -44,7 +44,7 @@ import java.util.concurrent.TimeUnit
  */
 object ImageGenController {
 
-    data class Result(val message: String, val base64: String?, val mime: String?)
+    data class Result(val message: String, val base64: String?, val mime: String?, val savedPath: String? = null)
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -125,7 +125,8 @@ object ImageGenController {
             Result(
                 "🎨 Image générée pour « $prompt » (Stable Diffusion embarqué, 100% hors-ligne).\n📁 Enregistrée dans : $savedPath",
                 base64,
-                "image/png"
+                "image/png",
+                savedPath
             )
         } catch (e: Exception) {
             Result("❌ Erreur du moteur Stable Diffusion embarqué : ${e.message}", null, null)
@@ -208,7 +209,8 @@ object ImageGenController {
                             return Result(
                                 "🎨 Image générée pour « $prompt » (Google Gemini).\n📁 Enregistrée dans : $savedPath",
                                 b64,
-                                mime
+                                mime,
+                                savedPath
                             )
                         }
                     }
@@ -263,7 +265,8 @@ object ImageGenController {
                     return Result(
                         "🎨 Image générée pour « $prompt » (OpenAI DALL-E 3).\n📁 Enregistrée dans : $savedPath",
                         b64,
-                        "image/png"
+                        "image/png",
+                        savedPath
                     )
                 }
             } catch (e: Exception) {
@@ -298,7 +301,8 @@ object ImageGenController {
                 Result(
                     "🎨 Image générée pour « $prompt » (Stable Diffusion XL).\n📁 Enregistrée dans : $savedPath",
                     base64,
-                    "image/jpeg"
+                    "image/jpeg",
+                    savedPath
                 )
             }
         } catch (e: Exception) {
