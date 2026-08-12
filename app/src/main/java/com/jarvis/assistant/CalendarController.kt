@@ -1,6 +1,7 @@
 package com.jarvis.assistant
 
 import android.Manifest
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
@@ -44,10 +45,9 @@ object CalendarController {
         return getEventsTimeRange(context, start, end, title, calendarRef)
     }
 
-    /** Filtre optionnel : si un calendarRef est fourni mais introuvable, on l'ignore plutôt que de tout masquer. */
     private fun calendarLabelSuffix(context: Context, calendarRef: String?): String {
         if (calendarRef.isNullOrBlank()) return ""
-        val id = resolveCalendarId(context, calendarRef) ?: return ""
+        val id = findCalendarId(context, calendarRef) ?: return ""
         val name = buildCalendarNameMap(context)[id] ?: return ""
         return " — $name"
     }
@@ -77,38 +77,61 @@ object CalendarController {
         return map
     }
 
+    /**
+     * Interroge les occurrences d'événements dans une plage de dates.
+     *
+     * IMPORTANT : on utilise la table [CalendarContract.Instances] et NON
+     * [CalendarContract.Events]. Events ne stocke qu'UNE seule ligne par
+     * événement récurrent (RRULE), avec le DTSTART de sa toute première
+     * occurrence — un filtre "DTSTART entre début et fin de journée" sur
+     * Events fait donc disparaître quasiment tous les événements récurrents
+     * (réunion hebdomadaire, rappel quotidien, etc.) sauf le jour exact où
+     * la série a commencé. Instances développe correctement les récurrences
+     * en occurrences réelles pour la plage demandée — c'est la cause la
+     * plus probable des "événements incohérents" (récurrents manquants ou
+     * mal datés).
+     */
     private fun getEventsTimeRange(context: Context, startMillis: Long, endMillis: Long, title: String, calendarRef: String? = null): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture de l'agenda non accordée."
         }
 
         val calendarNames = buildCalendarNameMap(context)
-        val filterCalendarId = if (!calendarRef.isNullOrBlank()) resolveCalendarId(context, calendarRef) else null
+
+        var filterCalendarId: Long? = null
+        if (!calendarRef.isNullOrBlank()) {
+            filterCalendarId = findCalendarId(context, calendarRef)
+            if (filterCalendarId == null) {
+                return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les calendriers disponibles, puis donne-lui un surnom avec name_calendar si besoin."
+            }
+        }
 
         val projection = arrayOf(
-            CalendarContract.Events._ID,
-            CalendarContract.Events.TITLE,
-            CalendarContract.Events.DTSTART,
-            CalendarContract.Events.EVENT_LOCATION,
-            CalendarContract.Events.DESCRIPTION,
-            CalendarContract.Events.CALENDAR_ID
+            CalendarContract.Instances.EVENT_ID,
+            CalendarContract.Instances.TITLE,
+            CalendarContract.Instances.BEGIN,
+            CalendarContract.Instances.EVENT_LOCATION,
+            CalendarContract.Instances.CALENDAR_ID
         )
 
-        var selection = "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ? AND ${CalendarContract.Events.DELETED} = 0"
-        val selectionArgsList = mutableListOf(startMillis.toString(), endMillis.toString())
+        var selection = "1 = 1"
+        val selectionArgsList = mutableListOf<String>()
         if (filterCalendarId != null) {
-            selection += " AND ${CalendarContract.Events.CALENDAR_ID} = ?"
+            selection += " AND ${CalendarContract.Instances.CALENDAR_ID} = ?"
             selectionArgsList.add(filterCalendarId.toString())
         }
-        val selectionArgs = selectionArgsList.toTypedArray()
 
         return try {
+            val uriBuilder = CalendarContract.Instances.CONTENT_URI.buildUpon()
+            ContentUris.appendId(uriBuilder, startMillis)
+            ContentUris.appendId(uriBuilder, endMillis)
+
             val cursor: Cursor? = context.contentResolver.query(
-                CalendarContract.Events.CONTENT_URI,
+                uriBuilder.build(),
                 projection,
                 selection,
-                selectionArgs,
-                "${CalendarContract.Events.DTSTART} ASC"
+                selectionArgsList.toTypedArray(),
+                "${CalendarContract.Instances.BEGIN} ASC"
             )
 
             cursor?.use { c ->
@@ -123,7 +146,7 @@ object CalendarController {
                     val eventTitle = c.getString(1) ?: "Sans titre"
                     val dtStart = c.getLong(2)
                     val location = c.getString(3) ?: ""
-                    val calendarId = c.getLong(5)
+                    val calendarId = c.getLong(4)
                     val calendarName = calendarNames[calendarId] ?: "Calendrier inconnu"
                     val timeStr = sdf.format(Date(dtStart))
 
@@ -154,7 +177,10 @@ object CalendarController {
         }
 
         val calendarId = resolveCalendarId(context, calendarRef)
-            ?: return "❌ Aucun calendrier disponible pour ajouter l'événement."
+            ?: return if (calendarRef.isNullOrBlank())
+                "❌ Aucun calendrier disponible sur cet appareil pour ajouter l'événement."
+            else
+                "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les calendriers disponibles, ou omets le paramètre calendar pour utiliser le calendrier par défaut."
 
         return try {
             val values = ContentValues().apply {
@@ -242,7 +268,13 @@ object CalendarController {
             return "❌ Permission de lecture de l'agenda non accordée."
         }
 
-        val filterCalendarId = if (!calendarRef.isNullOrBlank()) resolveCalendarId(context, calendarRef) else null
+        var filterCalendarId: Long? = null
+        if (!calendarRef.isNullOrBlank()) {
+            filterCalendarId = findCalendarId(context, calendarRef)
+            if (filterCalendarId == null) {
+                return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les calendriers disponibles."
+            }
+        }
 
         val projection = arrayOf(
             CalendarContract.Events._ID,
@@ -326,7 +358,10 @@ object CalendarController {
                 }
                 sb.append(
                     "\n💡 Pour distinguer deux calendriers similaires, donne-leur un surnom avec " +
-                        "l'action name_calendar (ex : « appelle le calendrier ID 3 'Perso' »)."
+                        "l'action name_calendar — tu peux référencer le calendrier par son nom affiché, " +
+                        "son compte (email), ou son ID (ex : « appelle le calendrier de untel@gmail.com 'Perso' »). " +
+                        "Ensuite utilise ce surnom comme paramètre calendar dans today_events/upcoming_events/search_event " +
+                        "pour n'afficher que ce planning précis."
                 )
                 sb.toString()
             } ?: "❌ Erreur lors de la récupération des calendriers."
@@ -377,19 +412,39 @@ object CalendarController {
         }
     }
 
-    /** Attribue un surnom mémorisable à un calendrier (ex: "Perso", "Boulot"), pour le distinguer facilement. */
-    fun nameCalendar(context: Context, calendarId: Long, nickname: String): String {
-        Prefs.saveCalendarNickname(context, calendarId, nickname)
-        return "✅ Le calendrier ID $calendarId s'appellera désormais « $nickname »."
+    /**
+     * Attribue un surnom mémorisable à un calendrier (ex: "Perso", "Boulot"), pour le
+     * distinguer facilement. [calendarRef] accepte un ID numérique, un surnom déjà
+     * existant, ou un nom affiché / nom de compte (recherche partielle, insensible à
+     * la casse) — pas besoin de connaître l'ID à l'avance.
+     */
+    fun nameCalendar(context: Context, calendarRef: String, nickname: String): String {
+        val id = findCalendarId(context, calendarRef)
+            ?: return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les noms/comptes disponibles."
+        Prefs.saveCalendarNickname(context, id, nickname)
+        val currentName = buildCalendarNameMap(context)[id] ?: calendarRef
+        return "✅ Le calendrier « $currentName » s'appellera désormais « $nickname »."
     }
 
-    /** Résout un identifiant de calendrier à partir d'un surnom, d'un nom affiché, ou d'un ID numérique direct. */
-    private fun resolveCalendarId(context: Context, calendarRef: String?): Long? {
-        if (calendarRef.isNullOrBlank()) return getDefaultCalendarId(context)
-        calendarRef.toLongOrNull()?.let { return it }
+    /**
+     * Résout un identifiant de calendrier à partir d'un surnom, d'un nom affiché, d'un
+     * compte, ou d'un ID numérique direct. Retourne null si [calendarRef] est fourni
+     * mais ne correspond à AUCUN calendrier — ne retombe JAMAIS silencieusement sur un
+     * autre calendrier, pour éviter d'afficher les événements du mauvais planning sans
+     * prévenir.
+     */
+    private fun findCalendarId(context: Context, calendarRef: String): Long? {
+        calendarRef.toLongOrNull()?.let { id ->
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(CalendarContract.Calendars._ID),
+                "${CalendarContract.Calendars._ID} = ?",
+                arrayOf(id.toString()),
+                null
+            )?.use { c -> if (c.moveToFirst()) return id }
+        }
 
-        val nicknameMatch = Prefs.findCalendarIdByNickname(context, calendarRef)
-        if (nicknameMatch != null) return nicknameMatch
+        Prefs.findCalendarIdByNickname(context, calendarRef)?.let { return it }
 
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
@@ -405,7 +460,13 @@ object CalendarController {
                 }
             }
         }
-        return getDefaultCalendarId(context)
+        return null
+    }
+
+    /** Comme [findCalendarId], mais une référence vide/absente renvoie le calendrier par défaut de l'appareil. */
+    private fun resolveCalendarId(context: Context, calendarRef: String?): Long? {
+        if (calendarRef.isNullOrBlank()) return getDefaultCalendarId(context)
+        return findCalendarId(context, calendarRef)
     }
 
     private fun getDefaultCalendarId(context: Context): Long? {

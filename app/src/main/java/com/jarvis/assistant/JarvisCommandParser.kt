@@ -131,10 +131,15 @@ object JarvisCommandParser {
             }
             "list_calendars" -> CalendarController.getCalendarList(context)
             "name_calendar" -> {
-                val id = json.optLong("calendarId", -1)
+                // "calendar" accepte un ID, un nom affiché, ou un compte (email) — pas besoin
+                // d'appeler list_calendars avant. "calendarId" reste accepté pour compatibilité.
+                val calendarRef = json.optString("calendar", "").ifBlank {
+                    val legacyId = json.optLong("calendarId", -1)
+                    if (legacyId != -1L) legacyId.toString() else ""
+                }
                 val nickname = json.optString("nickname", "")
-                if (id == -1L || nickname.isBlank()) "❌ Identifiant de calendrier ou surnom manquant."
-                else CalendarController.nameCalendar(context, id, nickname)
+                if (calendarRef.isBlank() || nickname.isBlank()) "❌ Calendrier ou surnom manquant. Précise le nom affiché du calendrier, son compte (email), ou son ID (via list_calendars)."
+                else CalendarController.nameCalendar(context, calendarRef, nickname)
             }
 
             "read_emails" -> EmailController.readInbox(context, json.optInt("count", 5))
@@ -491,6 +496,7 @@ object JarvisCommandParser {
             "freebox_wifi_off" -> FreeboxController.setWifiState(context, false).message
             "freebox_wifi_status" -> FreeboxController.getWifiStatus(context).message
             "freebox_status" -> FreeboxController.getSystemStatus(context).message
+            "freebox_permissions" -> FreeboxController.getPermissionsStatus(context).message
             "wake_on_lan" -> {
                 val mac = json.optString("mac", "")
                 val deviceName = json.optString("device", "").ifBlank { json.optString("name", "") }

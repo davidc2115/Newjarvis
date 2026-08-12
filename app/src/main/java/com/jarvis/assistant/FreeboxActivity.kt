@@ -61,6 +61,13 @@ class FreeboxActivity : AppCompatActivity() {
                 outputText.text = result.message
             }
         }
+        findViewById<TextView>(R.id.btnFbxPermissions).setOnClickListener {
+            outputText.text = "⏳..."
+            CoroutineScope(Dispatchers.Main).launch {
+                val result = withContext(Dispatchers.IO) { FreeboxController.getPermissionsStatus(this@FreeboxActivity) }
+                outputText.text = result.message
+            }
+        }
 
         findViewById<TextView>(R.id.btnFbxList).setOnClickListener { listCurrentPath() }
 

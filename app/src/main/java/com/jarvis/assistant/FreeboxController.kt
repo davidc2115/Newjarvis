@@ -48,6 +48,23 @@ object FreeboxController {
     private var cachedApiBaseUrl: String? = null
     private var sessionToken: String? = null
 
+    /**
+     * Permissions accordées à l'appli, renvoyées par login/session/ (champ
+     * "permissions" — confirmé sur la doc officielle dev.freebox.fr/sdk/os/login).
+     * Un champ absent équivaut à false. Mise à jour à chaque ouverture de session.
+     */
+    private var lastPermissions: JSONObject? = null
+
+    private val PERMISSION_LABELS = mapOf(
+        "explorer" to "📁 Gestionnaire de fichiers (disques durs, NAS)",
+        "settings" to "⚙️ Paramètres de la Freebox (nécessaire pour freebox_status)",
+        "contacts" to "👤 Contacts",
+        "calls" to "📞 Journal d'appels",
+        "downloader" to "⬇️ Téléchargements",
+        "parental" to "🔒 Contrôle parental",
+        "pvr" to "📺 Enregistreur (PVR)"
+    )
+
     fun isConfigured(context: Context): Boolean = Prefs.getFreeboxAppToken(context).isNotBlank()
 
     private fun host(context: Context): String = Prefs.getFreeboxHost(context)
@@ -115,7 +132,15 @@ object FreeboxController {
                 when (status) {
                     "granted" -> {
                         Prefs.saveFreeboxAppToken(context, appToken)
-                        return ActionResult(true, "✅ Freebox appairée avec succès !")
+                        // L'appairage seul n'accorde pas forcément l'accès aux disques durs ni
+                        // aux paramètres — certains modèles de Freebox demandent une validation
+                        // séparée par permission. On vérifie donc immédiatement et on prévient
+                        // l'utilisateur s'il manque quelque chose, plutôt que de le laisser
+                        // découvrir un échec silencieux plus tard en listant un dossier.
+                        sessionToken = null
+                        val permMsg = if (openSession(context)) permissionsSummary() else null
+                        val suffix = if (permMsg != null) "\n\n$permMsg" else ""
+                        return ActionResult(true, "✅ Freebox appairée avec succès !$suffix")
                     }
                     "denied" -> return ActionResult(false, "❌ Demande refusée sur l'écran de la Freebox.")
                     "timeout" -> return ActionResult(false, "❌ Temps écoulé sans validation sur la Freebox.")
@@ -151,7 +176,9 @@ object FreeboxController {
                 val body = response.body?.string() ?: return false
                 val json = JSONObject(body)
                 if (!json.optBoolean("success", false)) return false
-                sessionToken = json.getJSONObject("result").getString("session_token")
+                val result = json.getJSONObject("result")
+                sessionToken = result.getString("session_token")
+                lastPermissions = result.optJSONObject("permissions")
                 true
             }
         } catch (e: Exception) {
@@ -403,6 +430,44 @@ object FreeboxController {
             sb.append("• Connexion internet : impossible à lire (${conn.optString("msg", "erreur inconnue")})\n")
         }
         return ActionResult(true, sb.toString().trim())
+    }
+
+    // ─── Permissions accordées à JARVIS sur la Freebox ────────────────────────
+
+    /**
+     * Vérifie et affiche précisément quelles permissions Freebox JARVIS possède.
+     * Contrairement à deviner depuis un message d'erreur générique, ceci lit
+     * directement le champ "permissions" renvoyé par login/session/.
+     */
+    fun getPermissionsStatus(context: Context): ActionResult {
+        if (!isConfigured(context)) {
+            return ActionResult(false, "❌ Freebox non appairée. Va dans 🏠 → Freebox pour l'appairer.")
+        }
+        sessionToken = null
+        if (!openSession(context)) {
+            return ActionResult(false, "❌ Impossible d'ouvrir une session avec la Freebox pour vérifier les permissions (jeton peut-être révoqué — réappaire si besoin).")
+        }
+        return ActionResult(true, permissionsSummary() ?: "❌ La Freebox n'a pas renvoyé la liste des permissions.")
+    }
+
+    private fun permissionsSummary(): String? {
+        val perms = lastPermissions ?: return null
+        val sb = StringBuilder("🔑 **Permissions accordées à JARVIS sur la Freebox** :\n\n")
+        val missing = mutableListOf<String>()
+        for ((key, label) in PERMISSION_LABELS) {
+            val granted = perms.optBoolean(key, false)
+            sb.append(if (granted) "✅ $label\n" else "❌ $label\n")
+            if (!granted) missing.add(label)
+        }
+        if (missing.isNotEmpty()) {
+            sb.append(
+                "\n⚠️ Pour activer les permissions manquantes : mafreebox.freebox.fr → " +
+                    "Paramètres de la Freebox → Gestion des accès → Applications → JARVIS Assistant Android, " +
+                    "et coche les cases correspondantes (certains modèles ne les accordent pas automatiquement " +
+                    "à l'appairage, il faut les activer manuellement une fois)."
+            )
+        }
+        return sb.toString().trim()
     }
 
     private fun formatUptime(seconds: Long): String {
