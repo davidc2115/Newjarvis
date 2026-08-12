@@ -15,7 +15,7 @@ import java.util.TimeZone
 
 object CalendarController {
 
-    fun getTodayEvents(context: Context): String {
+    fun getTodayEvents(context: Context, calendarRef: String? = null): String {
         val startOfDay = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -30,16 +30,26 @@ object CalendarController {
             set(Calendar.MILLISECOND, 999)
         }.timeInMillis
 
-        return getEventsTimeRange(context, startOfDay, endOfDay, "📅 **Événements prévus aujourd'hui**")
+        val title = "📅 **Événements prévus aujourd'hui**" + calendarLabelSuffix(context, calendarRef)
+        return getEventsTimeRange(context, startOfDay, endOfDay, title, calendarRef)
     }
 
-    fun getUpcomingEvents(context: Context, days: Int = 7): String {
+    fun getUpcomingEvents(context: Context, days: Int = 7, calendarRef: String? = null): String {
         val start = Calendar.getInstance().timeInMillis
         val end = Calendar.getInstance().apply {
             add(Calendar.DAY_OF_YEAR, days)
         }.timeInMillis
 
-        return getEventsTimeRange(context, start, end, "📅 **Événements des $days prochains jours**")
+        val title = "📅 **Événements des $days prochains jours**" + calendarLabelSuffix(context, calendarRef)
+        return getEventsTimeRange(context, start, end, title, calendarRef)
+    }
+
+    /** Filtre optionnel : si un calendarRef est fourni mais introuvable, on l'ignore plutôt que de tout masquer. */
+    private fun calendarLabelSuffix(context: Context, calendarRef: String?): String {
+        if (calendarRef.isNullOrBlank()) return ""
+        val id = resolveCalendarId(context, calendarRef) ?: return ""
+        val name = buildCalendarNameMap(context)[id] ?: return ""
+        return " — $name"
     }
 
     /** Construit une table ID de calendrier -> "Nom (compte)" pour annoter les événements. */
@@ -67,12 +77,13 @@ object CalendarController {
         return map
     }
 
-    private fun getEventsTimeRange(context: Context, startMillis: Long, endMillis: Long, title: String): String {
+    private fun getEventsTimeRange(context: Context, startMillis: Long, endMillis: Long, title: String, calendarRef: String? = null): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture de l'agenda non accordée."
         }
 
         val calendarNames = buildCalendarNameMap(context)
+        val filterCalendarId = if (!calendarRef.isNullOrBlank()) resolveCalendarId(context, calendarRef) else null
 
         val projection = arrayOf(
             CalendarContract.Events._ID,
@@ -83,8 +94,13 @@ object CalendarController {
             CalendarContract.Events.CALENDAR_ID
         )
 
-        val selection = "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ? AND ${CalendarContract.Events.DELETED} = 0"
-        val selectionArgs = arrayOf(startMillis.toString(), endMillis.toString())
+        var selection = "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ? AND ${CalendarContract.Events.DELETED} = 0"
+        val selectionArgsList = mutableListOf(startMillis.toString(), endMillis.toString())
+        if (filterCalendarId != null) {
+            selection += " AND ${CalendarContract.Events.CALENDAR_ID} = ?"
+            selectionArgsList.add(filterCalendarId.toString())
+        }
+        val selectionArgs = selectionArgsList.toTypedArray()
 
         return try {
             val cursor: Cursor? = context.contentResolver.query(
@@ -221,10 +237,12 @@ object CalendarController {
         }
     }
 
-    fun searchEvents(context: Context, query: String): String {
+    fun searchEvents(context: Context, query: String, calendarRef: String? = null): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture de l'agenda non accordée."
         }
+
+        val filterCalendarId = if (!calendarRef.isNullOrBlank()) resolveCalendarId(context, calendarRef) else null
 
         val projection = arrayOf(
             CalendarContract.Events._ID,
@@ -234,11 +252,17 @@ object CalendarController {
         )
 
         return try {
+            var selection = "${CalendarContract.Events.TITLE} LIKE ? AND ${CalendarContract.Events.DELETED} = 0"
+            val argsList = mutableListOf("%$query%")
+            if (filterCalendarId != null) {
+                selection += " AND ${CalendarContract.Events.CALENDAR_ID} = ?"
+                argsList.add(filterCalendarId.toString())
+            }
             val cursor = context.contentResolver.query(
                 CalendarContract.Events.CONTENT_URI,
                 projection,
-                "${CalendarContract.Events.TITLE} LIKE ? AND ${CalendarContract.Events.DELETED} = 0",
-                arrayOf("%$query%"),
+                selection,
+                argsList.toTypedArray(),
                 "${CalendarContract.Events.DTSTART} DESC"
             )
 
@@ -308,6 +332,48 @@ object CalendarController {
             } ?: "❌ Erreur lors de la récupération des calendriers."
         } catch (e: Exception) {
             "❌ Erreur : ${e.message}"
+        }
+    }
+
+    data class EventDetails(
+        val id: Long,
+        val title: String,
+        val startMillis: Long,
+        val location: String,
+        val description: String
+    )
+
+    /** Récupère les détails complets d'un événement (utilisé notamment pour créer une fiche client depuis un RDV). */
+    fun getEventDetails(context: Context, eventId: Long): EventDetails? {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            return null
+        }
+        val projection = arrayOf(
+            CalendarContract.Events._ID,
+            CalendarContract.Events.TITLE,
+            CalendarContract.Events.DTSTART,
+            CalendarContract.Events.EVENT_LOCATION,
+            CalendarContract.Events.DESCRIPTION
+        )
+        return try {
+            context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                projection,
+                "${CalendarContract.Events._ID} = ?",
+                arrayOf(eventId.toString()),
+                null
+            )?.use { c ->
+                if (!c.moveToFirst()) return null
+                EventDetails(
+                    id = eventId,
+                    title = c.getString(1) ?: "Sans titre",
+                    startMillis = c.getLong(2),
+                    location = c.getString(3) ?: "",
+                    description = c.getString(4) ?: ""
+                )
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 

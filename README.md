@@ -6,6 +6,27 @@
 
 ---
 
+## 🆕 Nouveautés v5 — Agendas séparés & base clients géolocalisée
+
+| Fonctionnalité | Détail |
+|---|---|
+| **📅 Agendas séparés** | today_events/upcoming_events/search_event acceptent un calendrier précis (surnom, nom ou ID) — utile quand deux plannings (perso/pro, ou celui d'un collègue partagé) se mélangent dans un même compte mail |
+| **📇 Base clients** | Nouvelle catégorie « client » dans les fiches contact (déjà existantes : nom, tél, email, adresse, GPS) + historique des rendez-vous par client |
+| **🔗 Client depuis un RDV** | Crée/complète automatiquement une fiche client à partir d'un événement d'agenda (titre → nom, lieu → adresse, description → notes) |
+| **🗺️ Export KML** | Exporte les fiches clients en fichier .kml géolocalisé, importable dans Google Maps ou Google Earth — géocodage automatique des adresses sans GPS enregistré |
+
+### Séparer deux plannings sur un même compte
+
+1. Demande la liste des calendriers : « montre mes calendriers » → JARVIS liste tous les agendas visibles (le tien + ceux partagés) avec leur ID.
+2. Donne un surnom à chacun : « appelle le calendrier ID 3 Pro » et « appelle le calendrier ID 5 Perso ».
+3. Ensuite : « montre mon planning Pro aujourd'hui » n'affiche que ce calendrier-là.
+
+### Base clients + carte
+
+« Crée une fiche client à partir de mon rendez-vous avec Untel » (JARVIS retrouve l'événement), ou directement en fin de journée : « exporte mes clients en KML » → fichier prêt à glisser dans Google Maps → Vos endroits → Cartes → Importer.
+
+---
+
 ## 🆕 Nouveautés v4 — Freebox, tuiles rapides & contrôle total du stockage
 
 | Fonctionnalité | Détail |

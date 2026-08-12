@@ -32,7 +32,7 @@ import java.util.Locale
  */
 object PeopleController {
 
-    private val VALID_CATEGORIES = setOf("travail", "personnel", "famille", "autre")
+    private val VALID_CATEGORIES = setOf("travail", "personnel", "famille", "client", "autre")
     private val updatedFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
 
     private fun contactsFolder(context: Context): File =
@@ -45,6 +45,8 @@ object PeopleController {
     // Lecture / écriture d'une fiche
     // ─────────────────────────────────────────────────────────────────────────
 
+    private const val VISITS_MARKER = "## Historique des rendez-vous"
+
     private data class ContactNote(
         val name: String,
         val category: String,
@@ -54,7 +56,17 @@ object PeopleController {
         val latitude: Double?,
         val longitude: Double?,
         val notes: String,
+        val visits: List<String>,
         val file: File
+    )
+
+    /** Version publique légère (pour l'export KML notamment), sans les détails internes de parsing. */
+    data class ContactSummary(
+        val name: String,
+        val category: String,
+        val address: String?,
+        val latitude: Double?,
+        val longitude: Double?
     )
 
     /** Parse une fiche existante (frontmatter simple clé: valeur + corps libre). */
@@ -73,7 +85,22 @@ object PeopleController {
             return regex.find(frontmatter)?.groupValues?.get(1)?.trim()?.ifBlank { null }
         }
 
-        val notesOnly = body.lines().dropWhile { it.startsWith("#") || it.isBlank() }.joinToString("\n").trim()
+        val bodyWithoutTitle = body.lines().dropWhile { it.startsWith("#") || it.isBlank() }.joinToString("\n").trim()
+
+        val markerIdx = bodyWithoutTitle.indexOf(VISITS_MARKER)
+        val notesOnly: String
+        val visits: List<String>
+        if (markerIdx >= 0) {
+            notesOnly = bodyWithoutTitle.substring(0, markerIdx).trim()
+            visits = bodyWithoutTitle.substring(markerIdx + VISITS_MARKER.length)
+                .lines()
+                .map { it.trim() }
+                .filter { it.startsWith("-") }
+                .map { it.removePrefix("-").trim() }
+        } else {
+            notesOnly = bodyWithoutTitle
+            visits = emptyList()
+        }
 
         return ContactNote(
             name = file.nameWithoutExtension,
@@ -84,6 +111,7 @@ object PeopleController {
             latitude = field("latitude")?.toDoubleOrNull(),
             longitude = field("longitude")?.toDoubleOrNull(),
             notes = notesOnly,
+            visits = visits,
             file = file
         )
     }
@@ -114,6 +142,7 @@ object PeopleController {
             val finalLat = latitude ?: existing?.latitude
             val finalLng = longitude ?: existing?.longitude
             val finalNotes = notes ?: existing?.notes ?: ""
+            val finalVisits = existing?.visits ?: emptyList()
 
             val frontmatterLines = mutableListOf("category: $cat")
             finalPhone?.let { frontmatterLines.add("phone: \"$it\"") }
@@ -130,6 +159,10 @@ object PeopleController {
                 append("\n---\n\n")
                 append("# $name\n\n")
                 if (finalNotes.isNotBlank()) append(finalNotes) else append("_Aucune note._")
+                if (finalVisits.isNotEmpty()) {
+                    append("\n\n$VISITS_MARKER\n")
+                    finalVisits.forEach { append("- $it\n") }
+                }
             }
 
             file.writeText(content)
@@ -139,6 +172,79 @@ object PeopleController {
         } catch (e: Exception) {
             "❌ Erreur lors de l'enregistrement dans Obsidian : ${e.message}"
         }
+    }
+
+    /** Ajoute une ligne à l'historique des rendez-vous d'un contact (créé si besoin). */
+    fun addVisit(context: Context, name: String, visitLabel: String): String {
+        val contact = findContact(context, name)
+        val category = contact?.category ?: "client"
+        val updatedVisits = (contact?.visits ?: emptyList()) + visitLabel
+
+        return try {
+            val folder = contactsFolder(context)
+            val targetName = contact?.name ?: name
+            val file = File(folder, "${safeFileName(targetName)}.md")
+
+            val frontmatterLines = mutableListOf("category: $category")
+            contact?.phone?.let { frontmatterLines.add("phone: \"$it\"") }
+            contact?.email?.let { frontmatterLines.add("email: \"$it\"") }
+            contact?.address?.let { frontmatterLines.add("address: \"$it\"") }
+            contact?.latitude?.let { frontmatterLines.add("latitude: $it") }
+            contact?.longitude?.let { frontmatterLines.add("longitude: $it") }
+            frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
+            frontmatterLines.add("tags: [jarvis, contact]")
+
+            val content = buildString {
+                append("---\n")
+                append(frontmatterLines.joinToString("\n"))
+                append("\n---\n\n")
+                append("# $targetName\n\n")
+                val notesText = contact?.notes?.takeIf { it.isNotBlank() } ?: "_Aucune note._"
+                append(notesText)
+                append("\n\n$VISITS_MARKER\n")
+                updatedVisits.forEach { append("- $it\n") }
+            }
+            file.writeText(content)
+            "✅ Rendez-vous ajouté à l'historique de **$targetName**."
+        } catch (e: Exception) {
+            "❌ Erreur lors de l'ajout du rendez-vous : ${e.message}"
+        }
+    }
+
+    /**
+     * Crée ou complète une fiche client à partir d'un événement d'agenda :
+     * titre → nom du client (sauf si nameOverride fourni), lieu → adresse,
+     * description → notes, + ajoute ce rendez-vous à l'historique.
+     */
+    fun createClientFromEvent(context: Context, event: CalendarController.EventDetails, nameOverride: String? = null): String {
+        val clientName = nameOverride?.ifBlank { null } ?: event.title
+        if (clientName.isBlank()) return "❌ Impossible de déterminer le nom du client (titre d'événement vide)."
+
+        val saveResult = saveContact(
+            context, clientName, category = "client",
+            address = event.location.ifBlank { null },
+            notes = event.description.ifBlank { null }
+        )
+
+        val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRENCH)
+        val visitLabel = "${sdf.format(Date(event.startMillis))} : ${event.title}" +
+            (if (event.location.isNotBlank()) " (${event.location})" else "")
+        addVisit(context, clientName, visitLabel)
+
+        return "$saveResult\n📅 Rendez-vous du ${sdf.format(Date(event.startMillis))} ajouté à son historique."
+    }
+
+    /** Version structurée (sans le texte formaté) pour l'export KML. */
+    fun getContactsByCategory(context: Context, category: String): List<ContactSummary> {
+        val folder = contactsFolder(context)
+        val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
+        val cat = category.lowercase().trim()
+        val all = cat.isBlank() || cat == "tous" || cat == "tout"
+
+        return files.mapNotNull { parseContactFile(it) }
+            .filter { all || it.category == cat }
+            .map { ContactSummary(it.name, it.category, it.address, it.latitude, it.longitude) }
+            .sortedBy { it.name }
     }
 
     fun getContactDetails(context: Context, name: String): String {
@@ -234,6 +340,10 @@ object PeopleController {
             if (!c.address.isNullOrBlank()) append("📍 Adresse : ${c.address}\n")
             if (c.latitude != null && c.longitude != null) append("🌐 GPS : ${c.latitude}, ${c.longitude}\n")
             if (c.notes.isNotBlank()) append("\n📝 ${c.notes}\n")
+            if (c.visits.isNotEmpty()) {
+                append("\n🗓️ Historique des rendez-vous (${c.visits.size}) :\n")
+                c.visits.takeLast(10).forEach { append("   • $it\n") }
+            }
         }.trim()
     }
 

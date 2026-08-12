@@ -118,8 +118,8 @@ object JarvisCommandParser {
                 MediaController.setVolume(context, level)
             }
 
-            "today_events" -> CalendarController.getTodayEvents(context)
-            "upcoming_events" -> CalendarController.getUpcomingEvents(context, json.optInt("days", 7))
+            "today_events" -> CalendarController.getTodayEvents(context, json.optString("calendar", "").ifBlank { null })
+            "upcoming_events" -> CalendarController.getUpcomingEvents(context, json.optInt("days", 7), json.optString("calendar", "").ifBlank { null })
             "create_event" -> {
                 val title = json.optString("title", "Événement")
                 val start = json.optLong("startTime", System.currentTimeMillis() + 3600000)
@@ -250,7 +250,27 @@ object JarvisCommandParser {
             }
             "search_event" -> {
                 val query = json.optString("query", "")
-                CalendarController.searchEvents(context, query)
+                CalendarController.searchEvents(context, query, json.optString("calendar", "").ifBlank { null })
+            }
+
+            "create_client_from_event" -> {
+                val eventId = json.optLong("eventId", -1)
+                if (eventId == -1L) "❌ Identifiant d'événement manquant (cherche-le d'abord via search_event/today_events)."
+                else {
+                    val event = CalendarController.getEventDetails(context, eventId)
+                    if (event == null) "❌ Événement introuvable."
+                    else PeopleController.createClientFromEvent(context, event, json.optString("name", "").ifBlank { null })
+                }
+            }
+            "add_client_visit" -> {
+                val name = json.optString("name", "")
+                val note = json.optString("note", "").ifBlank { json.optString("visit", "") }
+                if (name.isBlank() || note.isBlank()) "❌ Nom du client ou détail du rendez-vous manquant."
+                else PeopleController.addVisit(context, name, note)
+            }
+            "export_clients_kml" -> {
+                val category = json.optString("category", "client")
+                KmlExportController.exportToKml(context, category).message
             }
 
             "github_list_repos" -> GitHubController.listRepos(context)
