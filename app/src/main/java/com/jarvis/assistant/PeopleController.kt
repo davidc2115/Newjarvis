@@ -41,6 +41,27 @@ object PeopleController {
     private fun safeFileName(name: String): String =
         name.replace(Regex("[/\\\\:*?\"<>|]"), "-").trim()
 
+    /** Casse/accents/espaces normalisés pour détecter qu'un nom désigne le même contact. */
+    private fun normalizeName(name: String): String =
+        java.text.Normalizer.normalize(name.lowercase().trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("\\s+"), " ")
+
+    /**
+     * Cherche une fiche existante dont le nom correspond EXACTEMENT (une fois casse et
+     * accents ignorés) au nom donné — pour réutiliser cette même fiche au lieu d'en créer
+     * une nouvelle sous une orthographe légèrement différente ("Jean Dupont" vs "jean
+     * DUPONT" vs "Jéan Dupont"). Volontairement strict (égalité exacte normalisée, pas de
+     * correspondance partielle) pour ne jamais fusionner deux personnes différentes par
+     * erreur — ça fragmentait les fiches d'un même contact en plusieurs fichiers séparés,
+     * chacun avec seulement une partie des infos enregistrées au fil du temps.
+     */
+    private fun findExactNameMatch(context: Context, name: String): File? {
+        val target = normalizeName(name)
+        val files = contactsFolder(context).listFiles { f -> f.extension == "md" } ?: emptyArray()
+        return files.firstOrNull { normalizeName(it.nameWithoutExtension) == target }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Lecture / écriture d'une fiche
     // ─────────────────────────────────────────────────────────────────────────
@@ -141,9 +162,17 @@ object PeopleController {
 
         return try {
             val folder = contactsFolder(context)
-            val file = File(folder, "${safeFileName(name)}.md")
+            // Réutilise une fiche existante dont le nom correspond exactement (casse/accents
+            // ignorés) plutôt que d'en créer une nouvelle sous une orthographe légèrement
+            // différente — évite de fragmenter les infos d'un même contact dans plusieurs
+            // fichiers séparés au fil des enregistrements successifs.
+            val file = findExactNameMatch(context, name) ?: File(folder, "${safeFileName(name)}.md")
             val existing = parseContactFile(file)
             val isUpdate = existing != null
+            // Garde l'orthographe/casse d'origine si la fiche existait déjà, pour que le
+            // titre de la note ne change pas d'un enregistrement à l'autre selon la façon
+            // dont le nom a été prononcé/écrit cette fois-ci.
+            val canonicalName = existing?.name ?: name
 
             val finalPhone = phone ?: existing?.phone
             val finalPhonePro = phonePro ?: existing?.phonePro
@@ -172,7 +201,7 @@ object PeopleController {
                 append("---\n")
                 append(frontmatterLines.joinToString("\n"))
                 append("\n---\n\n")
-                append("# $name\n\n")
+                append("# $canonicalName\n\n")
                 if (finalNotes.isNotBlank()) append(finalNotes) else append("_Aucune note._")
                 if (finalVisits.isNotEmpty()) {
                     append("\n\n$VISITS_MARKER\n")
@@ -182,8 +211,8 @@ object PeopleController {
 
             file.writeText(content)
 
-            if (isUpdate) "✅ Fiche de **$name** mise à jour (catégorie : $cat) dans le vault Obsidian."
-            else "✅ **$name** ajouté(e) aux contacts $cat, dans Obsidian → Contacts/${safeFileName(name)}.md"
+            if (isUpdate) "✅ Fiche de **$canonicalName** mise à jour (catégorie : $cat) dans le vault Obsidian."
+            else "✅ **$canonicalName** ajouté(e) aux contacts $cat, dans Obsidian → Contacts/${file.name}"
         } catch (e: Exception) {
             "❌ Erreur lors de l'enregistrement dans Obsidian : ${e.message}"
         }
@@ -288,7 +317,22 @@ object PeopleController {
         if (matches.isEmpty()) return "🔍 Aucun contact trouvé pour « $query »."
         if (matches.size == 1) return formatFullDetails(matches[0])
 
-        val sb = StringBuilder("🔍 **${matches.size} résultats pour « $query »** :\n\n")
+        // Auparavant, dès que 2+ fiches correspondaient (homonymes, ou fiches dupliquées
+        // par incohérence de casse/accent), seul un résumé compact s'affichait — sans les
+        // notes ni l'historique de rendez-vous — donnant l'impression que JARVIS "n'avait
+        // pas d'autres infos" tant que l'utilisateur n'affinait pas la recherche jusqu'à
+        // ne matcher qu'UNE seule fiche. Tant que le nombre de résultats reste raisonnable,
+        // on affiche maintenant TOUT directement, sans qu'il faille insister.
+        if (matches.size <= 4) {
+            val sb = StringBuilder("🔍 **${matches.size} contacts correspondent à « $query »** :\n\n")
+            matches.forEachIndexed { i, c ->
+                sb.append(formatFullDetails(c))
+                if (i < matches.size - 1) sb.append("\n\n───\n\n")
+            }
+            return sb.toString().trim()
+        }
+
+        val sb = StringBuilder("🔍 **${matches.size} résultats pour « $query »** (trop nombreux pour tout détailler — affine la recherche pour voir les infos complètes d'un contact précis) :\n\n")
         matches.forEach { appendSummary(sb, it) }
         return sb.toString().trim()
     }
@@ -304,6 +348,17 @@ object PeopleController {
             .sortedBy { it.name }
 
         if (contacts.isEmpty()) return "Aucun contact${if (!all) " dans la catégorie « $cat »" else ""}."
+
+        // Peu de contacts dans la catégorie -> autant tout montrer en détail directement
+        // plutôt que d'obliger l'utilisateur à redemander chaque fiche une par une.
+        if (contacts.size <= 3) {
+            val sb = StringBuilder("📇 **Contacts${if (!all) " — $cat" else ""}** (${contacts.size}) :\n\n")
+            contacts.forEachIndexed { i, c ->
+                sb.append(formatFullDetails(c))
+                if (i < contacts.size - 1) sb.append("\n\n───\n\n")
+            }
+            return sb.toString().trim()
+        }
 
         val sb = StringBuilder("📇 **Contacts${if (!all) " — $cat" else ""}** :\n\n")
         contacts.forEach { appendSummary(sb, it) }
