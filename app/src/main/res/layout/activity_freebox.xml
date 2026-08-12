@@ -51,6 +51,17 @@
             android:textSize="13sp"
             android:layout_marginBottom="16dp" />
 
+        <TextView
+            android:id="@+id/btnFbxStatus"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center"
+            android:text="📡 État de la box (système + connexion)"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:layout_marginBottom="10dp" />
+
         <!-- Wi-Fi box -->
         <LinearLayout
             android:layout_width="match_parent"

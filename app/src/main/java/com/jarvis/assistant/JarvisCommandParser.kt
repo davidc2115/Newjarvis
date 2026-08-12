@@ -461,8 +461,8 @@ object JarvisCommandParser {
 
             "freebox_list" -> {
                 val path = json.optString("path", "/")
-                val files = FreeboxController.listDirectory(context, path)
-                FreeboxController.formatDirectoryListing(path, files)
+                val result = FreeboxController.listDirectory(context, path)
+                FreeboxController.formatDirectoryListing(path, result)
             }
             "freebox_mkdir" -> {
                 val parent = json.optString("parent", "/")
@@ -490,6 +490,7 @@ object JarvisCommandParser {
             "freebox_wifi_on" -> FreeboxController.setWifiState(context, true).message
             "freebox_wifi_off" -> FreeboxController.setWifiState(context, false).message
             "freebox_wifi_status" -> FreeboxController.getWifiStatus(context).message
+            "freebox_status" -> FreeboxController.getSystemStatus(context).message
             "wake_on_lan" -> {
                 val mac = json.optString("mac", "")
                 val deviceName = json.optString("device", "").ifBlank { json.optString("name", "") }

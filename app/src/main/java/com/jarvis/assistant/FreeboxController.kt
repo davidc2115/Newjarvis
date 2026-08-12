@@ -206,11 +206,31 @@ object FreeboxController {
 
     // ─── Stockage : fs/ls, fs/mkdir, fs/rename, fs/rm, fs/mv ──────────────────
 
-    fun listDirectory(context: Context, path: String): List<FbxFile> {
+    data class ListResult(val files: List<FbxFile>, val error: String?)
+
+    /**
+     * Liste un dossier. En cas d'échec, [ListResult.error] contient le message
+     * exact renvoyé par la Freebox — le plus souvent "insufficient_rights" si
+     * l'appli n'a pas la permission "Accès aux disques durs" (à activer sur
+     * mafreebox.freebox.fr → Paramètres → Gestion des accès → Applications),
+     * ou "path_not_found" si le chemin n'existe pas.
+     */
+    fun listDirectory(context: Context, path: String): ListResult {
         val result = apiRequest(context, "GET", "fs/ls/${encodePath(path)}/?removeHidden=true")
-        if (!result.optBoolean("success", false)) return emptyList()
+        if (!result.optBoolean("success", false)) {
+            val errorCode = result.optString("error_code", "")
+            val msg = result.optString("msg", "").ifBlank {
+                when (errorCode) {
+                    "insufficient_rights" -> "Permission « Accès aux disques durs » non accordée à JARVIS. Va sur mafreebox.freebox.fr → Paramètres de la Freebox → Gestion des accès → Applications, et active cette permission pour JARVIS."
+                    "path_not_found" -> "Ce chemin n'existe pas sur la Freebox."
+                    "disk_unavailable" -> "Le disque n'est pas monté sur la Freebox."
+                    else -> errorCode.ifBlank { "erreur inconnue" }
+                }
+            }
+            return ListResult(emptyList(), msg)
+        }
         val arr = result.optJSONArray("result") ?: JSONArray()
-        return (0 until arr.length()).map { i ->
+        val files = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             FbxFile(
                 path = decodePath(o.optString("path")),
@@ -219,6 +239,7 @@ object FreeboxController {
                 size = o.optLong("size", 0)
             )
         }
+        return ListResult(files, null)
     }
 
     private fun decodePath(base64Path: String): String =
@@ -283,10 +304,11 @@ object FreeboxController {
         return ActionResult(true, "$successMsg (toujours en cours en arrière-plan sur la Freebox — les gros transferts peuvent prendre plus de temps).")
     }
 
-    fun formatDirectoryListing(path: String, files: List<FbxFile>): String {
-        if (files.isEmpty()) return "📦 Le dossier « $path » est vide (ou introuvable)."
+    fun formatDirectoryListing(path: String, result: ListResult): String {
+        if (result.error != null) return "❌ Impossible de lister « $path » : ${result.error}"
+        if (result.files.isEmpty()) return "📦 Le dossier « $path » est vide."
         val sb = StringBuilder("📦 **$path** :\n\n")
-        files.sortedWith(compareByDescending<FbxFile> { it.isDir }.thenBy { it.name.lowercase() }).forEach { f ->
+        result.files.sortedWith(compareByDescending<FbxFile> { it.isDir }.thenBy { it.name.lowercase() }).forEach { f ->
             val icon = if (f.isDir) "📁" else "📄"
             val sizeStr = if (!f.isDir) " (${formatSize(f.size)})" else ""
             sb.append("$icon ${f.name}$sizeStr\n")
@@ -325,5 +347,78 @@ object FreeboxController {
         } else {
             ActionResult(false, "❌ Échec de la modification du Wi-Fi Freebox : ${result.optString("msg", "erreur inconnue")}")
         }
+    }
+
+    // ─── État général de la box (système + connexion internet) ───────────────
+
+    /**
+     * Statut complet de la Freebox : modèle, version firmware, température,
+     * temps de fonctionnement, et état de la connexion internet (débit,
+     * type de ligne, état). Note : sur mafreebox.freebox.fr → Paramètres →
+     * Gestion des accès → Applications, la permission "Accès aux paramètres
+     * de la Freebox" doit être activée pour JARVIS pour lire system/.
+     */
+    fun getSystemStatus(context: Context): ActionResult {
+        val sys = apiRequest(context, "GET", "system/")
+        if (!sys.optBoolean("success", false)) {
+            val errorCode = sys.optString("error_code", "")
+            val msg = sys.optString("msg", "").ifBlank {
+                if (errorCode == "insufficient_rights")
+                    "Permission « Accès aux paramètres de la Freebox » non accordée à JARVIS. Active-la sur mafreebox.freebox.fr → Paramètres de la Freebox → Gestion des accès → Applications."
+                else errorCode.ifBlank { "erreur inconnue" }
+            }
+            return ActionResult(false, "❌ Impossible de lire l'état de la Freebox : $msg")
+        }
+        val s = sys.optJSONObject("result") ?: JSONObject()
+        val sb = StringBuilder("📡 **État de la Freebox**\n\n")
+        sb.append("• Modèle : ${s.optString("model_info", s.optString("board_name", "inconnu"))}\n")
+        sb.append("• Firmware : ${s.optString("firmware_version", "?")}\n")
+        val uptimeSec = s.optLong("uptime_val", -1)
+        if (uptimeSec >= 0) sb.append("• Allumée depuis : ${formatUptime(uptimeSec)}\n")
+        val temp = s.optInt("temp_cpum", s.optInt("temp_sw", -1))
+        if (temp > 0) sb.append("• Température : $temp°C\n")
+
+        val conn = apiRequest(context, "GET", "connection/")
+        if (conn.optBoolean("success", false)) {
+            val c = conn.optJSONObject("result") ?: JSONObject()
+            val state = c.optString("state", "inconnu")
+            val stateFr = when (state) {
+                "up" -> "connectée ✅"
+                "down" -> "déconnectée ❌"
+                "going_up" -> "connexion en cours…"
+                "going_down" -> "déconnexion en cours…"
+                else -> state
+            }
+            sb.append("• Connexion internet : $stateFr\n")
+            sb.append("• Type de ligne : ${c.optString("media", "?")}\n")
+            val rateDown = c.optLong("rate_down", -1)
+            val rateUp = c.optLong("rate_up", -1)
+            if (rateDown >= 0) sb.append("• Débit descendant actuel : ${formatBitrate(rateDown)}\n")
+            if (rateUp >= 0) sb.append("• Débit montant actuel : ${formatBitrate(rateUp)}\n")
+            val bwDown = c.optLong("bandwidth_down", -1)
+            val bwUp = c.optLong("bandwidth_up", -1)
+            if (bwDown >= 0) sb.append("• Bande passante max descendante : ${formatBitrate(bwDown)}\n")
+            if (bwUp >= 0) sb.append("• Bande passante max montante : ${formatBitrate(bwUp)}\n")
+        } else {
+            sb.append("• Connexion internet : impossible à lire (${conn.optString("msg", "erreur inconnue")})\n")
+        }
+        return ActionResult(true, sb.toString().trim())
+    }
+
+    private fun formatUptime(seconds: Long): String {
+        val days = seconds / 86400
+        val hours = (seconds % 86400) / 3600
+        val minutes = (seconds % 3600) / 60
+        return when {
+            days > 0 -> "${days}j ${hours}h"
+            hours > 0 -> "${hours}h ${minutes}min"
+            else -> "${minutes}min"
+        }
+    }
+
+    private fun formatBitrate(bitsPerSec: Long): String {
+        // Les valeurs Freebox sont en bits/s ; on affiche en Mbit/s comme repère habituel.
+        val mbps = bitsPerSec / 1_000_000.0
+        return if (mbps >= 1) "%.1f Mbit/s".format(mbps) else "${bitsPerSec / 1000} Kbit/s"
     }
 }
