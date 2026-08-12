@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background_dark"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📦 Freebox Server"
+            android:textColor="@color/cyan_accent"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Stockage et Wi-Fi de ta Freebox. La première fois, tu dois valider l'appairage sur l'écran de la Freebox (flèche droite) ou dans l'appli Freebox."
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:layout_marginBottom="14dp" />
+
+        <EditText
+            android:id="@+id/fbxHostInput"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:background="@drawable/bg_input"
+            android:hint="http://mafreebox.freebox.fr"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"
+            android:inputType="textUri"
+            android:padding="12dp"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:id="@+id/btnFbxPair"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:background="@drawable/bg_mic_button"
+            android:gravity="center"
+            android:text="🔗 Appairer la Freebox"
+            android:textColor="@color/background_dark"
+            android:textStyle="bold"
+            android:textSize="13sp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Wi-Fi box -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/btnFbxWifiOn"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="📶 Wi-Fi ON"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/btnFbxWifiOff"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="📴 Wi-Fi OFF"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/btnFbxWifiStatus"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="ℹ️ État"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Navigateur de fichiers -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📁 Fichiers"
+            android:textColor="@color/cyan_accent"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/fbxPathInput"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_input"
+            android:hint="Chemin (ex: /Disque dur)"
+            android:text="/"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"
+            android:padding="10dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/btnFbxList"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center"
+            android:text="📂 Lister ce dossier"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:id="@+id/fbxOutputText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_input"
+            android:padding="14dp"
+            android:text="Appaire d'abord la Freebox, puis liste un dossier."
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:lineSpacingExtra="2dp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Actions fichiers -->
+        <EditText
+            android:id="@+id/fbxNameInput"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_input"
+            android:hint="Nom (nouveau dossier / nouveau nom)"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"
+            android:padding="10dp"
+            android:layout_marginBottom="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:id="@+id/btnFbxMkdir"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="📁 Créer"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/btnFbxRename"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="✏️ Renommer"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/btnFbxDelete"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="🗑️ Supprimer"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/fbxDestInput"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_input"
+            android:hint="Dossier de destination (pour Déplacer)"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"
+            android:padding="10dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/btnFbxMove"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center"
+            android:text="📦 Déplacer le nom saisi ci-dessus vers ce dossier"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Les boutons Créer/Renommer/Déplacer utilisent le champ « Nom » comme fichier/dossier cible (chemin complet, ex: /Disque dur/photo.jpg) sauf Créer qui l'utilise comme nom du nouveau dossier dans le chemin listé ci-dessus."
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp"
+            android:layout_marginTop="8dp" />
+
+    </LinearLayout>
+</ScrollView>

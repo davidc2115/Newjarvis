@@ -23,5 +23,8 @@ class SmartHomeActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.btnOpenGeneration).setOnClickListener {
             startActivity(Intent(this, GenerationActivity::class.java))
         }
+        findViewById<TextView>(R.id.btnOpenFreebox).setOnClickListener {
+            startActivity(Intent(this, FreeboxActivity::class.java))
+        }
     }
 }

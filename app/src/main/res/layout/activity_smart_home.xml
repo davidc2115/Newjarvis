@@ -76,6 +76,19 @@
             android:paddingEnd="16dp"
             android:text="🎨  Génération IA — image, vidéo, site web"
             android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:id="@+id/btnOpenFreebox"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="📦  Freebox Server — stockage et Wi-Fi de la box"
+            android:textColor="@color/text_primary"
             android:textSize="13sp" />
 
     </LinearLayout>

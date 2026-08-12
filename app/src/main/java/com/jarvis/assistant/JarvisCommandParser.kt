@@ -422,12 +422,54 @@ object JarvisCommandParser {
                 else HomeAssistantController.deleteEntity(context, entity.entityId).message
             }
             "ha_rescan" -> HomeAssistantController.summarize(context, json.optString("filter", ""))
+            "ha_browse_media" -> {
+                val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val entity = HomeAssistantController.findEntity(context, name)
+                if (entity == null) "❌ Aucun lecteur média Home Assistant trouvé pour « $name »."
+                else HomeAssistantController.browseMedia(
+                    context, entity.entityId,
+                    json.optString("path", "").ifBlank { null },
+                    json.optString("mediaType", "").ifBlank { null }
+                )
+            }
 
             "network_scan" -> {
                 val devices = NetworkController.scanNetwork(context)
                 Prefs.saveScannedDevices(context, devices)
                 NetworkController.formatScanResult(devices)
             }
+
+            "freebox_list" -> {
+                val path = json.optString("path", "/")
+                val files = FreeboxController.listDirectory(context, path)
+                FreeboxController.formatDirectoryListing(path, files)
+            }
+            "freebox_mkdir" -> {
+                val parent = json.optString("parent", "/")
+                val name = json.optString("name", "")
+                if (name.isBlank()) "❌ Nom de dossier manquant."
+                else FreeboxController.createFolder(context, parent, name).message
+            }
+            "freebox_rename" -> {
+                val path = json.optString("path", "")
+                val newName = json.optString("newName", "")
+                if (path.isBlank() || newName.isBlank()) "❌ Chemin ou nouveau nom manquant."
+                else FreeboxController.renameEntry(context, path, newName).message
+            }
+            "freebox_delete" -> {
+                val path = json.optString("path", "")
+                if (path.isBlank()) "❌ Chemin manquant."
+                else FreeboxController.deleteEntry(context, path).message
+            }
+            "freebox_move" -> {
+                val path = json.optString("path", "")
+                val dest = json.optString("dest", "")
+                if (path.isBlank() || dest.isBlank()) "❌ Chemin source ou destination manquant."
+                else FreeboxController.moveEntry(context, path, dest).message
+            }
+            "freebox_wifi_on" -> FreeboxController.setWifiState(context, true).message
+            "freebox_wifi_off" -> FreeboxController.setWifiState(context, false).message
+            "freebox_wifi_status" -> FreeboxController.getWifiStatus(context).message
             "wake_on_lan" -> {
                 val mac = json.optString("mac", "")
                 val deviceName = json.optString("device", "").ifBlank { json.optString("name", "") }

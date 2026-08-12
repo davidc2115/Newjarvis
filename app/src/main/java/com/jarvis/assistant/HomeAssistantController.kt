@@ -197,6 +197,43 @@ object HomeAssistantController {
         }
     }
 
+    /**
+     * Parcourt les sources média exposées par un media_player Home Assistant
+     * (dossiers locaux, partages réseau/NAS configurés dans HA...) — LECTURE
+     * SEULE : c'est la seule API de "stockage" que Home Assistant expose
+     * réellement (pas de create/rename/delete de fichiers via HA).
+     * https://developers.home-assistant.io/docs/core/websocket_api#browse-media
+     */
+    suspend fun browseMedia(
+        context: Context,
+        entityId: String,
+        mediaContentId: String? = null,
+        mediaContentType: String? = null
+    ): String {
+        val command = JSONObject().put("type", "media_player/browse_media").put("entity_id", entityId)
+        if (!mediaContentId.isNullOrBlank()) command.put("media_content_id", mediaContentId)
+        if (!mediaContentType.isNullOrBlank()) command.put("media_content_type", mediaContentType)
+
+        val result = HomeAssistantWsClient.sendCommand(context, command)
+        if (!result.optBoolean("success", false)) {
+            val err = result.optJSONObject("error")?.optString("message") ?: result.optString("error", "erreur inconnue")
+            return "❌ Impossible de parcourir les médias : $err"
+        }
+
+        val res = result.optJSONObject("result") ?: return "❌ Réponse vide de Home Assistant."
+        val title = res.optString("title", "Racine")
+        val children = res.optJSONArray("children") ?: JSONArray()
+        if (children.length() == 0) return "📂 « $title » est vide (ou ne contient rien de navigable)."
+
+        val sb = StringBuilder("📂 **$title** :\n\n")
+        for (i in 0 until children.length()) {
+            val child = children.getJSONObject(i)
+            val icon = if (child.optBoolean("can_expand", false)) "📁" else "🎵"
+            sb.append("$icon ${child.optString("title", "?")}\n")
+        }
+        return sb.toString().trim()
+    }
+
     /** Formatte la liste des entités en texte lisible pour l'IA / la voix. */
     fun summarize(context: Context, filter: String = ""): String {
         if (!isConfigured(context)) {

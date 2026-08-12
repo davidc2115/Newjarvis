@@ -166,13 +166,20 @@ object StorageController {
 
     fun moveFile(context: Context, sourcePath: String, destPath: String): String {
         val src = resolvePath(sourcePath)
-        if (!src.exists()) return "❌ Fichier source introuvable : « ${src.absolutePath} »."
+        if (!src.exists()) return "❌ Fichier ou dossier source introuvable : « ${src.absolutePath} »."
 
         val dest = resolvePath(destPath)
         return try {
             dest.parentFile?.mkdirs()
             if (src.renameTo(dest)) {
-                "📦 Fichier **${src.name}** déplacé vers **${dest.path}** avec succès."
+                "📦 **${src.name}** déplacé vers **${dest.path}** avec succès."
+            } else if (src.isDirectory) {
+                // renameTo échoue en général quand la source et la destination sont sur des
+                // volumes différents (interne vs carte SD) — pour un dossier, une copie simple
+                // ne suffit pas (il faut copier tout le contenu récursivement).
+                src.copyRecursively(dest, overwrite = true)
+                src.deleteRecursively()
+                "📦 Dossier **${src.name}** déplacé avec succès."
             } else {
                 src.copyTo(dest, overwrite = true)
                 src.delete()

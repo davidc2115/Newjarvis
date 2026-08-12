@@ -169,6 +169,12 @@
             android:label="Génération IA"
             android:theme="@style/Theme.Jarvis" />
 
+        <activity
+            android:name=".FreeboxActivity"
+            android:exported="false"
+            android:label="Freebox Server"
+            android:theme="@style/Theme.Jarvis" />
+
 
         <!-- ── Receiver SMS (Validation des permissions SMS sur Android 10+) ── -->
         <receiver
@@ -202,6 +208,29 @@
             android:name=".GenerationService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- ── Tuiles Paramètres rapides (Wi-Fi / Bluetooth téléphone) ─────────── -->
+        <service
+            android:name=".JarvisWifiTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher"
+            android:label="JARVIS Wi-Fi"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".JarvisBluetoothTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher"
+            android:label="JARVIS Bluetooth"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- ── Relance l'écoute permanente après redémarrage du téléphone ─────── -->
         <receiver

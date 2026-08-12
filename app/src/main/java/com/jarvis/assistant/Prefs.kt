@@ -446,6 +446,24 @@ object Prefs {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // FREEBOX SERVER (stockage + Wi-Fi de la box)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getFreeboxHost(context: Context): String =
+        prefs(context).getString("freebox_host", "http://mafreebox.freebox.fr") ?: "http://mafreebox.freebox.fr"
+
+    fun saveFreeboxHost(context: Context, host: String) {
+        prefs(context).edit().putString("freebox_host", host.trim().trimEnd('/').ifBlank { "http://mafreebox.freebox.fr" }).apply()
+    }
+
+    fun getFreeboxAppToken(context: Context): String =
+        prefs(context).getString("freebox_app_token", "") ?: ""
+
+    fun saveFreeboxAppToken(context: Context, token: String) {
+        prefs(context).edit().putString("freebox_app_token", token.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // RÉSEAU LOCAL — appareils enregistrés (pour Wake-on-LAN rapide)
     // ═════════════════════════════════════════════════════════════════════════
 

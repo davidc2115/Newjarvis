@@ -6,6 +6,36 @@
 
 ---
 
+## 🆕 Nouveautés v4 — Freebox, tuiles rapides & contrôle total du stockage
+
+| Fonctionnalité | Détail |
+|---|---|
+| **📦 Freebox Server** | Stockage complet (lister/créer/renommer/déplacer/supprimer des fichiers et dossiers) + Wi-Fi de la box réellement activable/désactivable par commande, via l'API officielle Freebox OS |
+| **📱 Stockage téléphone** | Gestion complète déjà en place : lister, chercher, lire, écrire, renommer, copier, déplacer, supprimer (fichiers ET dossiers) |
+| **🧩 Tuiles Paramètres rapides** | Tuiles JARVIS Wi-Fi / Bluetooth dans le volet système (swipe vers le bas) — accès en un tap sans ouvrir l'app |
+| **📂 Médias Home Assistant** | Parcours (lecture seule) des dossiers/NAS exposés par un lecteur média HA |
+
+### ⚠️ Limite honnête : Wi-Fi / Bluetooth du téléphone
+
+Depuis Android 10 (Wi-Fi) et Android 13 (Bluetooth), Google interdit à toute
+application tierce de les activer/désactiver **silencieusement** — c'est une
+protection contre les apps malveillantes, aucun code ne peut la contourner
+sans root. JARVIS ouvre donc le panneau système correspondant (un tap
+suffit). Le Wi-Fi de la **Freebox**, lui, n'a aucune restriction de ce type :
+totalement pilotable par commande.
+
+### Appairer la Freebox
+
+1. Dans l'app → 🏠 → **Freebox Server** → renseigne l'hôte (par défaut
+   `http://mafreebox.freebox.fr`, valable si le téléphone est sur le même
+   Wi-Fi que la Freebox) → **Appairer la Freebox**.
+2. Valide la demande sur l'écran de la Freebox (flèche droite) ou dans
+   l'appli Freebox — jusqu'à 2 minutes pour répondre.
+3. Une fois appairé, le jeton est conservé : plus besoin de refaire cette
+   étape.
+
+---
+
 ## 🆕 Nouveautés v3 — Maison connectée & création IA
 
 | Fonctionnalité | Détail |
