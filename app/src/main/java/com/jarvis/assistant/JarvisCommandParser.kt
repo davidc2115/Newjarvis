@@ -382,6 +382,8 @@ object JarvisCommandParser {
                 else ObsidianController.searchNotes(context, query)
             }
             "obsidian_list" -> ObsidianController.listNotes(context, json.optString("folder", ""))
+            "obsidian_reset_path" -> ObsidianController.resetVaultPath(context)
+            "obsidian_wipe" -> ObsidianController.wipeVault(context)
 
             "generate_image" -> {
                 // L'image reste générée immédiatement (pas en arrière-plan) : c'est le cas le
