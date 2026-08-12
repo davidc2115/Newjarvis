@@ -62,16 +62,22 @@ class NetworkActivity : AppCompatActivity() {
         CoroutineScope(Dispatchers.Main).launch {
             val devices = withContext(Dispatchers.IO) { NetworkController.scanNetwork(this@NetworkActivity) }
             lastScan = devices
+            withContext(Dispatchers.IO) { Prefs.saveScannedDevices(this@NetworkActivity, devices) }
             outputText.text = NetworkController.formatScanResult(devices)
+            refreshSavedDevices()
         }
     }
 
     private fun refreshSavedDevices() {
         val devices = Prefs.getSavedNetworkDevices(this)
         savedDevicesText.text = if (devices.isEmpty()) {
-            "Aucun appareil enregistré."
+            "Aucun appareil enregistré. Lance un scan, ou ajoute une adresse MAC ci-dessus pour le Wake-on-LAN."
         } else {
-            devices.joinToString("\n") { "• ${it.name} — ${it.mac}" }
+            devices.joinToString("\n") { d ->
+                val macPart = if (d.mac.isNotBlank()) " — MAC ${d.mac}" else " — pas de MAC (réveil impossible)"
+                val ipPart = if (d.ip.isNotBlank()) " (${d.ip})" else ""
+                "• ${d.name}$ipPart$macPart"
+            }
         }
     }
 }

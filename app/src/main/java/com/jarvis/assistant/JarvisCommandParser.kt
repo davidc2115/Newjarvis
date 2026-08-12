@@ -383,6 +383,7 @@ object JarvisCommandParser {
 
             "network_scan" -> {
                 val devices = NetworkController.scanNetwork(context)
+                Prefs.saveScannedDevices(context, devices)
                 NetworkController.formatScanResult(devices)
             }
             "wake_on_lan" -> {

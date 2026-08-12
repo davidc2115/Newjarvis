@@ -465,15 +465,45 @@ object Prefs {
     fun saveNetworkDevice(context: Context, device: SavedDevice) {
         val list = getSavedNetworkDevices(context).filter { it.name != device.name }.toMutableList()
         list.add(device)
-        val arr = JSONArray()
-        list.forEach { d ->
-            arr.put(JSONObject().put("name", d.name).put("mac", d.mac).put("ip", d.ip))
-        }
-        prefs(context).edit().putString("network_saved_devices", arr.toString()).apply()
+        writeSavedNetworkDevices(context, list)
     }
 
     fun removeNetworkDevice(context: Context, name: String) {
-        val list = getSavedNetworkDevices(context).filter { it.name != name }
+        writeSavedNetworkDevices(context, getSavedNetworkDevices(context).filter { it.name != name })
+    }
+
+    /**
+     * Enregistre automatiquement les appareils trouvés lors d'un scan réseau
+     * (📡 Réseau local, ou commande vocale/chat "scanne le réseau") dans la
+     * liste des appareils connus, pour qu'ils apparaissent dans l'écran
+     * Réseau local sans action manuelle. Un appareil déjà connu (même IP) est
+     * mis à jour (nom rafraîchi) sans écraser une adresse MAC déjà renseignée
+     * manuellement pour le Wake-on-LAN.
+     */
+    fun saveScannedDevices(context: Context, devices: List<NetworkController.Device>) {
+        if (devices.isEmpty()) return
+        val existing = getSavedNetworkDevices(context).toMutableList()
+
+        devices.forEach { scanned ->
+            val label = scanned.label
+            val existingIdx = existing.indexOfFirst { it.ip.isNotBlank() && it.ip == scanned.ip }
+            if (existingIdx >= 0) {
+                val current = existing[existingIdx]
+                existing[existingIdx] = current.copy(
+                    name = if (current.mac.isBlank() && current.name != label) label else current.name,
+                    ip = scanned.ip
+                )
+            } else {
+                val nameTaken = existing.any { it.name == label }
+                val finalName = if (nameTaken) "$label (${scanned.ip})" else label
+                existing.add(SavedDevice(name = finalName, mac = "", ip = scanned.ip))
+            }
+        }
+
+        writeSavedNetworkDevices(context, existing)
+    }
+
+    private fun writeSavedNetworkDevices(context: Context, list: List<SavedDevice>) {
         val arr = JSONArray()
         list.forEach { d ->
             arr.put(JSONObject().put("name", d.name).put("mac", d.mac).put("ip", d.ip))
