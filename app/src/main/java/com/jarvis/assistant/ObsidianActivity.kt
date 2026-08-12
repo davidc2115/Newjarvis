@@ -3,6 +3,8 @@ package com.jarvis.assistant
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.provider.DocumentsContract
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
@@ -12,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class ObsidianActivity : AppCompatActivity() {
 
@@ -26,10 +29,61 @@ class ObsidianActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         if (uri != null) {
-            val path = uri.path?.replace("/tree/primary:", "/sdcard/") ?: return@registerForActivityResult
+            val path = resolveTreeUriToPath(uri)
+            if (path == null) {
+                Toast.makeText(
+                    this,
+                    "❌ Impossible de déterminer le chemin réel de ce dossier (carte SD non standard ?). Vault inchangé.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@registerForActivityResult
+            }
+            val target = File(path)
+            // Vérification concrète avant d'adopter ce chemin : on doit pouvoir au
+            // moins créer/lister le dossier. Sans ce contrôle, un chemin mal calculé
+            // (ex: carte SD) serait accepté silencieusement et JARVIS écrirait dans
+            // le vide — exactement le genre de désynchronisation signalée.
+            val usable = target.exists() || target.mkdirs()
+            if (!usable) {
+                Toast.makeText(
+                    this,
+                    "❌ Ce dossier n'est pas accessible en écriture par JARVIS (chemin calculé : $path). " +
+                        "Choisis un dossier sur le stockage interne, ou dans Documents.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@registerForActivityResult
+            }
             Prefs.saveObsidianVaultPath(this, path)
             vaultPathText.text = "📂 Vault : $path"
-            Toast.makeText(this, "Vault déplacé vers : $path", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "✅ Vault pointé vers : $path (vérifié accessible)", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Convertit une URI d'arbre de documents (SAF) en chemin filesystem réel.
+     * L'ancienne implémentation faisait un simple replace("/tree/primary:", "/sdcard/")
+     * qui ne fonctionnait QUE pour le stockage interne principal — pour toute carte SD
+     * ou volume secondaire (id différent de "primary"), le chemin obtenu était un
+     * fragment d'URI invalide, silencieusement accepté comme chemin de vault, ce qui
+     * cassait complètement la correspondance avec le vrai vault Obsidian de l'utilisateur.
+     */
+    private fun resolveTreeUriToPath(uri: Uri): String? {
+        return try {
+            val docId = DocumentsContract.getTreeDocumentId(uri)
+            val parts = docId.split(":", limit = 2)
+            val volumeId = parts.getOrNull(0) ?: return null
+            val relativePath = parts.getOrNull(1) ?: ""
+            val base = if (volumeId.equals("primary", ignoreCase = true)) {
+                Environment.getExternalStorageDirectory().absolutePath
+            } else {
+                // Volume secondaire (carte SD, stockage USB...) — chemin standard sur
+                // la grande majorité des appareils Android, non garanti à 100% selon
+                // le fabricant, d'où la vérification d'accessibilité juste après.
+                "/storage/$volumeId"
+            }
+            if (relativePath.isBlank()) base else "$base/$relativePath"
+        } catch (e: Exception) {
+            null
         }
     }
 

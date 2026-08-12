@@ -3,6 +3,9 @@ package com.jarvis.assistant
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
@@ -21,7 +24,22 @@ class GenerationActivity : AppCompatActivity() {
     private lateinit var videoOutput: TextView
     private lateinit var websiteOutput: TextView
     private lateinit var historyText: TextView
+    private lateinit var activeGenCard: View
+    private lateinit var activeGenLabel: TextView
     private var lastWebsiteFile: File? = null
+
+    // Rafraîchit l'historique (et donc la barre de progression) toutes les 1,5s
+    // pendant que cet écran est visible — indispensable pour voir en direct une
+    // génération lancée depuis le chat (image/vidéo/site), pas seulement celles
+    // lancées depuis ce bouton. S'arrête automatiquement quand l'écran n'est plus
+    // affiché (onPause) pour ne pas tourner inutilement en arrière-plan.
+    private val pollHandler = Handler(Looper.getMainLooper())
+    private val pollRunnable = object : Runnable {
+        override fun run() {
+            refreshHistory()
+            pollHandler.postDelayed(this, 1500)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,6 +56,8 @@ class GenerationActivity : AppCompatActivity() {
         val websitePrompt = findViewById<EditText>(R.id.websitePromptInput)
         websiteOutput = findViewById(R.id.websiteOutputText)
         historyText = findViewById(R.id.historyText)
+        activeGenCard = findViewById(R.id.activeGenCard)
+        activeGenLabel = findViewById(R.id.activeGenLabel)
 
         replicateTokenInput.setText(Prefs.getReplicateToken(this))
 
@@ -133,7 +153,36 @@ class GenerationActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshHistory()
+        pollHandler.post(pollRunnable)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        pollHandler.removeCallbacks(pollRunnable)
+    }
+
+    /**
+     * Affiche/masque la carte de progression selon qu'il existe des générations
+     * "pending" dans l'historique — que la génération ait été lancée depuis ce
+     * bouton, ou depuis le chat/la voix via GenerationService.
+     */
+    private fun updateActiveGenCard(history: List<Prefs.GenerationRecord>) {
+        val pending = history.filter { it.status == "pending" }
+        if (pending.isEmpty()) {
+            activeGenCard.visibility = View.GONE
+            return
+        }
+        activeGenCard.visibility = View.VISIBLE
+        val label = pending.joinToString("\n") { record ->
+            val typeLabel = when (record.type) {
+                "image" -> "🖼️ Image"
+                "video" -> "🎬 Vidéo"
+                "website" -> "🌐 Site web"
+                else -> record.type
+            }
+            "⏳ $typeLabel en cours — ${record.prompt.take(50)}"
+        }
+        activeGenLabel.text = label
     }
 
     private fun lastSuccessfulRecordPath(type: String): String? =
@@ -143,6 +192,7 @@ class GenerationActivity : AppCompatActivity() {
 
     private fun refreshHistory() {
         val history = Prefs.getGenerationHistory(this)
+        updateActiveGenCard(history)
         if (history.isEmpty()) {
             historyText.text = "Aucune génération pour l'instant."
             return

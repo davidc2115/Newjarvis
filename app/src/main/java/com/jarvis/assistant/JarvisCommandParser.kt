@@ -369,6 +369,20 @@ object JarvisCommandParser {
                 else PeopleController.navigateToContact(context, name)
             }
 
+            // Vault Obsidian réel (notes libres, distinct des fiches contacts ci-dessus) —
+            // toujours utiliser ces actions plutôt que de deviner un contenu : le chemin
+            // du vault est configurable (⚙ Obsidian) et peut différer de ce qu'on attend.
+            "obsidian_status" -> {
+                val path = ObsidianController.getVaultRoot(context).absolutePath
+                "📂 Vault Obsidian actuel : $path\n\n" + ObsidianController.getVaultStats(context)
+            }
+            "obsidian_search" -> {
+                val query = json.optString("query", "")
+                if (query.isBlank()) "❌ Aucun terme de recherche fourni."
+                else ObsidianController.searchNotes(context, query)
+            }
+            "obsidian_list" -> ObsidianController.listNotes(context, json.optString("folder", ""))
+
             "generate_image" -> {
                 // L'image reste générée immédiatement (pas en arrière-plan) : c'est le cas le
                 // plus rapide (quelques secondes via Gemini/OpenAI) et JARVIS l'affiche tout de
@@ -447,6 +461,20 @@ object JarvisCommandParser {
                 else HomeAssistantController.deleteEntity(context, entity.entityId).message
             }
             "ha_rescan" -> HomeAssistantController.summarize(context, json.optString("filter", ""))
+            "ha_set" -> {
+                val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val entity = HomeAssistantController.findEntity(context, name)
+                if (entity == null) "❌ Aucun appareil Home Assistant trouvé pour « $name »."
+                else HomeAssistantController.setValue(
+                    context, entity.entityId,
+                    brightnessPct = if (json.has("brightness")) json.optInt("brightness") else null,
+                    colorName = json.optString("color", "").ifBlank { null },
+                    temperature = if (json.has("temperature")) json.optDouble("temperature") else null,
+                    volumePct = if (json.has("volume")) json.optInt("volume") else null,
+                    positionPct = if (json.has("position")) json.optInt("position") else null,
+                    speedPct = if (json.has("speed")) json.optInt("speed") else null
+                ).message
+            }
             "ha_browse_media" -> {
                 val name = json.optString("device", "").ifBlank { json.optString("name", "") }
                 val entity = HomeAssistantController.findEntity(context, name)

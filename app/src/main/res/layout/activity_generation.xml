@@ -19,6 +19,37 @@
             android:textStyle="bold"
             android:layout_marginBottom="16dp" />
 
+        <!-- Carte de progression : visible seulement s'il y a une génération en cours
+             (lancée depuis cet écran OU depuis le chat), y compris en arrière-plan. -->
+        <LinearLayout
+            android:id="@+id/activeGenCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_input"
+            android:padding="12dp"
+            android:visibility="gone"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/activeGenLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="⏳ Génération en cours..."
+                android:textColor="@color/cyan_accent"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:layout_marginBottom="8dp" />
+
+            <ProgressBar
+                android:id="@+id/activeGenProgressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:indeterminate="true" />
+
+        </LinearLayout>
+
         <!-- IMAGE -->
         <TextView
             android:layout_width="wrap_content"

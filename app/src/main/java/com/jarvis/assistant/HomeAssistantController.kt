@@ -156,6 +156,57 @@ object HomeAssistantController {
     }
 
     /**
+     * Ajuste une valeur précise sur une entité — au-delà du simple allumer/éteindre :
+     * luminosité et couleur d'une lumière, température d'un thermostat, volume d'un
+     * lecteur média, position d'un volet, vitesse d'un ventilateur. Devine le bon
+     * service Home Assistant selon le domaine de l'entité.
+     *
+     * Ceci couvre la quasi-totalité des demandes courantes de "réglage" — mais reste
+     * différent d'une reconfiguration profonde (créer une automatisation, ajouter une
+     * intégration, éditer le YAML) : Home Assistant n'expose pas ça via une API REST/WS
+     * simple et sûre à piloter depuis un mobile, ce n'est donc pas fait ici pour éviter
+     * de casser une configuration existante sans supervision.
+     */
+    fun setValue(
+        context: Context,
+        entityId: String,
+        brightnessPct: Int? = null,
+        colorName: String? = null,
+        temperature: Double? = null,
+        volumePct: Int? = null,
+        positionPct: Int? = null,
+        speedPct: Int? = null
+    ): ActionResult {
+        val domain = entityId.substringBefore(".")
+        return when (domain) {
+            "light" -> {
+                val extra = mutableMapOf<String, Any>()
+                brightnessPct?.let { extra["brightness_pct"] = it.coerceIn(0, 100) }
+                colorName?.let { extra["color_name"] = it }
+                if (extra.isEmpty()) return ActionResult(false, "❌ Précise une luminosité (0-100) ou une couleur pour cette lumière.")
+                callService(context, "light", "turn_on", entityId, extra)
+            }
+            "climate" -> {
+                if (temperature == null) return ActionResult(false, "❌ Précise la température souhaitée.")
+                callService(context, "climate", "set_temperature", entityId, mapOf("temperature" to temperature))
+            }
+            "media_player" -> {
+                if (volumePct == null) return ActionResult(false, "❌ Précise le volume souhaité (0 à 100).")
+                callService(context, "media_player", "volume_set", entityId, mapOf("volume_level" to (volumePct.coerceIn(0, 100) / 100.0)))
+            }
+            "cover" -> {
+                if (positionPct == null) return ActionResult(false, "❌ Précise la position du volet souhaitée (0 = fermé, 100 = ouvert).")
+                callService(context, "cover", "set_cover_position", entityId, mapOf("position" to positionPct.coerceIn(0, 100)))
+            }
+            "fan" -> {
+                if (speedPct == null) return ActionResult(false, "❌ Précise la vitesse du ventilateur souhaitée (0 à 100).")
+                callService(context, "fan", "set_percentage", entityId, mapOf("percentage" to speedPct.coerceIn(0, 100)))
+            }
+            else -> ActionResult(false, "❌ « $entityId » ($domain) ne propose pas de réglage précis depuis JARVIS — seulement allumer/éteindre/basculer.")
+        }
+    }
+
+    /**
      * Renomme une entité DANS Home Assistant lui-même (registre d'entités,
      * via l'API WebSocket — pas de route REST équivalente). Le nouveau nom
      * apparaît alors partout dans Home Assistant, pas seulement dans JARVIS.
