@@ -486,17 +486,21 @@ object Prefs {
 
         devices.forEach { scanned ->
             val label = scanned.label
+            val scannedMac = scanned.mac?.takeIf { it.isNotBlank() } ?: ""
             val existingIdx = existing.indexOfFirst { it.ip.isNotBlank() && it.ip == scanned.ip }
             if (existingIdx >= 0) {
                 val current = existing[existingIdx]
                 existing[existingIdx] = current.copy(
+                    // Ne renomme que si l'utilisateur n'a pas déjà donné un nom manuel (mac vide = probablement auto-détecté).
                     name = if (current.mac.isBlank() && current.name != label) label else current.name,
+                    // Garde une MAC déjà connue ; ne la remplace que si elle était vide.
+                    mac = current.mac.ifBlank { scannedMac },
                     ip = scanned.ip
                 )
             } else {
                 val nameTaken = existing.any { it.name == label }
                 val finalName = if (nameTaken) "$label (${scanned.ip})" else label
-                existing.add(SavedDevice(name = finalName, mac = "", ip = scanned.ip))
+                existing.add(SavedDevice(name = finalName, mac = scannedMac, ip = scanned.ip))
             }
         }
 

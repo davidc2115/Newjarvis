@@ -155,6 +155,48 @@ object HomeAssistantController {
         return callService(context, domain, service, entityId)
     }
 
+    /**
+     * Renomme une entité DANS Home Assistant lui-même (registre d'entités,
+     * via l'API WebSocket — pas de route REST équivalente). Le nouveau nom
+     * apparaît alors partout dans Home Assistant, pas seulement dans JARVIS.
+     */
+    suspend fun renameEntity(context: Context, entityId: String, newName: String): ActionResult {
+        if (newName.isBlank()) return ActionResult(false, "❌ Le nouveau nom ne peut pas être vide.")
+        val command = JSONObject()
+            .put("type", "config/entity_registry/update")
+            .put("entity_id", entityId)
+            .put("name", newName)
+        val result = HomeAssistantWsClient.sendCommand(context, command)
+        return if (result.optBoolean("success", false)) {
+            ActionResult(true, "✅ Entité renommée en « $newName ».")
+        } else {
+            val errMsg = result.optJSONObject("error")?.optString("message")
+                ?: result.optString("error", "erreur inconnue")
+            ActionResult(false, "❌ Échec du renommage : $errMsg")
+        }
+    }
+
+    /**
+     * Supprime une entité du registre Home Assistant (API WebSocket).
+     * ⚠️ Si l'entité est toujours fournie par une intégration active (ex:
+     * une ampoule physiquement connectée), elle réapparaîtra probablement
+     * au prochain redémarrage de Home Assistant — la suppression de
+     * registre sert surtout à nettoyer des entités orphelines/désactivées.
+     */
+    suspend fun deleteEntity(context: Context, entityId: String): ActionResult {
+        val command = JSONObject()
+            .put("type", "config/entity_registry/remove")
+            .put("entity_id", entityId)
+        val result = HomeAssistantWsClient.sendCommand(context, command)
+        return if (result.optBoolean("success", false)) {
+            ActionResult(true, "✅ Entité supprimée du registre Home Assistant.")
+        } else {
+            val errMsg = result.optJSONObject("error")?.optString("message")
+                ?: result.optString("error", "erreur inconnue")
+            ActionResult(false, "❌ Échec de la suppression : $errMsg")
+        }
+    }
+
     /** Formatte la liste des entités en texte lisible pour l'IA / la voix. */
     fun summarize(context: Context, filter: String = ""): String {
         if (!isConfigured(context)) {

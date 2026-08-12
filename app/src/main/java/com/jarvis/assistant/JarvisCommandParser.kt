@@ -35,8 +35,7 @@ object JarvisCommandParser {
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact",
         "github_list_repos", "github_read_file",
-        "search_contact_profile", "list_contacts_by_category",
-        "ha_status", "network_scan"
+        "search_contact_profile", "list_contacts_by_category"
     )
 
     /**
@@ -380,6 +379,21 @@ object JarvisCommandParser {
                 if (entity == null) "❌ Aucun appareil Home Assistant trouvé pour « $name »."
                 else HomeAssistantController.toggle(context, entity.entityId).message
             }
+            "ha_rename" -> {
+                val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val newName = json.optString("newName", "").ifBlank { json.optString("new_name", "") }
+                val entity = HomeAssistantController.findEntity(context, name)
+                if (entity == null) "❌ Aucun appareil Home Assistant trouvé pour « $name »."
+                else if (newName.isBlank()) "❌ Précise le nouveau nom souhaité."
+                else HomeAssistantController.renameEntity(context, entity.entityId, newName).message
+            }
+            "ha_delete" -> {
+                val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val entity = HomeAssistantController.findEntity(context, name)
+                if (entity == null) "❌ Aucun appareil Home Assistant trouvé pour « $name »."
+                else HomeAssistantController.deleteEntity(context, entity.entityId).message
+            }
+            "ha_rescan" -> HomeAssistantController.summarize(context, json.optString("filter", ""))
 
             "network_scan" -> {
                 val devices = NetworkController.scanNetwork(context)

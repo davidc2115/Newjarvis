@@ -1,5 +1,6 @@
 package com.jarvis.assistant
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.widget.EditText
 import android.widget.TextView
@@ -15,6 +16,7 @@ class HomeAssistantActivity : AppCompatActivity() {
     private lateinit var urlInput: EditText
     private lateinit var tokenInput: EditText
     private lateinit var searchInput: EditText
+    private lateinit var renameInput: EditText
     private lateinit var outputText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,6 +26,7 @@ class HomeAssistantActivity : AppCompatActivity() {
         urlInput = findViewById(R.id.haUrlInput)
         tokenInput = findViewById(R.id.haTokenInput)
         searchInput = findViewById(R.id.haSearchInput)
+        renameInput = findViewById(R.id.haRenameInput)
         outputText = findViewById(R.id.haOutputText)
 
         urlInput.setText(Prefs.getHaUrl(this))
@@ -48,6 +51,31 @@ class HomeAssistantActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.btnHaTurnOn).setOnClickListener { runEntityAction { HomeAssistantController.turnOn(this, it) } }
         findViewById<TextView>(R.id.btnHaTurnOff).setOnClickListener { runEntityAction { HomeAssistantController.turnOff(this, it) } }
         findViewById<TextView>(R.id.btnHaToggle).setOnClickListener { runEntityAction { HomeAssistantController.toggle(this, it) } }
+
+        findViewById<TextView>(R.id.btnHaRename).setOnClickListener {
+            val newName = renameInput.text.toString().trim()
+            if (newName.isBlank()) {
+                Toast.makeText(this, "Indique le nouveau nom dans le champ prévu.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            runEntityAction { entityId -> HomeAssistantController.renameEntity(this, entityId, newName) }
+        }
+
+        findViewById<TextView>(R.id.btnHaDelete).setOnClickListener {
+            val query = searchInput.text.toString().trim()
+            if (query.isBlank()) {
+                Toast.makeText(this, "Indique le nom de l'appareil dans le champ de recherche.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Supprimer cet appareil ?")
+                .setMessage("« $query » sera supprimé du registre Home Assistant. Cette action est irréversible et peut être annulée uniquement en réintégrant l'appareil depuis Home Assistant.")
+                .setPositiveButton("Supprimer") { _, _ ->
+                    runEntityAction { entityId -> HomeAssistantController.deleteEntity(this, entityId) }
+                }
+                .setNegativeButton("Annuler", null)
+                .show()
+        }
 
         if (HomeAssistantController.isConfigured(this)) refreshEntities()
     }
