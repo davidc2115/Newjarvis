@@ -39,8 +39,40 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # Met en cache le wrapper Gradle téléchargé + les dépendances entre les runs.
+      # Sans ça, chaque run repart de zéro et retélécharge gradle-8.x-bin.zip depuis
+      # services.gradle.org — un simple aléa réseau côté serveur de distribution
+      # (SocketException "Unexpected end of file from server") suffit alors à faire
+      # échouer le build avant même la moindre ligne de code compilée. Avec le cache,
+      # la plupart des runs n'ont plus du tout besoin de ce téléchargement.
+      - name: Cache Gradle wrapper & dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper
+            ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/gradle/wrapper/gradle-wrapper.properties', '**/*.gradle*', '**/gradle.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          attempt=1
+          max_attempts=3
+          until [ $attempt -gt $max_attempts ]; do
+            echo "=== Tentative de build $attempt/$max_attempts ==="
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            code=$?
+            if [ $code -eq 0 ]; then
+              exit 0
+            fi
+            echo "⚠️ Échec (code $code) — probablement un aléa réseau transitoire (ex: téléchargement du wrapper Gradle). Nouvelle tentative dans 20s..."
+            attempt=$((attempt + 1))
+            sleep 20
+          done
+          echo "❌ Échec après $max_attempts tentatives."
+          exit $code
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

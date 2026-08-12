@@ -51,10 +51,13 @@ object PeopleController {
         val name: String,
         val category: String,
         val phone: String?,
+        val phonePro: String?,
         val email: String?,
         val address: String?,
+        val addressPro: String?,
         val latitude: Double?,
         val longitude: Double?,
+        val installDate: String?,
         val notes: String,
         val visits: List<String>,
         val file: File
@@ -106,10 +109,13 @@ object PeopleController {
             name = file.nameWithoutExtension,
             category = field("category") ?: "autre",
             phone = field("phone"),
+            phonePro = field("phone_pro"),
             email = field("email"),
             address = field("address"),
+            addressPro = field("address_pro"),
             latitude = field("latitude")?.toDoubleOrNull(),
             longitude = field("longitude")?.toDoubleOrNull(),
+            installDate = field("install_date"),
             notes = notesOnly,
             visits = visits,
             file = file
@@ -121,10 +127,13 @@ object PeopleController {
         name: String,
         category: String = "autre",
         phone: String? = null,
+        phonePro: String? = null,
         email: String? = null,
         address: String? = null,
+        addressPro: String? = null,
         latitude: Double? = null,
         longitude: Double? = null,
+        installDate: String? = null,
         notes: String? = null
     ): String {
         if (name.isBlank()) return "❌ Nom du contact manquant."
@@ -137,19 +146,25 @@ object PeopleController {
             val isUpdate = existing != null
 
             val finalPhone = phone ?: existing?.phone
+            val finalPhonePro = phonePro ?: existing?.phonePro
             val finalEmail = email ?: existing?.email
             val finalAddress = address ?: existing?.address
+            val finalAddressPro = addressPro ?: existing?.addressPro
             val finalLat = latitude ?: existing?.latitude
             val finalLng = longitude ?: existing?.longitude
+            val finalInstallDate = installDate ?: existing?.installDate
             val finalNotes = notes ?: existing?.notes ?: ""
             val finalVisits = existing?.visits ?: emptyList()
 
             val frontmatterLines = mutableListOf("category: $cat")
             finalPhone?.let { frontmatterLines.add("phone: \"$it\"") }
+            finalPhonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
             finalEmail?.let { frontmatterLines.add("email: \"$it\"") }
             finalAddress?.let { frontmatterLines.add("address: \"$it\"") }
+            finalAddressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
             finalLat?.let { frontmatterLines.add("latitude: $it") }
             finalLng?.let { frontmatterLines.add("longitude: $it") }
+            finalInstallDate?.let { frontmatterLines.add("install_date: \"$it\"") }
             frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
             frontmatterLines.add("tags: [jarvis, contact]")
 
@@ -187,10 +202,13 @@ object PeopleController {
 
             val frontmatterLines = mutableListOf("category: $category")
             contact?.phone?.let { frontmatterLines.add("phone: \"$it\"") }
+            contact?.phonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
             contact?.email?.let { frontmatterLines.add("email: \"$it\"") }
             contact?.address?.let { frontmatterLines.add("address: \"$it\"") }
+            contact?.addressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
             contact?.latitude?.let { frontmatterLines.add("latitude: $it") }
             contact?.longitude?.let { frontmatterLines.add("longitude: $it") }
+            contact?.installDate?.let { frontmatterLines.add("install_date: \"$it\"") }
             frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
             frontmatterLines.add("tags: [jarvis, contact]")
 
@@ -260,8 +278,10 @@ object PeopleController {
         val matches = files.mapNotNull { parseContactFile(it) }.filter { c ->
             c.name.lowercase().contains(q) ||
                 (c.phone?.lowercase()?.contains(q) == true) ||
+                (c.phonePro?.lowercase()?.contains(q) == true) ||
                 (c.email?.lowercase()?.contains(q) == true) ||
                 (c.address?.lowercase()?.contains(q) == true) ||
+                (c.addressPro?.lowercase()?.contains(q) == true) ||
                 c.notes.lowercase().contains(q)
         }
 
@@ -332,27 +352,50 @@ object PeopleController {
             .firstOrNull { it.name.lowercase().contains(q) }
     }
 
+    /**
+     * Affiche TOUT ce qui est enregistré sur ce contact, en liste propre avec emojis —
+     * uniquement les champs réellement renseignés (pas de ligne vide/« non renseigné »
+     * pour ne pas alourdir l'affichage), afin que l'utilisateur voie d'un coup d'œil
+     * l'intégralité des informations réellement stockées dans le vault.
+     */
     private fun formatFullDetails(c: ContactNote): String {
         return buildString {
-            append("📇 **${c.name}** (${c.category})\n\n")
-            if (!c.phone.isNullOrBlank()) append("📞 Téléphone : ${c.phone}\n")
+            append("📇 ${c.name} (${categoryLabel(c.category)})\n\n")
+            if (!c.phone.isNullOrBlank()) append("📞 Téléphone perso : ${c.phone}\n")
+            if (!c.phonePro.isNullOrBlank()) append("📱 Téléphone pro : ${c.phonePro}\n")
             if (!c.email.isNullOrBlank()) append("✉️ Email : ${c.email}\n")
-            if (!c.address.isNullOrBlank()) append("📍 Adresse : ${c.address}\n")
+            if (!c.address.isNullOrBlank()) append("🏠 Adresse perso : ${c.address}\n")
+            if (!c.addressPro.isNullOrBlank()) append("🏗️ Adresse pro / chantier : ${c.addressPro}\n")
             if (c.latitude != null && c.longitude != null) append("🌐 GPS : ${c.latitude}, ${c.longitude}\n")
-            if (c.notes.isNotBlank()) append("\n📝 ${c.notes}\n")
+            if (!c.installDate.isNullOrBlank()) append("📆 Date d'installation : ${c.installDate}\n")
+            if (c.notes.isNotBlank()) append("\n📝 Notes : ${c.notes}\n")
             if (c.visits.isNotEmpty()) {
                 append("\n🗓️ Historique des rendez-vous (${c.visits.size}) :\n")
                 c.visits.takeLast(10).forEach { append("   • $it\n") }
             }
+            val hasAnyDetail = !c.phone.isNullOrBlank() || !c.phonePro.isNullOrBlank() || !c.email.isNullOrBlank() ||
+                !c.address.isNullOrBlank() || !c.addressPro.isNullOrBlank() || !c.installDate.isNullOrBlank()
+            if (!hasAnyDetail) append("\nℹ️ Aucune coordonnée enregistrée pour l'instant (juste le nom et la catégorie).\n")
         }.trim()
     }
 
+    private fun categoryLabel(cat: String): String = when (cat) {
+        "travail" -> "travail"
+        "personnel" -> "personnel"
+        "famille" -> "famille"
+        "client" -> "client"
+        else -> "autre"
+    }
+
     private fun appendSummary(sb: StringBuilder, c: ContactNote) {
-        sb.append("• **${c.name}** (${c.category})")
+        sb.append("• ${c.name} (${categoryLabel(c.category)})")
         if (!c.phone.isNullOrBlank()) sb.append(" — 📞 ${c.phone}")
+        if (!c.phonePro.isNullOrBlank()) sb.append(" — 📱 ${c.phonePro}")
         if (!c.email.isNullOrBlank()) sb.append(" — ✉️ ${c.email}")
         sb.append("\n")
-        if (!c.address.isNullOrBlank()) sb.append("   📍 ${c.address}\n")
+        if (!c.address.isNullOrBlank()) sb.append("   🏠 ${c.address}\n")
+        if (!c.addressPro.isNullOrBlank()) sb.append("   🏗️ ${c.addressPro}\n")
+        if (!c.installDate.isNullOrBlank()) sb.append("   📆 Installé le ${c.installDate}\n")
         sb.append("\n")
     }
 }

@@ -27,6 +27,11 @@ object JarvisCommandParser {
     // Actions qui RENVOIENT une information à présenter (l'IA doit reformuler
     // naturellement le résultat). Les autres actions sont des confirmations
     // d'exécution (ex: "SMS envoyé") qui n'ont pas besoin d'être reformulées.
+    // Remarque : search_contact_profile / list_contacts_by_category sont volontairement
+    // ABSENTS de cette liste — les fiches contact Obsidian doivent
+    // s'afficher exactement comme formatées par PeopleController (liste propre avec
+    // emojis), pas reformulées en prose par un second appel IA qui pourrait perdre des
+    // champs ou casser la mise en forme demandée.
     private val INFORMATIONAL_ACTIONS = setOf(
         "list_files", "search_files", "read_file", "storage_info",
         "today_events", "upcoming_events", "search_event", "list_calendars",
@@ -34,8 +39,7 @@ object JarvisCommandParser {
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact",
-        "github_list_repos", "github_read_file",
-        "search_contact_profile", "list_contacts_by_category"
+        "github_list_repos", "github_read_file"
     )
 
     /**
@@ -342,14 +346,18 @@ object JarvisCommandParser {
                 val name = json.optString("name", "")
                 if (name.isBlank()) "❌ Nom du contact manquant."
                 else PeopleController.saveContact(
-                    context, name,
-                    json.optString("category", "autre"),
-                    json.optString("phone", "").ifBlank { null },
-                    json.optString("email", "").ifBlank { null },
-                    json.optString("address", "").ifBlank { null },
-                    if (json.has("latitude")) json.optDouble("latitude") else null,
-                    if (json.has("longitude")) json.optDouble("longitude") else null,
-                    json.optString("notes", "").ifBlank { null }
+                    context = context,
+                    name = name,
+                    category = json.optString("category", "autre"),
+                    phone = json.optString("phone", "").ifBlank { null },
+                    phonePro = json.optString("phonePro", "").ifBlank { null },
+                    email = json.optString("email", "").ifBlank { null },
+                    address = json.optString("address", "").ifBlank { null },
+                    addressPro = json.optString("addressPro", "").ifBlank { null },
+                    latitude = if (json.has("latitude")) json.optDouble("latitude") else null,
+                    longitude = if (json.has("longitude")) json.optDouble("longitude") else null,
+                    installDate = json.optString("installDate", "").ifBlank { null },
+                    notes = json.optString("notes", "").ifBlank { null }
                 )
             }
             "search_contact_profile" -> {
