@@ -782,7 +782,9 @@ object JarvisCommandParser {
                 val title = json.optString("title", "")
                 val content = json.optString("content", "")
                 val name = json.optString("name", "").ifBlank { title }
-                val result = FileGenController.createPdf(title, content, name)
+                val images = mutableListOf<String>()
+                json.optJSONArray("images")?.let { arr -> for (i in 0 until arr.length()) images.add(arr.optString(i)) }
+                val result = FileGenController.createPdf(title, content, name, images)
                 logFileRecord(context, "pdf", name, result.success, result.filePath, result.message)
                 result.message
             }
@@ -790,7 +792,9 @@ object JarvisCommandParser {
                 val title = json.optString("title", "")
                 val content = json.optString("content", "")
                 val name = json.optString("name", "").ifBlank { title }
-                val result = FileGenController.createDocx(title, content, name)
+                val images = mutableListOf<String>()
+                json.optJSONArray("images")?.let { arr -> for (i in 0 until arr.length()) images.add(arr.optString(i)) }
+                val result = FileGenController.createDocx(title, content, name, images)
                 logFileRecord(context, "docx", name, result.success, result.filePath, result.message)
                 result.message
             }

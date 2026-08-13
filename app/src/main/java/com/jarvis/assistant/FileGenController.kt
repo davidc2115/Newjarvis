@@ -1,6 +1,8 @@
 package com.jarvis.assistant
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.os.Environment
@@ -91,8 +93,15 @@ object FileGenController {
      * Génère un PDF réel (texte, paginé automatiquement) via android.graphics.pdf.PdfDocument
      * — l'API PDF intégrée à Android, pas une simulation. Format A4 (595x842 pt).
      */
-    fun createPdf(title: String, content: String, name: String): Result {
-        if (content.isBlank() && title.isBlank()) return Result(false, "❌ Aucun contenu fourni pour le PDF.")
+    fun createPdf(title: String, content: String, name: String, imagePaths: List<String> = emptyList()): Result {
+        if (content.isBlank() && title.isBlank() && imagePaths.isEmpty()) return Result(false, "❌ Aucun contenu fourni pour le PDF.")
+
+        // Permet de composer un PDF à partir d'images déjà générées/existantes sur le
+        // téléphone (ex: "fais-moi un livre avec les images que tu as créées") — chaque
+        // image obtient sa propre page, à la suite du texte. Un chemin introuvable est
+        // signalé plutôt qu'ignoré silencieusement (l'utilisateur doit savoir qu'une image
+        // manque au résultat).
+        val missingImages = imagePaths.filter { !File(it).exists() }
 
         val pageWidth = 595
         val pageHeight = 842
@@ -138,10 +147,40 @@ object FileGenController {
             }
             document.finishPage(page)
 
+            // Une page dédiée par image, mise à l'échelle pour tenir dans la page tout en
+            // conservant ses proportions (pas de déformation).
+            var insertedImages = 0
+            imagePaths.filter { File(it).exists() }.forEach { imgPath ->
+                val bitmap = BitmapFactory.decodeFile(imgPath)
+                if (bitmap != null) {
+                    pageNumber++
+                    val imgPageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+                    val imgPage = document.startPage(imgPageInfo)
+                    val availableW = pageWidth - marginX * 2
+                    val availableH = pageHeight - marginTop - marginBottom
+                    val scale = minOf(availableW / bitmap.width, availableH / bitmap.height)
+                    val drawW = bitmap.width * scale
+                    val drawH = bitmap.height * scale
+                    val left = (pageWidth - drawW) / 2
+                    val top = (pageHeight - drawH) / 2
+                    val destRect = android.graphics.RectF(left, top, left + drawW, top + drawH)
+                    imgPage.canvas.drawBitmap(bitmap, null, destRect, null)
+                    document.finishPage(imgPage)
+                    bitmap.recycle()
+                    insertedImages++
+                }
+            }
+
             val outFile = File(outputDir(), safeFileName(name.ifBlank { title }, "pdf"))
             FileOutputStream(outFile).use { document.writeTo(it) }
             document.close()
-            Result(true, "📄 PDF créé (${pageNumber} page${if (pageNumber > 1) "s" else ""}).\n📁 Enregistré dans : ${outFile.absolutePath}", outFile.absolutePath)
+            val imageNote = when {
+                insertedImages > 0 && missingImages.isEmpty() -> " avec $insertedImages image(s) intégrée(s)"
+                insertedImages > 0 -> " avec $insertedImages image(s) intégrée(s) — introuvable(s) : ${missingImages.joinToString(", ")}"
+                missingImages.isNotEmpty() -> " (⚠️ aucune des images demandées n'a été trouvée : ${missingImages.joinToString(", ")})"
+                else -> ""
+            }
+            Result(true, "📄 PDF créé (${pageNumber} page${if (pageNumber > 1) "s" else ""})$imageNote.\n📁 Enregistré dans : ${outFile.absolutePath}", outFile.absolutePath)
         } catch (e: Exception) {
             try { document.close() } catch (_: Exception) {}
             Result(false, "❌ Échec de la création du PDF : ${e.message}")
@@ -174,8 +213,8 @@ object FileGenController {
      * POI (bibliothèque lourde, mal adaptée à Android) — le résultat s'ouvre
      * normalement dans Word/LibreOffice/Google Docs.
      */
-    fun createDocx(title: String, content: String, name: String): Result {
-        if (content.isBlank() && title.isBlank()) return Result(false, "❌ Aucun contenu fourni pour le document.")
+    fun createDocx(title: String, content: String, name: String, imagePaths: List<String> = emptyList()): Result {
+        if (content.isBlank() && title.isBlank() && imagePaths.isEmpty()) return Result(false, "❌ Aucun contenu fourni pour le document.")
 
         val body = StringBuilder()
         if (title.isNotBlank()) {
@@ -192,17 +231,92 @@ object FileGenController {
             }
         }
 
+        // Intègre réellement les images (pas un simple lien) — chaque image est ajoutée à
+        // l'archive .docx sous word/media/, référencée par relation dans
+        // word/_rels/document.xml.rels, et affichée via un <w:drawing> dans le corps du
+        // document, mise à l'échelle pour ne pas dépasser la largeur de page (~6 pouces
+        // utiles) tout en gardant ses proportions. Permet par exemple de composer un
+        // "livre" DOCX à partir d'images déjà générées par generate_image.
+        val missingImages = imagePaths.filter { !File(it).exists() }
+        val validImages = imagePaths.filter { File(it).exists() }
+        val mediaEntries = mutableListOf<Triple<String, String, ByteArray>>() // (zipPath, extension, bytes)
+        val relationships = StringBuilder()
+        var relIndex = 1
+
+        validImages.forEachIndexed { idx, imgPath ->
+            val bytes = try { File(imgPath).readBytes() } catch (e: Exception) { null } ?: return@forEachIndexed
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(imgPath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@forEachIndexed
+
+            val ext = when (imgPath.substringAfterLast('.', "png").lowercase()) {
+                "jpg", "jpeg" -> "jpeg"
+                else -> "png"
+            }
+            val relId = "rIdImg$relIndex"
+            val mediaPath = "word/media/image$relIndex.$ext"
+            mediaEntries.add(Triple(mediaPath, ext, bytes))
+            relationships.append(
+                "<Relationship Id=\"$relId\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image$relIndex.$ext\"/>"
+            )
+
+            // 914400 EMU par pouce, ~96px/pouce pour une image générée à l'écran — plafonné
+            // à 6x8 pouces utiles (page A4/Letter avec marges) en conservant les proportions.
+            val emuPerPx = 9525.0
+            var cx = bounds.outWidth * emuPerPx
+            var cy = bounds.outHeight * emuPerPx
+            val maxCx = 6.0 * 914400
+            val maxCy = 8.0 * 914400
+            val scale = minOf(1.0, maxCx / cx, maxCy / cy)
+            cx *= scale
+            cy *= scale
+            val cxInt = cx.toLong()
+            val cyInt = cy.toLong()
+
+            body.append(
+                "<w:p><w:r><w:drawing>" +
+                    "<wp:inline xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">" +
+                    "<wp:extent cx=\"$cxInt\" cy=\"$cyInt\"/>" +
+                    "<wp:docPr id=\"${idx + 1}\" name=\"Picture ${idx + 1}\"/>" +
+                    "<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">" +
+                    "<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
+                    "<pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">" +
+                    "<pic:nvPicPr><pic:cNvPr id=\"${idx + 1}\" name=\"Picture ${idx + 1}\"/><pic:cNvPicPr/></pic:nvPicPr>" +
+                    "<pic:blipFill><a:blip r:embed=\"$relId\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" +
+                    "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$cxInt\" cy=\"$cyInt\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>" +
+                    "</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+            )
+            relIndex++
+        }
+
         val documentXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>$body<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr></w:body></w:document>"""
+
+        val documentRelsXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">$relationships</Relationships>"""
 
         val outFile = File(outputDir(), safeFileName(name.ifBlank { title }, "docx"))
         return try {
             ZipOutputStream(FileOutputStream(outFile)).use { zos ->
-                writeZipEntry(zos, "[Content_Types].xml", CONTENT_TYPES_DOCX)
+                writeZipEntry(zos, "[Content_Types].xml", if (mediaEntries.isEmpty()) CONTENT_TYPES_DOCX else CONTENT_TYPES_DOCX_WITH_IMAGES)
                 writeZipEntry(zos, "_rels/.rels", RELS_ROOT_DOCX)
                 writeZipEntry(zos, "word/document.xml", documentXml)
+                if (mediaEntries.isNotEmpty()) {
+                    writeZipEntry(zos, "word/_rels/document.xml.rels", documentRelsXml)
+                    mediaEntries.forEach { (path, _, bytes) ->
+                        zos.putNextEntry(ZipEntry(path))
+                        zos.write(bytes)
+                        zos.closeEntry()
+                    }
+                }
             }
-            Result(true, "📝 Document Word créé.\n📁 Enregistré dans : ${outFile.absolutePath}", outFile.absolutePath)
+            val imageNote = when {
+                mediaEntries.isNotEmpty() && missingImages.isEmpty() -> " avec ${mediaEntries.size} image(s) intégrée(s)"
+                mediaEntries.isNotEmpty() -> " avec ${mediaEntries.size} image(s) intégrée(s) — introuvable(s) : ${missingImages.joinToString(", ")}"
+                missingImages.isNotEmpty() -> " (⚠️ aucune des images demandées n'a été trouvée : ${missingImages.joinToString(", ")})"
+                else -> ""
+            }
+            Result(true, "📝 Document Word créé$imageNote.\n📁 Enregistré dans : ${outFile.absolutePath}", outFile.absolutePath)
         } catch (e: Exception) {
             outFile.delete()
             Result(false, "❌ Échec de la création du document : ${e.message}")
@@ -211,6 +325,9 @@ object FileGenController {
 
     private const val CONTENT_TYPES_DOCX = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"""
+
+    private const val CONTENT_TYPES_DOCX_WITH_IMAGES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"""
 
     private const val RELS_ROOT_DOCX = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"""
