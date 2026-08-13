@@ -1,6 +1,7 @@
 package com.jarvis.assistant
 
 import android.content.Context
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 object JarvisCommandParser {
@@ -146,6 +147,11 @@ object JarvisCommandParser {
                 else CalendarController.nameCalendar(context, calendarRef, nickname)
             }
             "reset_calendar_nicknames" -> CalendarController.resetCalendarNicknames(context)
+            "sync_calendar" -> {
+                val calendarRef = json.optString("calendar", "")
+                if (calendarRef.isBlank()) "❌ Précise quel calendrier synchroniser (nom, compte, ID — voir list_calendars)."
+                else CalendarController.syncCalendar(context, calendarRef, json.optBoolean("enable", true))
+            }
 
             "read_emails" -> EmailController.readInbox(context, json.optInt("count", 5))
             "read_unread_emails" -> EmailController.readUnread(context)
@@ -350,15 +356,15 @@ object JarvisCommandParser {
                     context = context,
                     name = name,
                     category = json.optString("category", "autre"),
-                    phone = json.optString("phone", "").ifBlank { null },
-                    phonePro = json.optString("phonePro", "").ifBlank { null },
-                    email = json.optString("email", "").ifBlank { null },
-                    address = json.optString("address", "").ifBlank { null },
-                    addressPro = json.optString("addressPro", "").ifBlank { null },
+                    phone = cleanOptionalField(json.optString("phone", "")),
+                    phonePro = cleanOptionalField(json.optString("phonePro", "")),
+                    email = cleanOptionalField(json.optString("email", "")),
+                    address = cleanOptionalField(json.optString("address", "")),
+                    addressPro = cleanOptionalField(json.optString("addressPro", "")),
                     latitude = if (json.has("latitude")) json.optDouble("latitude") else null,
                     longitude = if (json.has("longitude")) json.optDouble("longitude") else null,
-                    installDate = json.optString("installDate", "").ifBlank { null },
-                    notes = json.optString("notes", "").ifBlank { null }
+                    installDate = cleanOptionalField(json.optString("installDate", "")),
+                    notes = cleanOptionalField(json.optString("notes", ""))
                 )
             }
             "search_contact_profile" -> {
@@ -395,28 +401,44 @@ object JarvisCommandParser {
             "obsidian_wipe" -> ObsidianController.wipeVault(context)
 
             "generate_image" -> {
-                // L'image reste générée immédiatement (pas en arrière-plan) : c'est le cas le
-                // plus rapide (quelques secondes via Gemini/OpenAI) et JARVIS l'affiche tout de
-                // suite dans le chat. Voir generate_video/generate_website pour le mode différé.
-                // Toujours enregistrée dans l'historique (🎨 Génération) pour rester cohérent
-                // avec les générations lancées en arrière-plan.
                 val prompt = json.optString("prompt", "")
-                val recordId = "${System.currentTimeMillis()}_${(0..9999).random()}"
-                Prefs.addGenerationRecord(
-                    context,
-                    Prefs.GenerationRecord(id = recordId, type = "image", prompt = prompt, status = "pending", timestamp = System.currentTimeMillis())
-                )
-                val result = ImageGenController.generateImage(context, prompt)
-                Prefs.updateGenerationRecord(context, recordId) { record ->
-                    record.copy(
-                        status = if (result.base64 != null) "success" else "failed",
-                        resultPath = result.savedPath,
-                        errorMessage = if (result.base64 == null) result.message else null
-                    )
+                if (prompt.isBlank()) "❌ Aucune description d'image fournie."
+                else {
+                    // On tente l'image en direct (cas rapide, quelques secondes via Gemini/OpenAI)
+                    // pour l'afficher tout de suite dans le chat comme avant — MAIS bornée par un
+                    // délai limite. Avant ce correctif, l'appel tournait sans limite dans la coroutine
+                    // du chat : si un fournisseur traînait (ou si l'utilisateur quittait l'écran, ce
+                    // qui annule la coroutine), l'entrée restait bloquée en "pending" pour toujours,
+                    // SANS aucune notification — contrairement à generate_video/generate_website qui
+                    // passent déjà par GenerationService (service en premier plan avec notification de
+                    // progression). Si ce délai est dépassé, on abandonne proprement cette tentative et
+                    // on relaie vers GenerationService, qui GARANTIT une notification de progression et
+                    // un résultat final (succès ou échec), même app fermée.
+                    val fastResult = withTimeoutOrNull(25_000L) { ImageGenController.generateImage(context, prompt) }
+                    if (fastResult != null) {
+                        val recordId = "${System.currentTimeMillis()}_${(0..9999).random()}"
+                        Prefs.addGenerationRecord(
+                            context,
+                            Prefs.GenerationRecord(
+                                id = recordId,
+                                type = "image",
+                                prompt = prompt,
+                                status = if (fastResult.base64 != null) "success" else "failed",
+                                timestamp = System.currentTimeMillis(),
+                                resultPath = fastResult.savedPath,
+                                errorMessage = if (fastResult.base64 == null) fastResult.message else null
+                            )
+                        )
+                        pendingImageBase64 = fastResult.base64
+                        pendingImageMime = fastResult.mime
+                        fastResult.message
+                    } else {
+                        GenerationService.enqueue(context, "image", prompt)
+                        "🎨 La génération prend plus de temps que prévu (au-delà de 25s) — elle continue en arrière-plan " +
+                            "avec une notification de progression. Tu seras prévenu dès que l'image sera prête (ou en cas d'échec), " +
+                            "visible aussi dans l'onglet 🎨 Génération."
+                    }
                 }
-                pendingImageBase64 = result.base64
-                pendingImageMime = result.mime
-                result.message
             }
             "generate_video" -> {
                 val prompt = json.optString("prompt", "")
@@ -584,6 +606,17 @@ object JarvisCommandParser {
                 if (path.isBlank()) "❌ Chemin de fichier manquant."
                 else FileGenController.openFile(context, path)
             }
+            "print_file" -> {
+                val path = json.optString("path", "")
+                if (path.isBlank()) "❌ Chemin de fichier à imprimer manquant."
+                else PrintController.printFile(context, path, json.optString("printer", "").ifBlank { null }).message
+            }
+            "list_printers" -> PrintController.listPrinters(context)
+            "set_default_printer" -> {
+                val ip = json.optString("ip", "")
+                if (ip.isBlank()) "❌ Adresse IP d'imprimante manquante."
+                else PrintController.setDefaultPrinter(context, ip)
+            }
             "create_zip" -> {
                 val paths = mutableListOf<String>()
                 json.optJSONArray("paths")?.let { arr -> for (i in 0 until arr.length()) paths.add(arr.optString(i)) }
@@ -641,6 +674,21 @@ object JarvisCommandParser {
 
             else -> "❌ Commande système inconnue : « $action »."
         }
+    }
+
+    // Valeurs que l'IA écrit parfois littéralement à la place d'omettre un champ inconnu
+    // (au lieu d'un vrai JSON null) — sans ce filtre, elles s'affichaient telles quelles
+    // plus tard dans la fiche contact (ex: "📞 Téléphone perso : null").
+    private val BLANK_PLACEHOLDER_VALUES = setOf(
+        "null", "n/a", "na", "none", "aucun", "aucune", "non renseigné", "non renseigne", "inconnu", "-", "?"
+    )
+
+    /** Traite un champ texte optionnel venant de l'IA : absence réelle si vide OU si l'IA
+     *  a écrit un texte de substitution du type "null"/"N/A" au lieu d'omettre le champ. */
+    private fun cleanOptionalField(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank() || trimmed.lowercase() in BLANK_PLACEHOLDER_VALUES) return null
+        return trimmed
     }
 
     /** Enregistre un fichier créé (zip/pdf/docx/xlsx) dans l'historique de 🎨 Génération, pour rester cohérent avec les autres types de génération et pouvoir le retrouver plus tard depuis la galerie. */

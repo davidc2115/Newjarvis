@@ -326,6 +326,27 @@ object HomeAssistantController {
                 sb.append("   - ${e.friendlyName} : ${e.state}$unitStr\n")
             }
         }
+
+        // Si une grande partie des entités renvoie "unknown"/"unavailable" alors que
+        // Home Assistant lui-même affiche des valeurs normales, ce n'est presque jamais
+        // un bug de JARVIS : /api/states renvoie fidèlement ce que Home Assistant lui a
+        // répondu à cet instant précis. Cause la plus fréquente et vérifiable : le jeton
+        // d'accès à long terme a été créé depuis un compte UTILISATEUR restreint (pas
+        // administrateur) — Home Assistant peut alors renvoyer un état masqué/non à jour
+        // pour des entités hors des zones autorisées à ce compte, même si l'administrateur
+        // les voit normalement dans sa propre session.
+        val unknownCount = filtered.count { it.state.equals("unknown", true) || it.state.equals("unavailable", true) }
+        if (filtered.isNotEmpty() && unknownCount.toDouble() / filtered.size > 0.4) {
+            sb.append(
+                "\n⚠️ $unknownCount appareil(s) sur ${filtered.size} renvoient un état « unknown »/« unavailable » " +
+                    "alors que Home Assistant les affiche normalement de ton côté. Causes les plus probables, par ordre de fréquence :\n" +
+                    "   1. Le jeton d'accès à long terme utilisé par JARVIS a été créé depuis un compte non-administrateur " +
+                    "(recrée-le depuis Profil → tout en bas → « Jetons d'accès à long terme », en étant connecté avec le compte admin).\n" +
+                    "   2. L'URL configurée (⚙ → Domotique) pointe vers une autre instance/un cache (ex: URL Nabu Casa mise en " +
+                    "cache par un proxy) que celle affichée dans ton navigateur.\n" +
+                    "   3. Home Assistant vient de redémarrer et ces entités n'ont pas encore été repolies (rare si tu viens de vérifier à l'instant).\n"
+            )
+        }
         return sb.toString().trim()
     }
 

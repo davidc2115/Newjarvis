@@ -104,9 +104,15 @@ object PeopleController {
         val frontmatter = parts[0]
         val body = parts.drop(1).joinToString("---").trim()
 
+        // Une IA écrit parfois littéralement "null"/"N/A"/"aucun" dans un champ au lieu de
+        // l'omettre — sans ce filtre, une fiche déjà enregistrée avec ce genre de valeur
+        // continuerait à afficher "Téléphone perso : null" indéfiniment. Traité comme une
+        // vraie absence, au même titre qu'un champ vide.
+        val blankPlaceholders = setOf("null", "n/a", "na", "none", "aucun", "aucune", "non renseigné", "non renseigne", "inconnu", "-", "?")
         fun field(key: String): String? {
             val regex = Regex("^$key:\\s*\"?([^\"\\n]*)\"?\\s*$", RegexOption.MULTILINE)
-            return regex.find(frontmatter)?.groupValues?.get(1)?.trim()?.ifBlank { null }
+            val value = regex.find(frontmatter)?.groupValues?.get(1)?.trim()?.ifBlank { null } ?: return null
+            return if (value.lowercase() in blankPlaceholders) null else value
         }
 
         val bodyWithoutTitle = body.lines().dropWhile { it.startsWith("#") || it.isBlank() }.joinToString("\n").trim()

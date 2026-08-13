@@ -450,6 +450,49 @@ object CalendarController {
     }
 
     /**
+     * Active ou réactive la synchronisation ET la visibilité d'un calendrier directement
+     * via le ContentProvider Android (CalendarContract.Calendars.SYNC_EVENTS / VISIBLE),
+     * sans passer par l'appli Google Agenda. L'app possède déjà la permission WRITE_CALENDAR.
+     * Cible typique : un planning partagé (Skello, calendrier d'équipe...) dont le compte
+     * synchronise bien avec le téléphone, mais dont CE calendrier précis a SYNC_EVENTS=0 —
+     * cause la plus fréquente d'un planning "invisible pour JARVIS mais visible sur le site
+     * Skello / dans Google Agenda web". Écrire directement ce champ évite à l'utilisateur de
+     * devoir chercher le bon réglage caché dans les paramètres de l'appli d'agenda.
+     */
+    fun syncCalendar(context: Context, calendarRef: String, enable: Boolean): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission d'écriture de l'agenda non accordée — active-la dans les paramètres de l'app."
+        }
+        val id = findCalendarId(context, calendarRef)
+            ?: return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les calendriers disponibles."
+
+        return try {
+            val values = ContentValues().apply {
+                put(CalendarContract.Calendars.SYNC_EVENTS, if (enable) 1 else 0)
+                put(CalendarContract.Calendars.VISIBLE, if (enable) 1 else 0)
+            }
+            val uri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id)
+            val rows = context.contentResolver.update(uri, values, null, null)
+            val name = buildCalendarNameMap(context)[id] ?: calendarRef
+            if (rows > 0) {
+                if (enable) {
+                    "✅ Synchronisation activée pour « $name ». Si les événements n'apparaissent pas immédiatement, " +
+                        "cela peut prendre quelques minutes le temps qu'Android resynchronise ce calendrier avec le serveur — " +
+                        "sinon relance simplement today_events ou upcoming_events dans une minute."
+                } else {
+                    "✅ Synchronisation désactivée pour « $name »."
+                }
+            } else {
+                "⚠️ Aucune ligne modifiée — soit le calendrier était déjà dans cet état, soit le compte associé " +
+                    "(${buildCalendarNameMap(context)[id]}) refuse l'écriture directe (certains comptes gérés type " +
+                    "Exchange/Google readonly-sync bloquent ce champ ; dans ce cas, seule l'appli Google Agenda peut le modifier)."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur lors de la modification du calendrier : ${e.message}"
+        }
+    }
+
+    /**
      * Attribue un surnom mémorisable à un calendrier (ex: "Perso", "Boulot"), pour le
      * distinguer facilement. [calendarRef] accepte un ID numérique, un surnom déjà
      * existant, ou un nom affiché / nom de compte (recherche partielle, insensible à

@@ -149,9 +149,81 @@ object VideoGenController {
             } ?: return Result(false, "❌ Vidéo vide reçue depuis Replicate.")
 
             val savedPath = saveVideo(context, videoBytes, prompt)
-            Result(true, "🎬 Vidéo de ${duration}s générée pour « $prompt ».\n📁 Enregistrée dans : $savedPath", savedPath)
+
+            // On ne fait JAMAIS confiance aveuglément à la durée demandée pour le message
+            // affiché : Replicate a déjà été observé accepter le paramètre "duration" sans
+            // erreur tout en renvoyant une vidéo plus courte que demandé (limite réelle du
+            // modèle, pas un bug de l'appli). On mesure donc la durée RÉELLE directement
+            // dans le conteneur MP4 téléchargé (atome mvhd) et on l'affiche à la place —
+            // et on prévient explicitement l'utilisateur si le modèle n'a pas respecté sa demande.
+            val actualDuration = extractMp4DurationSeconds(videoBytes)
+            val message = if (actualDuration != null) {
+                val rounded = Math.round(actualDuration).toInt()
+                if (kotlin.math.abs(actualDuration - duration) > 1.5) {
+                    "🎬 Vidéo générée pour « $prompt » — durée réelle : ${rounded}s (le modèle n'a pas respecté la durée demandée de ${duration}s ; " +
+                        "c'est une limite du modèle « $model » côté Replicate, pas un bug de JARVIS — réessaie ou raccourcis ta demande si besoin).\n📁 Enregistrée dans : $savedPath"
+                } else {
+                    "🎬 Vidéo de ${rounded}s générée pour « $prompt ».\n📁 Enregistrée dans : $savedPath"
+                }
+            } else {
+                "🎬 Vidéo générée pour « $prompt » (durée demandée : ${duration}s, durée réelle non détectable automatiquement).\n📁 Enregistrée dans : $savedPath"
+            }
+            Result(true, message, savedPath)
         } catch (e: Exception) {
             Result(false, "❌ Erreur lors de la génération vidéo : ${e.message}")
+        }
+    }
+
+    /**
+     * Lit la durée réelle d'un fichier MP4 directement depuis son atome "mvhd" (Movie Header
+     * Box), sans dépendance externe (MediaMetadataRetriever nécessiterait un fichier déjà
+     * écrit sur disque ; ici on lit directement les octets déjà en mémoire). Retourne null si
+     * le format n'est pas reconnu plutôt que de faire une supposition fausse.
+     */
+    private fun extractMp4DurationSeconds(bytes: ByteArray): Double? {
+        try {
+            fun u32(off: Int): Long =
+                ((bytes[off].toLong() and 0xFF) shl 24) or ((bytes[off + 1].toLong() and 0xFF) shl 16) or
+                    ((bytes[off + 2].toLong() and 0xFF) shl 8) or (bytes[off + 3].toLong() and 0xFF)
+            fun u64(off: Int): Long {
+                var v = 0L
+                for (i in 0 until 8) v = (v shl 8) or (bytes[off + i].toLong() and 0xFF)
+                return v
+            }
+
+            // Cherche récursivement l'atome "moov" puis "mvhd" à l'intérieur.
+            fun findBox(start: Int, end: Int, type: String): Pair<Int, Int>? {
+                var pos = start
+                while (pos + 8 <= end) {
+                    var size = u32(pos)
+                    val boxType = String(bytes, pos + 4, 4, Charsets.US_ASCII)
+                    var headerSize = 8
+                    if (size == 1L) {
+                        size = u64(pos + 8)
+                        headerSize = 16
+                    }
+                    if (size <= 0) break
+                    if (boxType == type) return Pair(pos + headerSize, (pos + size).toInt())
+                    pos += size.toInt()
+                }
+                return null
+            }
+
+            val moov = findBox(0, bytes.size, "moov") ?: return null
+            val mvhd = findBox(moov.first, moov.second, "mvhd") ?: return null
+            val mvhdStart = mvhd.first
+            val version = bytes[mvhdStart].toInt() and 0xFF
+            return if (version == 1) {
+                val timescale = u32(mvhdStart + 4 + 8 + 8)
+                val duration = u64(mvhdStart + 4 + 8 + 8 + 4)
+                if (timescale == 0L) null else duration.toDouble() / timescale.toDouble()
+            } else {
+                val timescale = u32(mvhdStart + 4 + 4 + 4)
+                val duration = u32(mvhdStart + 4 + 4 + 4 + 4)
+                if (timescale == 0L) null else duration.toDouble() / timescale.toDouble()
+            }
+        } catch (_: Exception) {
+            return null
         }
     }
 

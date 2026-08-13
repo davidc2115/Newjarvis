@@ -419,6 +419,12 @@ class SettingsActivity : AppCompatActivity() {
      * anciennes rangées fixes de pastilles/boutons. Les deux restent synchronisés :
      * changer la couleur met immédiatement à jour l'aperçu live dans le carrousel
      * de styles, puisque chaque carte y affiche une vraie mini-instance d'OrbView.
+     *
+     * IMPORTANT : contrairement au reste de l'écran (qui n'est sauvegardé qu'au clic
+     * sur ENREGISTRER, plus bas et facile à manquer), une sélection ici est enregistrée
+     * IMMÉDIATEMENT — un choix de couleur/style qu'on oublie de "confirmer" via un
+     * bouton lointain est l'explication la plus probable d'un orbe qui semble "ne
+     * jamais changer" alors que le tapotement a bien été pris en compte à l'écran.
      */
     private fun setupColorAndStyleCarousels() {
         selectedAccentColor = Prefs.getAccentColor(this)
@@ -427,6 +433,8 @@ class SettingsActivity : AppCompatActivity() {
         colorCarouselAdapter = ColorCarouselAdapter(this, carouselColors, selectedAccentColor) { color ->
             selectedAccentColor = color
             orbStyleCarouselAdapter.updateAccentColor(color)
+            Prefs.saveAccentColor(this, color)
+            Toast.makeText(this, "✅ Couleur enregistrée — relance le mode vocal pour la voir.", Toast.LENGTH_SHORT).show()
         }
         colorCarousel.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
         colorCarousel.adapter = colorCarouselAdapter
@@ -435,6 +443,8 @@ class SettingsActivity : AppCompatActivity() {
         val styleOptions = listOf("PULSE" to "Orbe pulsante", "NETWORK_SPHERE" to "Sphère réseau")
         orbStyleCarouselAdapter = OrbStyleCarouselAdapter(this, styleOptions, selectedOrbStyle, selectedAccentColor) { styleId ->
             selectedOrbStyle = styleId
+            Prefs.saveOrbStyle(this, styleId)
+            Toast.makeText(this, "✅ Style d'orbe enregistré — relance le mode vocal pour le voir.", Toast.LENGTH_SHORT).show()
         }
         orbStyleCarousel.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
         orbStyleCarousel.adapter = orbStyleCarouselAdapter

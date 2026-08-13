@@ -561,6 +561,18 @@ object Prefs {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // IMPRIMANTE RÉSEAU PAR DÉFAUT (IPP)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** Adresse IP de l'imprimante réseau à utiliser par défaut quand aucune n'est précisée dans la commande. */
+    fun getDefaultPrinterIp(context: Context): String =
+        prefs(context).getString("default_printer_ip", "") ?: ""
+
+    fun saveDefaultPrinterIp(context: Context, ip: String) {
+        prefs(context).edit().putString("default_printer_ip", ip.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // HISTORIQUE DES GÉNÉRATIONS (image / vidéo / site web)
     // ═════════════════════════════════════════════════════════════════════════
 
