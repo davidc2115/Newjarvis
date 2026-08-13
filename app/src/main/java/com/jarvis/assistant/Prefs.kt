@@ -619,6 +619,42 @@ object Prefs {
         writeGenerationHistory(context, getGenerationHistory(context).filter { it.id != id })
     }
 
+    // Au-delà de ce délai, aucune génération ne travaille légitimement encore : la vidéo
+    // est plafonnée à ~3min20 de sondage (MAX_POLL_ATTEMPTS côté VideoGenController), l'image
+    // à 90s de délai réseau max, le site à la durée d'un simple appel de chat. Un enregistrement
+    // encore "pending" après ce délai signifie que GenerationService a été tué par le système
+    // (optimisation de batterie, manque de mémoire, app fermée de force) avant d'avoir pu écrire
+    // un résultat — pas qu'il travaille toujours. Sans cette réconciliation, ces enregistrements
+    // restaient bloqués sur "en cours" indéfiniment, ce qui donnait l'impression d'une boucle
+    // infinie côté utilisateur.
+    private const val STALE_GENERATION_TIMEOUT_MS = 10 * 60 * 1000L
+
+    /**
+     * Marque comme "failed" (avec une cause honnête) tout enregistrement resté "pending"
+     * plus longtemps que ce qu'une génération met légitimement à se terminer. À appeler à
+     * chaque ouverture/rafraîchissement de l'écran Génération. Retourne true si au moins un
+     * enregistrement a été corrigé.
+     */
+    fun reconcileStaleGenerations(context: Context): Boolean {
+        val now = System.currentTimeMillis()
+        var changed = false
+        val list = getGenerationHistory(context).map { record ->
+            if (record.status == "pending" && now - record.timestamp > STALE_GENERATION_TIMEOUT_MS) {
+                changed = true
+                record.copy(
+                    status = "failed",
+                    errorMessage = "Interrompue : le service a été arrêté par le système avant la fin " +
+                        "(optimisation de batterie, manque de mémoire, ou application fermée de force), " +
+                        "sans message d'erreur explicite du moteur de génération. Réessaie ; si ça se " +
+                        "reproduit souvent, désactive l'optimisation de batterie pour JARVIS dans les " +
+                        "réglages système Android."
+                )
+            } else record
+        }
+        if (changed) writeGenerationHistory(context, list)
+        return changed
+    }
+
     private fun writeGenerationHistory(context: Context, list: List<GenerationRecord>) {
         val arr = JSONArray()
         list.forEach { arr.put(it.toJson()) }

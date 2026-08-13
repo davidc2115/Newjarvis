@@ -312,6 +312,85 @@ object NetworkController {
         return InetAddress.getByName("255.255.255.255")
     }
 
+    // Ports qui servent effectivement une interface web consultable dans un navigateur
+    // (contrairement à 9100, port d'impression brut sans interface HTTP).
+    private val WEB_PORTS = listOf(443, 80, 8080, 631)
+
+    /** Meilleure URL web devinée pour un appareil, ou null si aucun port web n'est ouvert. */
+    fun guessWebUrl(device: Device): String? {
+        val port = WEB_PORTS.firstOrNull { device.openPorts.contains(it) } ?: return null
+        val scheme = if (port == 443) "https" else "http"
+        val portSuffix = if (port == 80 || port == 443) "" else ":$port"
+        return "$scheme://${device.ip}$portSuffix"
+    }
+
+    /**
+     * Retrouve l'IP d'un appareil à partir d'un nom (recherche insensible à la casse
+     * dans les appareils déjà scannés/enregistrés) ou directement d'une IP fournie.
+     */
+    private fun resolveDeviceIp(context: Context, query: String): String? {
+        val q = query.trim()
+        if (q.isBlank()) return null
+        // L'utilisateur a peut-être donné directement une IP.
+        if (Regex("""^\d{1,3}(\.\d{1,3}){3}$""").matches(q)) return q
+        val saved = Prefs.getSavedNetworkDevices(context)
+        return saved.firstOrNull { it.name.equals(q, ignoreCase = true) && it.ip.isNotBlank() }?.ip
+            ?: saved.firstOrNull { it.name.contains(q, ignoreCase = true) && it.ip.isNotBlank() }?.ip
+    }
+
+    /**
+     * "Ping" applicatif d'un appareil précis (par nom déjà connu ou IP directe) : reteste
+     * sa joignabilité et ses ports ouverts EN DIRECT (contrairement au scan complet, ne
+     * sonde qu'un seul hôte donc quasi instantané). Utilisé pour la commande vocale/chat
+     * "ping l'imprimante" ou "est-ce que le NAS répond".
+     */
+    suspend fun pingDevice(context: Context, query: String): String = withContext(Dispatchers.IO) {
+        val ip = resolveDeviceIp(context, query)
+            ?: return@withContext "❌ Aucun appareil connu pour « $query ». Lance d'abord un scan réseau (📡 Réseau local) pour qu'il soit repéré."
+
+        val start = System.currentTimeMillis()
+        val portResults = PROBE_PORTS.map { port -> async { port to isPortOpen(ip, port) } }.awaitAll()
+        val elapsedMs = System.currentTimeMillis() - start
+        val openPorts = portResults.filter { it.second }.map { it.first }
+        val reachable = openPorts.isNotEmpty() || isIcmpReachable(ip)
+
+        if (!reachable) {
+            return@withContext "❌ « $query » ($ip) ne répond pas — éteint, hors de portée Wi-Fi, ou pare-feu qui bloque le sondage."
+        }
+
+        val device = Device(ip = ip, openPorts = openPorts)
+        val webPart = guessWebUrl(device)?.let { "\n🌐 Interface web disponible : $it" } ?: ""
+        val portsPart = if (openPorts.isNotEmpty()) "\n🔓 Ports ouverts : ${openPorts.joinToString(", ")}" else ""
+        "✅ « $query » ($ip) répond en ${elapsedMs}ms — ${device.guessedType}.$portsPart$webPart"
+    }
+
+    /**
+     * Ouvre l'interface web d'un appareil (nom connu ou IP) dans le navigateur du
+     * téléphone, si un port web est détecté. Reteste en direct plutôt que de se fier à
+     * un ancien scan, au cas où l'appareil aurait changé d'état depuis.
+     */
+    suspend fun openWebInterface(context: Context, query: String): String {
+        val ip = resolveDeviceIp(context, query)
+            ?: return "❌ Aucun appareil connu pour « $query ». Lance d'abord un scan réseau (📡 Réseau local) pour qu'il soit repéré."
+
+        val openPorts = withContext(Dispatchers.IO) {
+            WEB_PORTS.map { port -> async { port to isPortOpen(ip, port) } }.awaitAll()
+        }.filter { it.second }.map { it.first }
+
+        val url = guessWebUrl(Device(ip = ip, openPorts = openPorts))
+            ?: return "❌ « $query » ($ip) ne semble pas exposer d'interface web accessible (aucun des ports 80/443/8080/631 n'est ouvert). Pour une imprimante, vérifie que le serveur web intégré est activé dans ses réglages."
+
+        return try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            "🌐 Ouverture de l'interface web de « $query » : $url"
+        } catch (e: Exception) {
+            "❌ Impossible d'ouvrir le navigateur : ${e.message}"
+        }
+    }
+
     /** Formatte les résultats d'un scan pour la voix / le chat IA. */
     fun formatScanResult(devices: List<Device>): String {
         if (devices.isEmpty()) return "📡 Aucun appareil détecté sur le réseau local (ou le balayage a échoué)."

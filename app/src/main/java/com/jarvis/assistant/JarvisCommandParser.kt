@@ -519,6 +519,16 @@ object JarvisCommandParser {
                 Prefs.saveScannedDevices(context, devices)
                 NetworkController.formatScanResult(devices)
             }
+            "network_ping" -> {
+                val device = json.optString("device", "").ifBlank { json.optString("name", "") }
+                if (device.isBlank()) "❌ Précise le nom ou l'IP de l'appareil à tester."
+                else NetworkController.pingDevice(context, device)
+            }
+            "network_open_web" -> {
+                val device = json.optString("device", "").ifBlank { json.optString("name", "") }
+                if (device.isBlank()) "❌ Précise le nom ou l'IP de l'appareil dont ouvrir l'interface web."
+                else NetworkController.openWebInterface(context, device)
+            }
 
             "freebox_list" -> {
                 val path = json.optString("path", "/")

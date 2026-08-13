@@ -179,6 +179,10 @@ class GenerationActivity : AppCompatActivity() {
      * résultat (image/vidéo/site) et, pour un site, propose aussi de le modifier.
      */
     private fun refreshHistory() {
+        // Corrige les générations restées bloquées sur "pending" parce que le service a
+        // été tué par le système avant de pouvoir écrire un résultat (sinon elles restent
+        // affichées "en cours" indéfiniment, sans jamais aboutir ni échouer explicitement).
+        Prefs.reconcileStaleGenerations(this)
         val history = Prefs.getGenerationHistory(this)
         updateActiveGenCard(history)
         historyContainer.removeAllViews()
