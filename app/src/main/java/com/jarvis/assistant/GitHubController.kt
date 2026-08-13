@@ -96,6 +96,41 @@ object GitHubController {
         }
     }
 
+    data class RepoInfo(val owner: String, val name: String, val isPrivate: Boolean) {
+        val fullName: String get() = "$owner/$name"
+    }
+
+    /**
+     * Version structurée de listRepos — utilisée par l'écran GitHub pour construire un
+     * sélecteur de dépôts CLIQUABLE (demandé explicitement à la place de la saisie manuelle
+     * du propriétaire/nom du dépôt). Renvoie une liste vide en cas d'échec (pas de compte,
+     * erreur réseau...) plutôt que de faire planter l'appelant — l'écran affiche alors un
+     * message adapté via listRepos (la version texte) pour connaître la cause exacte.
+     */
+    suspend fun listReposStructured(context: Context, accountLabel: String = ""): List<RepoInfo> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val builder = authBuilder(context, "https://api.github.com/user/repos?sort=updated&per_page=30", accountLabel)
+                ?: return@withContext emptyList()
+            try {
+                client.newCall(builder.get().build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext emptyList()
+                    val body = resp.body?.string() ?: return@withContext emptyList()
+                    val arr = JSONArray(body)
+                    (0 until arr.length()).map { i ->
+                        val repo = arr.getJSONObject(i)
+                        val fullName = repo.optString("full_name")
+                        RepoInfo(
+                            owner = fullName.substringBefore("/", ""),
+                            name = fullName.substringAfter("/", fullName),
+                            isPrivate = repo.optBoolean("private")
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+
     fun createRepo(context: Context, name: String, description: String, isPrivate: Boolean, accountLabel: String = ""): String {
         val builder = authBuilder(context, "https://api.github.com/user/repos", accountLabel)
             ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
@@ -118,43 +153,65 @@ object GitHubController {
         }
     }
 
+    sealed class ContentsResult {
+        data class Success(val folders: List<String>, val files: List<Pair<String, Long>>) : ContentsResult()
+        data class NotADirectory(val path: String, val sizeBytes: Long) : ContentsResult()
+        data class Error(val message: String) : ContentsResult()
+    }
+
+    /**
+     * Version structurée de listContents — utilisée par l'écran GitHub pour construire un
+     * navigateur de dossiers CLIQUABLE (demandé explicitement à la place de la saisie
+     * manuelle du chemin). listContents (texte) réutilise cette fonction pour ne pas
+     * dupliquer l'appel réseau/parsing à deux endroits.
+     */
+    suspend fun listContentsStructured(context: Context, owner: String, repo: String, path: String, branch: String, accountLabel: String = ""): ContentsResult =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val cleanPath = path.trim().trim('/')
+            val url = "https://api.github.com/repos/$owner/$repo/contents/$cleanPath?ref=$branch"
+            val builder = authBuilder(context, url, accountLabel)
+                ?: return@withContext ContentsResult.Error(if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel))
+            try {
+                client.newCall(builder.get().build()).execute().use { resp ->
+                    val body = resp.body?.string() ?: ""
+                    if (!resp.isSuccessful) return@withContext ContentsResult.Error("❌ Impossible de lister « ${cleanPath.ifBlank { "/" }} » (${resp.code}) : $body")
+                    val trimmedBody = body.trim()
+                    if (!trimmedBody.startsWith("[")) {
+                        val obj = JSONObject(trimmedBody)
+                        return@withContext ContentsResult.NotADirectory(obj.optString("path"), obj.optLong("size"))
+                    }
+                    val arr = JSONArray(trimmedBody)
+                    val folders = mutableListOf<String>()
+                    val files = mutableListOf<Pair<String, Long>>()
+                    for (i in 0 until arr.length()) {
+                        val item = arr.getJSONObject(i)
+                        if (item.optString("type") == "dir") folders.add(item.optString("name"))
+                        else files.add(item.optString("name") to item.optLong("size"))
+                    }
+                    ContentsResult.Success(folders.sorted(), files.sortedBy { it.first })
+                }
+            } catch (e: Exception) {
+                ContentsResult.Error("❌ Erreur réseau : ${e.message}")
+            }
+        }
+
     /**
      * Liste le contenu d'un dossier d'un dépôt (racine si [path] est vide) — distingue
      * fichiers et sous-dossiers, avec leur taille pour les fichiers. C'est ce qui permet
      * de "voir le dépôt en direct" depuis JARVIS sans connaître déjà les chemins exacts.
      */
-    fun listContents(context: Context, owner: String, repo: String, path: String, branch: String, accountLabel: String = ""): String {
+    suspend fun listContents(context: Context, owner: String, repo: String, path: String, branch: String, accountLabel: String = ""): String {
         val cleanPath = path.trim().trim('/')
-        val url = "https://api.github.com/repos/$owner/$repo/contents/$cleanPath?ref=$branch"
-        val builder = authBuilder(context, url, accountLabel)
-            ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
-        return try {
-            client.newCall(builder.get().build()).execute().use { resp ->
-                val body = resp.body?.string() ?: ""
-                if (!resp.isSuccessful) return "❌ Impossible de lister « ${cleanPath.ifBlank { "/" }} » (${resp.code}) : $body"
-                val trimmedBody = body.trim()
-                if (!trimmedBody.startsWith("[")) {
-                    // Le chemin pointe vers un fichier, pas un dossier — l'API renvoie un objet unique.
-                    val obj = JSONObject(trimmedBody)
-                    return "📄 « ${obj.optString("path")} » est un fichier (${obj.optLong("size")} octets), pas un dossier. " +
-                        "Utilise github_read_file pour le lire."
-                }
-                val arr = JSONArray(trimmedBody)
-                if (arr.length() == 0) return "📂 « ${cleanPath.ifBlank { "/" }} » est vide."
-                val folders = mutableListOf<String>()
-                val files = mutableListOf<Pair<String, Long>>()
-                for (i in 0 until arr.length()) {
-                    val item = arr.getJSONObject(i)
-                    if (item.optString("type") == "dir") folders.add(item.optString("name"))
-                    else files.add(item.optString("name") to item.optLong("size"))
-                }
+        return when (val result = listContentsStructured(context, owner, repo, path, branch, accountLabel)) {
+            is ContentsResult.Error -> result.message
+            is ContentsResult.NotADirectory -> "📄 « ${result.path} » est un fichier (${result.sizeBytes} octets), pas un dossier. Utilise github_read_file pour le lire."
+            is ContentsResult.Success -> {
+                if (result.folders.isEmpty() && result.files.isEmpty()) return "📂 « ${cleanPath.ifBlank { "/" }} » est vide."
                 val sb = StringBuilder("📂 **$owner/$repo${if (cleanPath.isNotBlank()) "/$cleanPath" else ""}** (branche $branch) :\n\n")
-                folders.sorted().forEach { sb.append("📁 $it/\n") }
-                files.sortedBy { it.first }.forEach { (n, size) -> sb.append("📄 $n (${size} octets)\n") }
+                result.folders.forEach { sb.append("📁 $it/\n") }
+                result.files.forEach { (n, size) -> sb.append("📄 $n (${size} octets)\n") }
                 sb.toString().trim()
             }
-        } catch (e: Exception) {
-            "❌ Erreur réseau : ${e.message}"
         }
     }
 

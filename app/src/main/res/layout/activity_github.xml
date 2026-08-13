@@ -208,6 +208,17 @@
                 android:textSize="13sp"
                 android:lineSpacingExtra="3dp"
                 android:visibility="gone"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Sélecteur de dépôt cliquable — rempli dynamiquement par GitHubActivity à
+                 partir de GitHubController.listReposStructured(). Taper un dépôt remplit
+                 automatiquement propriétaire/nom ci-dessous ET ouvre sa racine. -->
+            <LinearLayout
+                android:id="@+id/reposListContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
                 android:layout_marginBottom="24dp" />
 
             <View
@@ -317,6 +328,17 @@
                 android:textColor="@color/text_primary"
                 android:textSize="13sp"
                 android:lineSpacingExtra="3dp"
+                android:visibility="gone"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Navigateur de dossiers cliquable — rempli dynamiquement par GitHubActivity.
+                 Taper un dossier y entre (met à jour le chemin + reparcourt), taper un
+                 fichier remplit le champ chemin ci-dessus (utile pour le supprimer). -->
+            <LinearLayout
+                android:id="@+id/browseListContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
                 android:visibility="gone"
                 android:layout_marginBottom="16dp" />
 

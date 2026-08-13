@@ -279,6 +279,27 @@ class SettingsActivity : AppCompatActivity() {
         picovoiceKeyInput.setText(Prefs.getPicovoiceKey(this))
         updateWakeWordButtonLabel(toggleWakeWordButton)
 
+        // ── Accès SMB (voir SmbController) — demandé explicitement, absent des Paramètres
+        // jusqu'ici (seule la commande chat smb_configure existait pour le régler).
+        val smbHostInput     = findViewById<EditText>(R.id.smbHostInput)
+        val smbUsernameInput = findViewById<EditText>(R.id.smbUsernameInput)
+        val smbPasswordInput = findViewById<EditText>(R.id.smbPasswordInput)
+        val saveSmbButton    = findViewById<TextView>(R.id.saveSmbButton)
+
+        smbHostInput.setText(Prefs.getSmbHost(this))
+        smbUsernameInput.setText(Prefs.getSmbUsername(this))
+        smbPasswordInput.setText(Prefs.getSmbPassword(this))
+
+        saveSmbButton.setOnClickListener {
+            val message = SmbController.configure(
+                this,
+                smbHostInput.text.toString().trim(),
+                smbUsernameInput.text.toString().trim(),
+                smbPasswordInput.text.toString()
+            )
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        }
+
         // ── Cartes dynamiques de modèles ──────────────────────────────────────
         modelCardsContainer.removeAllViews()
         ModelDownloader.MODEL_CATALOG.forEachIndexed { index, entry ->

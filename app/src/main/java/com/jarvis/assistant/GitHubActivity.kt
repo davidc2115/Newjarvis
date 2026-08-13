@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.os.Bundle
 import android.view.View
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -18,12 +19,16 @@ class GitHubActivity : AppCompatActivity() {
     private lateinit var accountLabelInput: EditText
     private lateinit var accountTokenInput: EditText
 
+    private lateinit var reposResultText: TextView
+    private lateinit var reposListContainer: LinearLayout
+
     private lateinit var browseOwnerInput: EditText
     private lateinit var browseRepoInput: EditText
     private lateinit var browseBranchInput: EditText
     private lateinit var browsePathInput: EditText
     private lateinit var browseAccountInput: EditText
     private lateinit var browseResultText: TextView
+    private lateinit var browseListContainer: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,7 +41,8 @@ class GitHubActivity : AppCompatActivity() {
         val githubTokenInput = findViewById<EditText>(R.id.githubTokenInput)
         val saveGithubTokenButton = findViewById<TextView>(R.id.saveGithubTokenButton)
         val listReposButton = findViewById<TextView>(R.id.listReposButton)
-        val reposResultText = findViewById<TextView>(R.id.reposResultText)
+        reposResultText = findViewById(R.id.reposResultText)
+        reposListContainer = findViewById(R.id.reposListContainer)
         val newRepoNameInput = findViewById<EditText>(R.id.newRepoNameInput)
         val newRepoDescInput = findViewById<EditText>(R.id.newRepoDescInput)
         val createRepoButton = findViewById<TextView>(R.id.createRepoButton)
@@ -55,6 +61,7 @@ class GitHubActivity : AppCompatActivity() {
         browseAccountInput = findViewById(R.id.browseAccountInput)
         val browseButton = findViewById<TextView>(R.id.browseButton)
         browseResultText = findViewById(R.id.browseResultText)
+        browseListContainer = findViewById(R.id.browseListContainer)
         val deleteFileButton = findViewById<TextView>(R.id.deleteFileButton)
         val deleteFolderButton = findViewById<TextView>(R.id.deleteFolderButton)
         val deleteRepoButton = findViewById<TextView>(R.id.deleteRepoButton)
@@ -115,15 +122,39 @@ class GitHubActivity : AppCompatActivity() {
                 .show()
         }
 
-        // ─── Liste des dépôts ───────────────────────────────────────────────
+        // ─── Liste des dépôts (sélecteur cliquable) ──────────────────────────
+        // Demandé explicitement : plus besoin de taper le propriétaire/nom du dépôt à la
+        // main — on liste les dépôts réels du compte et taper l'un d'eux remplit les champs
+        // ET ouvre directement sa racine.
         listReposButton.setOnClickListener {
+            reposListContainer.removeAllViews()
+            reposListContainer.visibility = View.GONE
             reposResultText.visibility = View.VISIBLE
             reposResultText.text = "Chargement…"
+            val account = browseAccountInput.text.toString().trim()
             CoroutineScope(Dispatchers.Main).launch {
-                val result = withContext(Dispatchers.IO) {
-                    GitHubController.listRepos(this@GitHubActivity, browseAccountInput.text.toString().trim())
+                val repos = GitHubController.listReposStructured(this@GitHubActivity, account)
+                if (repos.isEmpty()) {
+                    // Repli sur la version texte pour connaître la VRAIE cause (pas de
+                    // compte, erreur réseau, ou simplement aucun dépôt) plutôt que
+                    // d'afficher silencieusement une liste vide sans explication.
+                    val message = withContext(Dispatchers.IO) {
+                        GitHubController.listRepos(this@GitHubActivity, account)
+                    }
+                    reposResultText.text = message
+                    return@launch
                 }
-                reposResultText.text = result
+                reposResultText.visibility = View.GONE
+                reposListContainer.visibility = View.VISIBLE
+                repos.forEach { repo ->
+                    val visibility = if (repo.isPrivate) "privé" else "public"
+                    addClickableRow(reposListContainer, "📦 ${repo.fullName} ($visibility)") {
+                        browseOwnerInput.setText(repo.owner)
+                        browseRepoInput.setText(repo.name)
+                        browsePathInput.setText("")
+                        browseCurrentPath()
+                    }
+                }
             }
         }
 
@@ -246,15 +277,75 @@ class GitHubActivity : AppCompatActivity() {
         return BrowseFields(owner, repo, branch, path, account)
     }
 
+    /**
+     * Navigateur de dossiers CLIQUABLE — demandé explicitement à la place de la saisie
+     * manuelle du chemin. Un dossier tapé y entre (met à jour browsePathInput et reparcourt),
+     * un fichier tapé remplit juste browsePathInput (utile pour ensuite le supprimer via
+     * deleteFileButton) sans tenter de le "parcourir".
+     */
     private fun browseCurrentPath() {
         val fields = readBrowseFields() ?: return
+        browseListContainer.removeAllViews()
+        browseListContainer.visibility = View.GONE
         browseResultText.visibility = View.VISIBLE
         browseResultText.text = "Chargement…"
         CoroutineScope(Dispatchers.Main).launch {
-            val result = withContext(Dispatchers.IO) {
-                GitHubController.listContents(this@GitHubActivity, fields.owner, fields.repo, fields.path, fields.branch, fields.account)
+            when (val result = GitHubController.listContentsStructured(this@GitHubActivity, fields.owner, fields.repo, fields.path, fields.branch, fields.account)) {
+                is GitHubController.ContentsResult.Error -> {
+                    browseResultText.text = result.message
+                }
+                is GitHubController.ContentsResult.NotADirectory -> {
+                    browseResultText.text = "📄 « ${result.path} » est un fichier (${result.sizeBytes} octets), pas un dossier — utilise SUPPRIMER LE FICHIER ci-dessous si besoin, ou remonte d'un niveau."
+                }
+                is GitHubController.ContentsResult.Success -> {
+                    if (result.folders.isEmpty() && result.files.isEmpty()) {
+                        browseResultText.text = "📂 « ${fields.path.ifBlank { "/" }} » est vide."
+                        return@launch
+                    }
+                    browseResultText.visibility = View.GONE
+                    browseListContainer.visibility = View.VISIBLE
+
+                    if (fields.path.isNotBlank()) {
+                        addClickableRow(browseListContainer, "⬆ .. (remonter d'un niveau)") {
+                            browsePathInput.setText(fields.path.trim('/').substringBeforeLast('/', ""))
+                            browseCurrentPath()
+                        }
+                    }
+                    result.folders.forEach { name ->
+                        addClickableRow(browseListContainer, "📁 $name/") {
+                            val newPath = if (fields.path.isBlank()) name else "${fields.path.trim('/')}/$name"
+                            browsePathInput.setText(newPath)
+                            browseCurrentPath()
+                        }
+                    }
+                    result.files.forEach { (name, size) ->
+                        addClickableRow(browseListContainer, "📄 $name ($size octets)") {
+                            val newPath = if (fields.path.isBlank()) name else "${fields.path.trim('/')}/$name"
+                            browsePathInput.setText(newPath)
+                            Toast.makeText(this@GitHubActivity, "Chemin rempli : $newPath — utilise SUPPRIMER LE FICHIER si besoin.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             }
-            browseResultText.text = result
         }
+    }
+
+    /** Ajoute une ligne cliquable au style de l'écran (même fond que les boutons secondaires). */
+    private fun addClickableRow(container: LinearLayout, text: String, onClick: () -> Unit) {
+        val row = TextView(this).apply {
+            this.text = text
+            setTextColor(getColor(R.color.text_primary))
+            textSize = 13f
+            setPadding(28, 24, 28, 24)
+            background = getDrawable(R.drawable.bg_input)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.bottomMargin = 8 }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+        container.addView(row)
     }
 }
