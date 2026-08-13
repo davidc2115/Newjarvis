@@ -285,24 +285,42 @@ object HomeAssistantController {
         return sb.toString().trim()
     }
 
-    /** Formatte la liste des entités en texte lisible pour l'IA / la voix. */
-    fun summarize(context: Context, filter: String = ""): String {
+    /**
+     * Formatte la liste des entités en texte lisible pour l'IA / la voix.
+     *
+     * @param filter Filtre par nom (ex: le prénom d'une personne) — sous-chaîne insensible à la casse.
+     * @param domain Filtre par domaine HA exact (ex: "person" pour ne récupérer QUE la localisation,
+     *   "sensor" pour ne récupérer QUE les capteurs). Laisser vide pour ne pas filtrer par domaine.
+     *
+     * IMPORTANT : sans filtre de domaine, une recherche par nom seul (ex: "Marie") remonte TOUTES
+     * les entités dont le nom contient "Marie" — l'entité de localisation (person.marie) MAIS AUSSI
+     * d'éventuels capteurs annexes (batterie du téléphone, nombre de pas, etc.) si Home Assistant les
+     * nomme avec le même prénom. Pour répondre précisément à une question ciblée ("où est Marie ?"),
+     * il faut préciser domain="person" afin de n'obtenir QUE l'information demandée.
+     */
+    fun summarize(context: Context, filter: String = "", domain: String = ""): String {
         if (!isConfigured(context)) {
             return "❌ Home Assistant n'est pas configuré. Va dans ⚙ → Domotique pour renseigner l'URL et le jeton d'accès."
         }
         val entities = getAllEntities(context)
         if (entities.isEmpty()) return "❌ Aucune entité récupérée depuis Home Assistant (vérifie la connexion)."
 
-        val filtered = if (filter.isBlank()) entities else entities.filter {
-            it.friendlyName.lowercase().contains(filter.lowercase()) ||
-                it.domain.lowercase().contains(filter.lowercase())
+        val byDomainFirst = if (domain.isBlank()) entities else entities.filter {
+            it.domain.equals(domain.trim(), ignoreCase = true)
         }
-        if (filtered.isEmpty()) return "🏠 Aucun appareil Home Assistant ne correspond à « $filter »."
+        val filtered = if (filter.isBlank()) byDomainFirst else byDomainFirst.filter {
+            it.friendlyName.lowercase().contains(filter.lowercase()) ||
+                (domain.isBlank() && it.domain.lowercase().contains(filter.lowercase()))
+        }
+        if (filtered.isEmpty()) {
+            val quoi = listOfNotNull(filter.takeIf { it.isNotBlank() }, domain.takeIf { it.isNotBlank() }).joinToString(" / ")
+            return "🏠 Aucun appareil Home Assistant ne correspond à « $quoi »."
+        }
 
         val byDomain = filtered.groupBy { it.domain }
         val sb = StringBuilder("🏠 **Maison connectée** :\n\n")
-        byDomain.forEach { (domain, list) ->
-            sb.append("• ${domainLabel(domain)} :\n")
+        byDomain.forEach { (d, list) ->
+            sb.append("• ${domainLabel(d)} :\n")
             list.take(20).forEach { e ->
                 val unitStr = e.unit?.let { " $it" } ?: ""
                 sb.append("   - ${e.friendlyName} : ${e.state}$unitStr\n")

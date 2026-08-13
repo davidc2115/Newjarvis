@@ -69,6 +69,12 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         tts = TextToSpeech(this, this)
 
+        // Le mode vocal a besoin du micro en exclusivité — l'écoute permanente en
+        // arrière-plan (Porcupine/openWakeWord) est mise en pause tant que cet écran
+        // est ouvert, sinon les deux se disputent le même flux audio et aucune parole
+        // n'est plus captée nulle part (chat, mode vocal, écoute permanente incluse).
+        WakeWordService.pauseListening(this)
+
         closeButton.setOnClickListener {
             stopSpeechAndTts()
             finish()
@@ -232,6 +238,9 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             speechRecognizer?.destroy()
             tts?.shutdown()
         } catch (_: Exception) {}
+        // Rend le micro à l'écoute permanente en arrière-plan maintenant que le mode
+        // vocal manuel n'en a plus besoin.
+        WakeWordService.resumeListening(this)
         super.onDestroy()
     }
 }

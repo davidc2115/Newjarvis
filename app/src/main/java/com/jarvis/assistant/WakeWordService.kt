@@ -72,6 +72,28 @@ class WakeWordService : Service() {
         const val CHANNEL_ID = "jarvis_wakeword_channel"
         const val NOTIFICATION_ID = 4242
         const val ACTION_STOP = "com.jarvis.assistant.STOP_WAKEWORD"
+        const val ACTION_PAUSE = "com.jarvis.assistant.PAUSE_WAKEWORD"
+        const val ACTION_RESUME = "com.jarvis.assistant.RESUME_WAKEWORD"
+
+        /**
+         * À appeler par TOUT autre composant qui a besoin du micro (mode vocal manuel,
+         * déclenché par le bouton micro OU par le mot-clé) : libère temporairement le
+         * micro tenu par l'écoute permanente en arrière-plan. Android ne permet qu'UNE
+         * seule capture audio active à la fois — sans cette mise en pause, l'écoute
+         * permanente (Porcupine ou openWakeWord) continue de monopoliser le micro et
+         * aucune autre fonctionnalité vocale (chat, mode vocal) ne reçoit plus le
+         * moindre son, même en parlant normalement.
+         */
+        fun pauseListening(context: Context) {
+            if (!Prefs.isWakeWordEnabled(context)) return
+            context.startService(Intent(context, WakeWordService::class.java).apply { action = ACTION_PAUSE })
+        }
+
+        /** Reprend l'écoute permanente après la mise en pause ci-dessus. */
+        fun resumeListening(context: Context) {
+            if (!Prefs.isWakeWordEnabled(context)) return
+            context.startService(Intent(context, WakeWordService::class.java).apply { action = ACTION_RESUME })
+        }
 
         /** Mots-clés intégrés Porcupine (moteur 1 — nécessite une clé Picovoice). */
         private val BUILT_IN_KEYWORDS = mapOf(
@@ -109,18 +131,36 @@ class WakeWordService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopListening()
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopListening()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_PAUSE -> {
+                // Un composant obligatoire (Service au premier plan) doit toujours appeler
+                // startForeground rapidement après un startService — on le fait même ici,
+                // en mode pause, pour rester valide vis-à-vis d'Android.
+                startForeground(NOTIFICATION_ID, buildNotification("⏸ en pause — micro utilisé ailleurs (chat/mode vocal)"))
+                stopPorcupine()
+                stopOpenWakeWord()
+                return START_STICKY
+            }
+            ACTION_RESUME -> {
+                startForeground(NOTIFICATION_ID, buildNotification(""))
+                isRunning = true
+                startBestAvailableEngine()
+                return START_STICKY
+            }
+            else -> {
+                startForeground(NOTIFICATION_ID, buildNotification(""))
+                if (!isRunning) {
+                    isRunning = true
+                    startBestAvailableEngine()
+                }
+                return START_STICKY
+            }
         }
-
-        startForeground(NOTIFICATION_ID, buildNotification(""))
-        if (!isRunning) {
-            isRunning = true
-            startBestAvailableEngine()
-        }
-        return START_STICKY
     }
 
     override fun onBind(intent: Intent?) = null

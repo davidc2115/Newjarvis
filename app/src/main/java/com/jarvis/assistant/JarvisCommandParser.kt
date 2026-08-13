@@ -455,7 +455,7 @@ object JarvisCommandParser {
                 }
             }
 
-            "ha_status" -> HomeAssistantController.summarize(context, json.optString("filter", ""))
+            "ha_status" -> HomeAssistantController.summarize(context, json.optString("filter", ""), json.optString("domain", ""))
             "ha_turn_on" -> {
                 val name = json.optString("device", "").ifBlank { json.optString("name", "") }
                 val entity = HomeAssistantController.findEntity(context, name)
@@ -488,7 +488,7 @@ object JarvisCommandParser {
                 if (entity == null) "❌ Aucun appareil Home Assistant trouvé pour « $name »."
                 else HomeAssistantController.deleteEntity(context, entity.entityId).message
             }
-            "ha_rescan" -> HomeAssistantController.summarize(context, json.optString("filter", ""))
+            "ha_rescan" -> HomeAssistantController.summarize(context, json.optString("filter", ""), json.optString("domain", ""))
             "ha_set" -> {
                 val name = json.optString("device", "").ifBlank { json.optString("name", "") }
                 val entity = HomeAssistantController.findEntity(context, name)
