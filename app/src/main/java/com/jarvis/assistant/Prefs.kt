@@ -365,6 +365,27 @@ object Prefs {
             .apply()
     }
 
+    // ─── Style de présentation préféré des fiches contact ─────────────────────
+    // Cause réelle du bug "je demande un type de présentation et il ne le reprend pas
+    // automatiquement" : le format d'une fiche contact était toujours généré tel quel par
+    // PeopleController.formatFullDetails (fixe, en dur), et la seule façon de "changer" la
+    // présentation était que l'IA reformule elle-même le texte dans SA réponse pour CE tour
+    // précis — sans aucune mémoire persistante au-delà de la fenêtre de contexte de la
+    // conversation en cours. Dès que la conversation redémarre ou que le contexte s'allonge,
+    // la consigne de mise en forme est oubliée et JARVIS revient au format brut par défaut.
+    private const val KEY_CONTACT_PRESENTATION_STYLE = "contact_presentation_style"
+
+    fun getContactPresentationStyle(context: Context): String =
+        prefs(context).getString(KEY_CONTACT_PRESENTATION_STYLE, "") ?: ""
+
+    fun saveContactPresentationStyle(context: Context, style: String) {
+        prefs(context).edit().putString(KEY_CONTACT_PRESENTATION_STYLE, style.trim()).apply()
+    }
+
+    fun resetContactPresentationStyle(context: Context) {
+        prefs(context).edit().remove(KEY_CONTACT_PRESENTATION_STYLE).apply()
+    }
+
     fun getHfToken(context: Context): String =
         prefs(context).getString(KEY_HF_TOKEN, "") ?: ""
 

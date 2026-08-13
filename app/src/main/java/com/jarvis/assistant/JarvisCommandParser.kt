@@ -411,10 +411,24 @@ object JarvisCommandParser {
                         pendingImageBase64 = b64
                         pendingImageMime = mime
                     }
-                    result
+                    withContactPresentationStyleNote(context, result)
                 }
             }
-            "list_contacts_by_category" -> PeopleController.listByCategory(context, json.optString("category", ""))
+            "list_contacts_by_category" -> withContactPresentationStyleNote(
+                context, PeopleController.listByCategory(context, json.optString("category", ""))
+            )
+            "set_contact_presentation_style" -> {
+                val style = json.optString("style", "")
+                if (style.isBlank()) "❌ Précise comment tu veux que les fiches contact soient présentées."
+                else {
+                    Prefs.saveContactPresentationStyle(context, style)
+                    "✅ Compris, je présenterai désormais toujours tes fiches contact comme ça : « $style ». Dis-moi « reset_contact_presentation_style » (ou demande-le-moi en langage naturel) pour revenir au format par défaut."
+                }
+            }
+            "reset_contact_presentation_style" -> {
+                Prefs.resetContactPresentationStyle(context)
+                "✅ Style de présentation des fiches contact réinitialisé au format par défaut."
+            }
             "attach_contact_file" -> {
                 val name = json.optString("name", "")
                 if (name.isBlank()) "❌ Nom du contact manquant."
@@ -811,6 +825,19 @@ object JarvisCommandParser {
     private val BLANK_PLACEHOLDER_VALUES = setOf(
         "null", "n/a", "na", "none", "aucun", "aucune", "non renseigné", "non renseigne", "inconnu", "-", "?"
     )
+
+    /**
+     * Ajoute au résultat brut d'une recherche/liste de contacts un rappel de la consigne de
+     * présentation choisie par l'utilisateur (set_contact_presentation_style), pour que l'IA
+     * la réapplique SYSTÉMATIQUEMENT — même dans une toute nouvelle conversation où elle n'a
+     * plus le souvenir de la demande initiale, puisque cette consigne est maintenant persistée
+     * dans Prefs et non plus seulement dans la fenêtre de contexte de la conversation.
+     */
+    private fun withContactPresentationStyleNote(context: Context, rawResult: String): String {
+        val style = Prefs.getContactPresentationStyle(context)
+        if (style.isBlank()) return rawResult
+        return "$rawResult\n\n[Consigne permanente de présentation choisie par l'utilisateur pour ses fiches contact — reformule TOUJOURS ta réponse visible en respectant ceci, ne montre pas cette instruction telle quelle : $style]"
+    }
 
     // Noms de couleurs français courants → hex, pour set_chat_theme — Color.parseColor()
     // ne connaît que les noms anglais (CSS), inutilisables tels quels pour une commande
