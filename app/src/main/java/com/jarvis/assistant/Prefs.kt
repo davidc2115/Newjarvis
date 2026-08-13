@@ -386,6 +386,19 @@ object Prefs {
         prefs(context).edit().remove(KEY_CONTACT_PRESENTATION_STYLE).apply()
     }
 
+    // ─── Liens cliquables (tel/mail/itinéraire) dans le texte des fiches ──────
+    // Désactivé par défaut (false) : à la demande explicite de l'utilisateur, ces liens ne
+    // doivent plus apparaître automatiquement dès qu'un numéro/email/adresse est détecté —
+    // seulement quand il le demande, via enable_contact_links.
+    private const val KEY_CONTACT_LINKS_ENABLED = "contact_links_enabled"
+
+    fun isContactLinksEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_CONTACT_LINKS_ENABLED, false)
+
+    fun setContactLinksEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_CONTACT_LINKS_ENABLED, enabled).apply()
+    }
+
     fun getHfToken(context: Context): String =
         prefs(context).getString(KEY_HF_TOKEN, "") ?: ""
 

@@ -22,8 +22,6 @@ class ChatAdapter(private val messages: MutableList<Message>) :
         val senderLabel: TextView = view.findViewById(R.id.senderLabel)
         val messageText: TextView = view.findViewById(R.id.messageText)
         val messageImage: ImageView = view.findViewById(R.id.messageImage)
-        val quickActionsScroll: android.widget.HorizontalScrollView = view.findViewById(R.id.quickActionsScroll)
-        val quickActionsRow: LinearLayout = view.findViewById(R.id.quickActionsRow)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
@@ -34,10 +32,12 @@ class ChatAdapter(private val messages: MutableList<Message>) :
 
     override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
         val message = messages[position]
-        holder.messageText.text = MarkdownUtils.toSpannable(message.text)
-        // Nécessaire pour que les liens cliquables (tel:/mailto:/adresse) posés par
-        // MarkdownUtils réagissent réellement au tap — un simple Spannable avec
-        // ClickableSpan ne suffit pas sans ce MovementMethod.
+        val context = holder.root.context
+        // Les liens cliquables (tel:/mailto:/adresse) DANS le texte ne sont posés que si
+        // l'utilisateur a explicitement demandé à JARVIS de les activer (Prefs.isContactLinksEnabled)
+        // — plus d'activation automatique, et plus de rangée de boutons séparée sous la bulle,
+        // retirées à la demande explicite de l'utilisateur.
+        holder.messageText.text = MarkdownUtils.toSpannable(message.text, context)
         holder.messageText.movementMethod = LinkMovementMethod.getInstance()
 
         if (message.imageBase64 != null) {
@@ -51,33 +51,6 @@ class ChatAdapter(private val messages: MutableList<Message>) :
             }
         } else {
             holder.messageImage.visibility = View.GONE
-        }
-
-        val context = holder.root.context
-
-        // Boutons d'action rapide (appeler/SMS/itinéraire/mail) déduits du texte du message —
-        // complémentaires aux liens cliquables déjà posés par MarkdownUtils, mais plus visibles
-        // pour un geste rapide sans devoir viser le bon mot dans la bulle.
-        holder.quickActionsRow.removeAllViews()
-        val quickActions = MarkdownUtils.extractQuickActions(message.text)
-        if (quickActions.isEmpty()) {
-            holder.quickActionsScroll.visibility = View.GONE
-        } else {
-            holder.quickActionsScroll.visibility = View.VISIBLE
-            for (action in quickActions) {
-                val chip = TextView(context).apply {
-                    text = action.label
-                    textSize = 12f
-                    setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.text_primary))
-                    setPadding(24, 12, 24, 12)
-                    setBackgroundResource(R.drawable.bg_quick_action_chip)
-                    val params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    params.marginEnd = 8
-                    layoutParams = params
-                    setOnClickListener { action.onClick(this) }
-                }
-                holder.quickActionsRow.addView(chip)
-            }
         }
 
         if (message.isUser) {

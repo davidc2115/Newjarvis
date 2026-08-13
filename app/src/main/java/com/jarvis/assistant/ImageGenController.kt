@@ -76,7 +76,9 @@ object ImageGenController {
         // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
         tryHuggingFace(context, prompt, diagnostics)?.let { return it }
 
-        // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé.
+        // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé — remis dans
+        // la cascade à la demande explicite de l'utilisateur (revenu sur sa décision précédente
+        // de le désactiver).
         tryOnDeviceStableDiffusion(context, prompt)?.let { return it }
 
         val detail = if (diagnostics.isNotEmpty()) {

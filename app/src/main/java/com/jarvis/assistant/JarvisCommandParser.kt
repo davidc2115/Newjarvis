@@ -430,6 +430,14 @@ object JarvisCommandParser {
                 Prefs.resetContactPresentationStyle(context)
                 "✅ Style de présentation des fiches contact réinitialisé au format par défaut."
             }
+            "enable_contact_links" -> {
+                Prefs.setContactLinksEnabled(context, true)
+                "✅ Les numéros de téléphone, emails et adresses affichés dans les fiches sont maintenant cliquables (appel/mail/itinéraire direct)."
+            }
+            "disable_contact_links" -> {
+                Prefs.setContactLinksEnabled(context, false)
+                "✅ Retour au texte simple, sans liens cliquables dans les fiches."
+            }
             "attach_contact_file" -> {
                 val name = json.optString("name", "")
                 if (name.isBlank()) "❌ Nom du contact manquant."

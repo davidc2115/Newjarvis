@@ -1,5 +1,6 @@
 package com.jarvis.assistant
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
@@ -46,7 +47,15 @@ object MarkdownUtils {
     private val addressColonRegex = Regex("(?:🏠|🏗️)[^:\\n]*:\\s*([^\\n]+)")
     private val addressInlineRegex = Regex("🏠\\s+([^\\n—]+)")
 
-    fun toSpannable(raw: String): CharSequence {
+    /**
+     * [context] est optionnel : quand fourni, les liens cliquables (tel/mail/itinéraire) ne
+     * sont posés QUE si l'utilisateur a explicitement demandé à JARVIS de les activer
+     * (Prefs.isContactLinksEnabled — via enable_contact_links). Avant ce correctif, ces liens
+     * étaient posés automatiquement sur chaque message contenant un numéro/email/adresse, ce
+     * que l'utilisateur ne voulait pas — désormais c'est un comportement opt-in, désactivé par
+     * défaut.
+     */
+    fun toSpannable(raw: String, context: Context? = null): CharSequence {
         var text = headerRegex.replace(raw) { "**${it.groupValues[1]}**" }
         text = bulletRegex.replace(text) { "• " }
 
@@ -77,7 +86,9 @@ object MarkdownUtils {
             lastEnd = match.range.last + 1
         }
         builder.append(text.substring(lastEnd))
-        applyContactLinks(builder)
+        if (context != null && Prefs.isContactLinksEnabled(context)) {
+            applyContactLinks(builder)
+        }
         return builder
     }
 
@@ -128,54 +139,6 @@ object MarkdownUtils {
                 try { view.context.startActivity(intent) } catch (_: Exception) { }
             }
         }
-    }
-
-    /** Un bouton d'action rapide affiché sous une bulle de chat (appeler, SMS, itinéraire, mail). */
-    data class QuickAction(val label: String, val onClick: (View) -> Unit)
-
-    /**
-     * Détecte les numéros de téléphone, emails et adresses dans [raw] (même logique que
-     * [applyContactLinks], réutilisée ici pour proposer aussi des boutons d'action rapide)
-     * — dédiés, complémentaires au texte cliquable, pas un remplacement : plus visibles pour
-     * un geste rapide "appeler", "SMS", "itinéraire" ou "mail" sans devoir viser le bon mot
-     * dans la bulle. Plafonné pour ne pas noyer l'écran si un message contient beaucoup de
-     * contacts (ex: liste de contacts entière).
-     */
-    fun extractQuickActions(raw: String, maxActions: Int = 6): List<QuickAction> {
-        val actions = mutableListOf<QuickAction>()
-        val seenPhones = mutableSetOf<String>()
-        val seenEmails = mutableSetOf<String>()
-        val seenAddresses = mutableSetOf<String>()
-
-        for (regex in listOf(addressColonRegex, addressInlineRegex)) {
-            for (match in regex.findAll(raw)) {
-                if (actions.size >= maxActions) return actions
-                val address = (match.groups[1] ?: continue).value.trim()
-                if (address.isBlank() || !seenAddresses.add(address)) continue
-                actions.add(QuickAction("🗺️ Itinéraire") { view -> LocationController.openMaps(view.context, address) })
-            }
-        }
-        for (match in phoneRegex.findAll(raw)) {
-            if (actions.size >= maxActions) return actions
-            val phone = match.value
-            if (!seenPhones.add(phone)) continue
-            actions.add(QuickAction("📞 Appeler") { view ->
-                try { view.context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(phone)}"))) } catch (_: Exception) { }
-            })
-            if (actions.size >= maxActions) return actions
-            actions.add(QuickAction("💬 SMS") { view ->
-                try { view.context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${Uri.encode(phone)}"))) } catch (_: Exception) { }
-            })
-        }
-        for (match in emailRegex.findAll(raw)) {
-            if (actions.size >= maxActions) return actions
-            val email = match.value
-            if (!seenEmails.add(email)) continue
-            actions.add(QuickAction("✉️ Mail") { view ->
-                try { view.context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$email"))) } catch (_: Exception) { }
-            })
-        }
-        return actions
     }
 
     fun stripForSpeech(raw: String): String {
