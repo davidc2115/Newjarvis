@@ -3,12 +3,16 @@ package com.jarvis.assistant
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Base64
+import android.view.View
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -31,6 +35,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var orbView: OrbView
     private lateinit var statusText: TextView
     private lateinit var transcriptText: TextView
+    private lateinit var imageOverlay: ImageView
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
@@ -52,6 +57,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         orbView = findViewById(R.id.orbView)
         statusText = findViewById(R.id.voiceStatusText)
         transcriptText = findViewById(R.id.voiceTranscriptText)
+        imageOverlay = findViewById(R.id.voiceImageOverlay)
         val closeButton = findViewById<TextView>(R.id.closeVoiceButton)
         val micToggle = findViewById<TextView>(R.id.micToggleButton)
 
@@ -116,6 +122,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         orbView.state = OrbView.OrbState.LISTENING
         statusText.text = "Je vous écoute…"
         transcriptText.text = ""
+        imageOverlay.visibility = View.GONE
 
         try {
             speechRecognizer?.destroy()
@@ -186,7 +193,30 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ConversationStore.addAssistant(result.text, result.imageBase64, result.imageMime)
             ConversationStore.persist(this@VoiceModeActivity)
             transcriptText.text = result.text
+            showImageOverlay(result.imageBase64)
             speak(MarkdownUtils.stripForSpeech(result.text))
+        }
+    }
+
+    /**
+     * Affiche un graphique/image généré directement par-dessus l'orbe (ex: create_chart,
+     * generate_image demandés au vocal) plutôt que de forcer l'utilisateur à ouvrir le
+     * chat pour le voir. Masqué automatiquement au tour de parole suivant.
+     */
+    private fun showImageOverlay(base64: String?) {
+        if (base64.isNullOrBlank()) {
+            imageOverlay.visibility = View.GONE
+            return
+        }
+        try {
+            val bytes = Base64.decode(base64, Base64.NO_WRAP)
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            if (bitmap != null) {
+                imageOverlay.setImageBitmap(bitmap)
+                imageOverlay.visibility = View.VISIBLE
+            }
+        } catch (_: Exception) {
+            imageOverlay.visibility = View.GONE
         }
     }
 

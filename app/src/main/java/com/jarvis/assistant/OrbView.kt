@@ -134,6 +134,11 @@ class OrbView @JvmOverloads constructor(
         canvas.drawCircle(cx, cy, coreRadius * 0.45f, corePaint)
     }
 
+    // Angles/longueurs fixes des rayons du cœur lumineux (générés une fois, pas à
+    // chaque frame) — évite un effet de scintillement aléatoire disgracieux.
+    private val rayAngles: List<Float> by lazy { (0 until 16).map { (it / 16f) * 2f * Math.PI.toFloat() } }
+    private val rayLengths: List<Float> by lazy { List(16) { 0.55f + (it % 5) * 0.09f } }
+
     private fun drawNetworkSphere(canvas: Canvas) {
         val cx = width / 2f
         val cy = height / 2f
@@ -147,6 +152,12 @@ class OrbView @JvmOverloads constructor(
             OrbState.SPEAKING -> 1.3f
         }
         val angle = pulsePhase * 2f * Math.PI.toFloat() * speedFactor
+
+        // Cœur lumineux avec rayons radiants (façon étoile/soleil) — c'est ce qui
+        // donne l'aspect "sphère de particules lumineuse" de la référence visuelle,
+        // en plus du maillage de points déjà existant ci-dessous.
+        drawRadiantCore(canvas, cx, cy, scale, angle)
+
         val cosA = cos(angle)
         val sinA = sin(angle)
         val wobble = 0.25f * sin(angle * 0.5f)
@@ -187,6 +198,37 @@ class OrbView @JvmOverloads constructor(
             val r = 2f + depth * 2.6f
             canvas.drawCircle(x, y, r, dotPaint)
         }
+    }
+
+    /**
+     * Dessine un cœur lumineux d'où partent de fins rayons vers l'extérieur, en
+     * rotation lente et indépendante du maillage de points — c'est cet effet
+     * "étoile/soleil au centre d'une toile" qui rapproche le rendu de la sphère
+     * de particules demandée en référence, plutôt qu'un simple maillage plat.
+     */
+    private fun drawRadiantCore(canvas: Canvas, cx: Float, cy: Float, scale: Float, angle: Float) {
+        val rayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.4f }
+        val rotation = angle * 0.3f // rotation plus lente que le maillage pour un effet de profondeur
+        rayAngles.forEachIndexed { i, baseAngle ->
+            val a = baseAngle + rotation
+            val length = scale * rayLengths[i]
+            val endX = cx + cos(a) * length
+            val endY = cy + sin(a) * length
+            rayPaint.color = accentColor
+            rayPaint.alpha = 55
+            rayPaint.shader = null
+            canvas.drawLine(cx, cy, endX, endY, rayPaint)
+        }
+
+        val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val glowRadius = scale * 0.22f
+        glowPaint.shader = RadialGradient(
+            cx, cy, glowRadius,
+            intArrayOf(Color.WHITE, accentColor, Color.TRANSPARENT),
+            floatArrayOf(0f, 0.4f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx, cy, glowRadius, glowPaint)
     }
 
     private fun adjustAlpha(color: Int, factor: Float): Int {

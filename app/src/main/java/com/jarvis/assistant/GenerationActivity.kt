@@ -205,6 +205,11 @@ class GenerationActivity : AppCompatActivity() {
                 "video" -> "🎬 Vidéo"
                 "website" -> "🌐 Site web"
                 "website_edit" -> "✏️ Site modifié"
+                "chart" -> "📊 Graphique"
+                "file_zip" -> "🗜️ Archive ZIP"
+                "file_pdf" -> "📄 PDF"
+                "file_docx" -> "📝 Document Word"
+                "file_xlsx" -> "📊 Tableur Excel"
                 else -> record.type
             }
             val date = fmt.format(Date(record.timestamp))
@@ -252,9 +257,10 @@ class GenerationActivity : AppCompatActivity() {
                     return
                 }
                 when (record.type) {
-                    "image" -> viewImage(path)
+                    "image", "chart" -> viewImage(path)
                     "video" -> playVideo(path)
                     "website", "website_edit" -> showWebsiteOptions(record, File(path))
+                    "file_zip", "file_pdf", "file_docx", "file_xlsx" -> openGeneratedFile(path)
                     else -> Toast.makeText(this, "Type de génération inconnu.", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -287,6 +293,22 @@ class GenerationActivity : AppCompatActivity() {
             startActivity(intent)
         } catch (e: Exception) {
             Toast.makeText(this, "Impossible d'ouvrir la vidéo : ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Ouvre un fichier généré (zip/pdf/docx/xlsx) avec l'appli du téléphone associée à son type, via FileProvider. */
+    private fun openGeneratedFile(path: String) {
+        try {
+            val file = File(path)
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, FileGenController.mimeTypeFor(path))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "❌ Impossible d'ouvrir le fichier (aucune app compatible installée, ou : ${e.message}).", Toast.LENGTH_LONG).show()
         }
     }
 

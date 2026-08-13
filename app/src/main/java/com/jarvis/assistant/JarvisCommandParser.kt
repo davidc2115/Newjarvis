@@ -575,8 +575,75 @@ object JarvisCommandParser {
                 else NetworkController.sendWakeOnLan(context, resolvedMac)
             }
 
+            "create_zip" -> {
+                val paths = mutableListOf<String>()
+                json.optJSONArray("paths")?.let { arr -> for (i in 0 until arr.length()) paths.add(arr.optString(i)) }
+                if (paths.isEmpty()) json.optString("path", "").ifBlank { null }?.let { paths.add(it) }
+                val name = json.optString("name", "").ifBlank { "archive" }
+                val result = FileGenController.createZip(paths, name)
+                logFileRecord(context, "zip", name, result.success, result.filePath, result.message)
+                result.message
+            }
+            "create_pdf" -> {
+                val title = json.optString("title", "")
+                val content = json.optString("content", "")
+                val name = json.optString("name", "").ifBlank { title }
+                val result = FileGenController.createPdf(title, content, name)
+                logFileRecord(context, "pdf", name, result.success, result.filePath, result.message)
+                result.message
+            }
+            "create_docx" -> {
+                val title = json.optString("title", "")
+                val content = json.optString("content", "")
+                val name = json.optString("name", "").ifBlank { title }
+                val result = FileGenController.createDocx(title, content, name)
+                logFileRecord(context, "docx", name, result.success, result.filePath, result.message)
+                result.message
+            }
+            "create_xlsx" -> {
+                val title = json.optString("title", "").ifBlank { json.optString("sheetName", "") }
+                val data = json.optString("data", "").ifBlank { json.optString("content", "") }
+                val name = json.optString("name", "").ifBlank { title }
+                val result = FileGenController.createXlsx(title, data, name)
+                logFileRecord(context, "xlsx", name, result.success, result.filePath, result.message)
+                result.message
+            }
+            "create_chart" -> {
+                val type = json.optString("type", "bar")
+                val title = json.optString("title", "")
+                val data = json.optString("data", "")
+                val recordId = "${System.currentTimeMillis()}_${(0..9999).random()}"
+                Prefs.addGenerationRecord(
+                    context,
+                    Prefs.GenerationRecord(id = recordId, type = "chart", prompt = title.ifBlank { "Graphique" }, status = "pending", timestamp = System.currentTimeMillis())
+                )
+                val result = ChartController.generateChart(type, title, data)
+                Prefs.updateGenerationRecord(context, recordId) { record ->
+                    record.copy(
+                        status = if (result.success) "success" else "failed",
+                        resultPath = result.savedPath,
+                        errorMessage = if (!result.success) result.message else null
+                    )
+                }
+                pendingImageBase64 = result.base64
+                pendingImageMime = result.mime
+                result.message
+            }
+
             else -> "❌ Commande système inconnue : « $action »."
         }
+    }
+
+    /** Enregistre un fichier créé (zip/pdf/docx/xlsx) dans l'historique de 🎨 Génération, pour rester cohérent avec les autres types de génération et pouvoir le retrouver plus tard depuis la galerie. */
+    private fun logFileRecord(context: Context, kind: String, name: String, success: Boolean, path: String?, message: String) {
+        val id = "${System.currentTimeMillis()}_${(0..9999).random()}"
+        Prefs.addGenerationRecord(
+            context,
+            Prefs.GenerationRecord(
+                id = id, type = "file_$kind", prompt = name.ifBlank { kind }, status = if (success) "success" else "failed",
+                timestamp = System.currentTimeMillis(), resultPath = path, errorMessage = if (!success) message else null
+            )
+        )
     }
 
     fun cleanResponse(llmResponse: String): String {
