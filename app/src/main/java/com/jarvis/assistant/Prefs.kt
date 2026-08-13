@@ -28,6 +28,7 @@ object Prefs {
     private const val KEY_HF_TOKEN          = "hf_token"
     private const val KEY_ORB_STYLE         = "orb_style"
     private const val KEY_EMAIL_ACCOUNTS    = "email_accounts"     // JSON array
+    private const val KEY_GITHUB_ACCOUNTS   = "github_accounts"    // JSON array
     private const val KEY_ROTATION_STRATEGY = "rotation_strategy"  // "ROUNDROBIN"|"FALLBACK"|"RANDOM"
     private const val KEY_OBSIDIAN_VAULT_PATH = "obsidian_vault_path"
 
@@ -408,6 +409,89 @@ object Prefs {
 
     fun getGithubToken(context: Context): String =
         prefs(context).getString("github_token", "") ?: ""
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // MULTI-COMPTES GITHUB
+    // ═════════════════════════════════════════════════════════════════════════
+
+    data class GitHubAccount(
+        val id: String = System.currentTimeMillis().toString(),
+        val label: String = "",   // ex: "Perso", "Pro", "Client X"
+        val token: String = "",
+        val isDefault: Boolean = false
+    ) {
+        fun toJson(): JSONObject = JSONObject().apply {
+            put("id", id); put("label", label); put("token", token); put("isDefault", isDefault)
+        }
+
+        companion object {
+            fun fromJson(j: JSONObject) = GitHubAccount(
+                id        = j.optString("id", System.currentTimeMillis().toString()),
+                label     = j.optString("label", ""),
+                token     = j.optString("token", ""),
+                isDefault = j.optBoolean("isDefault", false)
+            )
+        }
+    }
+
+    /**
+     * Migration douce : si aucun compte n'a encore été ajouté à la nouvelle liste
+     * multi-comptes mais qu'un ancien jeton unique (github_token, ⚙ → Clés API) existe,
+     * il est exposé comme un compte "Principal" par défaut — la configuration existante
+     * de l'utilisateur continue de fonctionner sans qu'il ait besoin de tout reconfigurer.
+     */
+    fun getGithubAccounts(context: Context): List<GitHubAccount> {
+        val json = prefs(context).getString(KEY_GITHUB_ACCOUNTS, "[]") ?: "[]"
+        val stored = try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { GitHubAccount.fromJson(arr.getJSONObject(it)) }
+        } catch (_: Exception) { emptyList() }
+        if (stored.isNotEmpty()) return stored
+        val legacyToken = getGithubToken(context)
+        return if (legacyToken.isNotBlank()) {
+            listOf(GitHubAccount(id = "legacy", label = "Principal", token = legacyToken, isDefault = true))
+        } else {
+            emptyList()
+        }
+    }
+
+    fun getDefaultGithubAccount(context: Context): GitHubAccount? =
+        getGithubAccounts(context).firstOrNull { it.isDefault }
+            ?: getGithubAccounts(context).firstOrNull()
+
+    /** Recherche floue d'un compte GitHub par son libellé (ex: "perso", "pro", "client X"). */
+    fun findGithubAccount(context: Context, label: String): GitHubAccount? {
+        if (label.isBlank()) return null
+        val q = label.trim().lowercase()
+        val all = getGithubAccounts(context)
+        return all.firstOrNull { it.label.lowercase() == q }
+            ?: all.firstOrNull { it.label.lowercase().contains(q) }
+    }
+
+    fun saveGithubAccounts(context: Context, accounts: List<GitHubAccount>) {
+        val arr = JSONArray()
+        accounts.forEach { arr.put(it.toJson()) }
+        prefs(context).edit().putString(KEY_GITHUB_ACCOUNTS, arr.toString()).apply()
+    }
+
+    fun addGithubAccount(context: Context, account: GitHubAccount) {
+        val list = getGithubAccounts(context).toMutableList()
+        list.removeAll { it.id == account.id }
+        // Le tout premier compte ajouté devient automatiquement celui par défaut.
+        val withDefault = if (list.isEmpty()) account.copy(isDefault = true) else account
+        list.add(withDefault)
+        saveGithubAccounts(context, list)
+    }
+
+    fun removeGithubAccount(context: Context, id: String) {
+        val list = getGithubAccounts(context).filter { it.id != id }
+        saveGithubAccounts(context, list)
+    }
+
+    fun setDefaultGithubAccount(context: Context, id: String) {
+        val list = getGithubAccounts(context).map { it.copy(isDefault = it.id == id) }
+        saveGithubAccounts(context, list)
+    }
 
     // ─── Écoute permanente (mot-clé d'activation) ───────────────────────────────
 

@@ -11,12 +11,17 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Permet à JARVIS de créer/modifier des projets sur GitHub et de committer,
- * pousser, ouvrir des pull requests — via l'API REST GitHub (pas de git
- * embarqué : plus simple et fiable sur mobile, et c'est ce que fait GitHub
- * lui-même en coulisses pour toute édition faite depuis son site web).
+ * Permet à JARVIS de créer/modifier/parcourir/supprimer des projets sur GitHub —
+ * via l'API REST GitHub (pas de git embarqué : plus simple et fiable sur mobile,
+ * et c'est ce que fait GitHub lui-même en coulisses pour toute édition faite
+ * depuis son site web).
  *
- * Nécessite un jeton personnel (⚙ Paramètres → Clés API → Codage GitHub).
+ * MULTI-COMPTES : chaque fonction accepte un [accountLabel] optionnel (ex: "perso",
+ * "pro", "client X") pour choisir quel compte GitHub utiliser parmi ceux enregistrés
+ * (⚙ Paramètres → Clés API → Codage GitHub). Vide = compte par défaut (le premier
+ * configuré, ou celui marqué par défaut). Si aucun compte ne correspond au libellé
+ * demandé, un message d'erreur explicite liste les comptes réellement disponibles —
+ * jamais un échec silencieux sur le mauvais compte.
  */
 object GitHubController {
 
@@ -28,9 +33,27 @@ object GitHubController {
     private val JSON = "application/json; charset=utf-8".toMediaType()
     private const val NO_TOKEN = "❌ Aucun jeton GitHub configuré. Ajoute-le dans ⚙ Paramètres → onglet « Clés API » → section Codage."
 
-    private fun authBuilder(context: Context, url: String): Request.Builder? {
-        val token = Prefs.getGithubToken(context)
-        if (token.isBlank()) return null
+    /** Résout le jeton à utiliser pour [accountLabel] (vide = compte par défaut). */
+    private fun resolveToken(context: Context, accountLabel: String): String? {
+        val accounts = Prefs.getGithubAccounts(context)
+        if (accounts.isEmpty()) return null
+        val account = if (accountLabel.isBlank()) {
+            Prefs.getDefaultGithubAccount(context)
+        } else {
+            Prefs.findGithubAccount(context, accountLabel)
+        }
+        return account?.token?.takeIf { it.isNotBlank() }
+    }
+
+    private fun noAccountMessage(context: Context, accountLabel: String): String {
+        val accounts = Prefs.getGithubAccounts(context)
+        if (accounts.isEmpty()) return NO_TOKEN
+        return "❌ Aucun compte GitHub trouvé pour « $accountLabel ». Comptes configurés : " +
+            accounts.joinToString(", ") { it.label.ifBlank { "(sans nom)" } } + "."
+    }
+
+    private fun authBuilder(context: Context, url: String, accountLabel: String = ""): Request.Builder? {
+        val token = resolveToken(context, accountLabel) ?: return null
         return Request.Builder()
             .url(url)
             .addHeader("Authorization", "Bearer $token")
@@ -38,8 +61,22 @@ object GitHubController {
             .addHeader("X-GitHub-Api-Version", "2022-11-28")
     }
 
-    fun listRepos(context: Context): String {
-        val builder = authBuilder(context, "https://api.github.com/user/repos?sort=updated&per_page=15") ?: return NO_TOKEN
+    /** Liste les comptes GitHub configurés (libellés + compte par défaut), sans exposer les jetons. */
+    fun listAccounts(context: Context): String {
+        val accounts = Prefs.getGithubAccounts(context)
+        if (accounts.isEmpty()) return NO_TOKEN
+        val sb = StringBuilder("👤 **Comptes GitHub configurés** :\n\n")
+        accounts.forEach { a ->
+            val star = if (a.isDefault) " ⭐ par défaut" else ""
+            sb.append("• ${a.label.ifBlank { "(sans nom)" }}$star\n")
+        }
+        return sb.toString().trim()
+    }
+
+    fun listRepos(context: Context, accountLabel: String = ""): String {
+        if (Prefs.getGithubAccounts(context).isEmpty()) return NO_TOKEN
+        val builder = authBuilder(context, "https://api.github.com/user/repos?sort=updated&per_page=15", accountLabel)
+            ?: return noAccountMessage(context, accountLabel)
         return try {
             client.newCall(builder.get().build()).execute().use { resp ->
                 val body = resp.body?.string() ?: ""
@@ -59,8 +96,9 @@ object GitHubController {
         }
     }
 
-    fun createRepo(context: Context, name: String, description: String, isPrivate: Boolean): String {
-        val builder = authBuilder(context, "https://api.github.com/user/repos") ?: return NO_TOKEN
+    fun createRepo(context: Context, name: String, description: String, isPrivate: Boolean, accountLabel: String = ""): String {
+        val builder = authBuilder(context, "https://api.github.com/user/repos", accountLabel)
+            ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
         return try {
             val body = JSONObject()
                 .put("name", name)
@@ -80,6 +118,46 @@ object GitHubController {
         }
     }
 
+    /**
+     * Liste le contenu d'un dossier d'un dépôt (racine si [path] est vide) — distingue
+     * fichiers et sous-dossiers, avec leur taille pour les fichiers. C'est ce qui permet
+     * de "voir le dépôt en direct" depuis JARVIS sans connaître déjà les chemins exacts.
+     */
+    fun listContents(context: Context, owner: String, repo: String, path: String, branch: String, accountLabel: String = ""): String {
+        val cleanPath = path.trim().trim('/')
+        val url = "https://api.github.com/repos/$owner/$repo/contents/$cleanPath?ref=$branch"
+        val builder = authBuilder(context, url, accountLabel)
+            ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
+        return try {
+            client.newCall(builder.get().build()).execute().use { resp ->
+                val body = resp.body?.string() ?: ""
+                if (!resp.isSuccessful) return "❌ Impossible de lister « ${cleanPath.ifBlank { "/" }} » (${resp.code}) : $body"
+                val trimmedBody = body.trim()
+                if (!trimmedBody.startsWith("[")) {
+                    // Le chemin pointe vers un fichier, pas un dossier — l'API renvoie un objet unique.
+                    val obj = JSONObject(trimmedBody)
+                    return "📄 « ${obj.optString("path")} » est un fichier (${obj.optLong("size")} octets), pas un dossier. " +
+                        "Utilise github_read_file pour le lire."
+                }
+                val arr = JSONArray(trimmedBody)
+                if (arr.length() == 0) return "📂 « ${cleanPath.ifBlank { "/" }} » est vide."
+                val folders = mutableListOf<String>()
+                val files = mutableListOf<Pair<String, Long>>()
+                for (i in 0 until arr.length()) {
+                    val item = arr.getJSONObject(i)
+                    if (item.optString("type") == "dir") folders.add(item.optString("name"))
+                    else files.add(item.optString("name") to item.optLong("size"))
+                }
+                val sb = StringBuilder("📂 **$owner/$repo${if (cleanPath.isNotBlank()) "/$cleanPath" else ""}** (branche $branch) :\n\n")
+                folders.sorted().forEach { sb.append("📁 $it/\n") }
+                files.sortedBy { it.first }.forEach { (n, size) -> sb.append("📄 $n (${size} octets)\n") }
+                sb.toString().trim()
+            }
+        } catch (e: Exception) {
+            "❌ Erreur réseau : ${e.message}"
+        }
+    }
+
     /** Crée un fichier, ou le met à jour s'il existe déjà (même endpoint GitHub pour les deux cas). */
     fun createOrUpdateFile(
         context: Context,
@@ -88,14 +166,17 @@ object GitHubController {
         path: String,
         content: String,
         commitMessage: String,
-        branch: String
+        branch: String,
+        accountLabel: String = ""
     ): String {
-        if (Prefs.getGithubToken(context).isBlank()) return NO_TOKEN
+        if (resolveToken(context, accountLabel) == null) {
+            return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
+        }
 
         // Récupère le sha existant si le fichier existe déjà (requis par l'API pour une mise à jour)
         var existingSha: String? = null
         try {
-            val getBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$branch")
+            val getBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$branch", accountLabel)
             if (getBuilder != null) {
                 client.newCall(getBuilder.get().build()).execute().use { resp ->
                     if (resp.isSuccessful) {
@@ -107,7 +188,7 @@ object GitHubController {
             // Le fichier n'existe probablement pas encore — on continue en création.
         }
 
-        val putBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path") ?: return NO_TOKEN
+        val putBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path", accountLabel) ?: return NO_TOKEN
         return try {
             val encoded = Base64.encodeToString(content.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
             val bodyJson = JSONObject()
@@ -130,8 +211,140 @@ object GitHubController {
         }
     }
 
-    fun readFile(context: Context, owner: String, repo: String, path: String, branch: String): String {
-        val builder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$branch") ?: return NO_TOKEN
+    /**
+     * Supprime un fichier d'un dépôt (nécessite son sha actuel, récupéré automatiquement).
+     * GitHub n'a pas de vraie notion de "dossier vide" — pour supprimer un dossier entier,
+     * voir deleteFolder (qui supprime récursivement tous les fichiers qu'il contient).
+     */
+    fun deleteFile(context: Context, owner: String, repo: String, path: String, commitMessage: String, branch: String, accountLabel: String = ""): String {
+        val getBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$branch", accountLabel)
+            ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
+        val sha = try {
+            client.newCall(getBuilder.get().build()).execute().use { resp ->
+                if (!resp.isSuccessful) return "❌ Fichier introuvable, rien à supprimer (${resp.code}) : ${resp.body?.string()}"
+                JSONObject(resp.body?.string() ?: "").optString("sha").ifBlank { null }
+                    ?: return "❌ « $path » ne semble pas être un fichier (peut-être un dossier ? utilise deleteFolder)."
+            }
+        } catch (e: Exception) {
+            return "❌ Erreur réseau : ${e.message}"
+        }
+
+        val deleteBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path", accountLabel) ?: return NO_TOKEN
+        return try {
+            val body = JSONObject()
+                .put("message", commitMessage)
+                .put("sha", sha)
+                .put("branch", branch)
+                .toString()
+                .toRequestBody(JSON)
+            client.newCall(deleteBuilder.delete(body).build()).execute().use { resp ->
+                if (!resp.isSuccessful) return "❌ Échec de la suppression (${resp.code}) : ${resp.body?.string()}"
+                "✅ Fichier « $path » supprimé de $owner/$repo."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur réseau : ${e.message}"
+        }
+    }
+
+    /**
+     * Supprime récursivement un dossier entier (tous les fichiers qu'il contient), en UN
+     * SEUL commit — via la Git Trees API : récupère l'arborescence complète de la branche,
+     * retire toutes les entrées dont le chemin commence par [folderPath], construit un
+     * nouvel arbre, un nouveau commit pointant dessus, puis avance la référence de branche.
+     * C'est la seule façon fiable de "supprimer un dossier" sur GitHub (qui ne modélise pas
+     * les dossiers comme des objets à part entière — seuls les fichiers existent réellement).
+     */
+    suspend fun deleteFolder(context: Context, owner: String, repo: String, folderPath: String, commitMessage: String, branch: String, accountLabel: String = ""): String =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val cleanFolder = folderPath.trim().trim('/')
+            if (cleanFolder.isBlank()) return@withContext "❌ Précise le chemin du dossier à supprimer (ne supprime jamais toute la racine par sécurité)."
+            if (resolveToken(context, accountLabel) == null) {
+                return@withContext if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
+            }
+            try {
+                // 1. SHA du commit courant de la branche.
+                val refBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/ref/heads/$branch", accountLabel)!!
+                val commitSha = client.newCall(refBuilder.get().build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext "❌ Branche « $branch » introuvable : ${resp.body?.string()}"
+                    JSONObject(resp.body?.string() ?: "").getJSONObject("object").getString("sha")
+                }
+                // 2. SHA de l'arbre racine associé à ce commit.
+                val commitBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/commits/$commitSha", accountLabel)!!
+                val treeSha = client.newCall(commitBuilder.get().build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext "❌ Impossible de lire le commit : ${resp.body?.string()}"
+                    JSONObject(resp.body?.string() ?: "").getJSONObject("tree").getString("sha")
+                }
+                // 3. Arborescence complète récursive.
+                val treeBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/trees/$treeSha?recursive=1", accountLabel)!!
+                val fullTree = client.newCall(treeBuilder.get().build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext "❌ Impossible de lire l'arborescence : ${resp.body?.string()}"
+                    JSONObject(resp.body?.string() ?: "").getJSONArray("tree")
+                }
+                val remaining = JSONArray()
+                var removedCount = 0
+                for (i in 0 until fullTree.length()) {
+                    val entry = fullTree.getJSONObject(i)
+                    val entryPath = entry.optString("path")
+                    if (entry.optString("type") == "blob" && (entryPath == cleanFolder || entryPath.startsWith("$cleanFolder/"))) {
+                        removedCount++
+                        continue
+                    }
+                    if (entry.optString("type") == "blob") {
+                        remaining.put(JSONObject().apply {
+                            put("path", entryPath); put("mode", entry.optString("mode"))
+                            put("type", "blob"); put("sha", entry.optString("sha"))
+                        })
+                    }
+                }
+                if (removedCount == 0) return@withContext "❌ Aucun fichier trouvé sous « $cleanFolder » — dossier déjà vide ou inexistant."
+
+                // 4. Nouvel arbre SANS les fichiers du dossier supprimé.
+                val newTreeBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/trees", accountLabel)!!
+                val newTreeBody = JSONObject().put("tree", remaining).toString().toRequestBody(JSON)
+                val newTreeSha = client.newCall(newTreeBuilder.post(newTreeBody).build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext "❌ Échec de la création du nouvel arbre : ${resp.body?.string()}"
+                    JSONObject(resp.body?.string() ?: "").getString("sha")
+                }
+                // 5. Nouveau commit pointant sur ce nouvel arbre.
+                val newCommitBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/commits", accountLabel)!!
+                val newCommitBody = JSONObject()
+                    .put("message", commitMessage)
+                    .put("tree", newTreeSha)
+                    .put("parents", JSONArray().put(commitSha))
+                    .toString().toRequestBody(JSON)
+                val newCommitSha = client.newCall(newCommitBuilder.post(newCommitBody).build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext "❌ Échec de la création du commit : ${resp.body?.string()}"
+                    JSONObject(resp.body?.string() ?: "").getString("sha")
+                }
+                // 6. Avance la référence de branche vers le nouveau commit.
+                val updateRefBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/refs/heads/$branch", accountLabel)!!
+                val updateBody = JSONObject().put("sha", newCommitSha).toString().toRequestBody(JSON)
+                client.newCall(updateRefBuilder.patch(updateBody).build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext "❌ Échec de la mise à jour de la branche : ${resp.body?.string()}"
+                    "✅ Dossier « $cleanFolder » supprimé ($removedCount fichier(s)) de $owner/$repo, branche $branch."
+                }
+            } catch (e: Exception) {
+                "❌ Erreur réseau : ${e.message}"
+            }
+        }
+
+    /** Supprime le dépôt entier — IRRÉVERSIBLE, l'appelant doit avoir obtenu une confirmation explicite avant. */
+    fun deleteRepo(context: Context, owner: String, repo: String, accountLabel: String = ""): String {
+        val builder = authBuilder(context, "https://api.github.com/repos/$owner/$repo", accountLabel)
+            ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
+        return try {
+            client.newCall(builder.delete().build()).execute().use { resp ->
+                if (resp.code == 204) "✅ Dépôt $owner/$repo supprimé définitivement."
+                else "❌ Échec de la suppression du dépôt (${resp.code}) : ${resp.body?.string()}"
+            }
+        } catch (e: Exception) {
+            "❌ Erreur réseau : ${e.message}"
+        }
+    }
+
+    fun readFile(context: Context, owner: String, repo: String, path: String, branch: String, accountLabel: String = ""): String {
+        val builder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$branch", accountLabel)
+            ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
         return try {
             client.newCall(builder.get().build()).execute().use { resp ->
                 val body = resp.body?.string() ?: ""
@@ -145,8 +358,8 @@ object GitHubController {
         }
     }
 
-    fun createBranch(context: Context, owner: String, repo: String, newBranch: String, fromBranch: String): String {
-        val getRefBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/ref/heads/$fromBranch") ?: return NO_TOKEN
+    fun createBranch(context: Context, owner: String, repo: String, newBranch: String, fromBranch: String, accountLabel: String = ""): String {
+        val getRefBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/ref/heads/$fromBranch", accountLabel) ?: return NO_TOKEN
         val baseSha = try {
             client.newCall(getRefBuilder.get().build()).execute().use { resp ->
                 if (!resp.isSuccessful) return "❌ Branche de base « $fromBranch » introuvable : ${resp.body?.string()}"
@@ -156,7 +369,7 @@ object GitHubController {
             return "❌ Erreur réseau : ${e.message}"
         }
 
-        val postBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/refs") ?: return NO_TOKEN
+        val postBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/git/refs", accountLabel) ?: return NO_TOKEN
         return try {
             val body = JSONObject()
                 .put("ref", "refs/heads/$newBranch")
@@ -180,9 +393,10 @@ object GitHubController {
         title: String,
         head: String,
         base: String,
-        body: String
+        body: String,
+        accountLabel: String = ""
     ): String {
-        val builder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/pulls") ?: return NO_TOKEN
+        val builder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/pulls", accountLabel) ?: return NO_TOKEN
         return try {
             val bodyJson = JSONObject()
                 .put("title", title)

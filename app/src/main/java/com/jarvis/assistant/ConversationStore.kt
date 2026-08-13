@@ -10,7 +10,12 @@ data class HistoryEntry(
     val role: String,
     val text: String,
     val imageBase64: String? = null,
-    val imageMime: String? = null
+    val imageMime: String? = null,
+    // Pièces jointes complètes (voir Attachment.kt) — imageBase64/imageMime ci-dessus restent
+    // remplis avec la PREMIÈRE image pour compatibilité avec le code existant, mais TOUTES les
+    // pièces jointes (images multiples, pages de PDF, texte extrait de documents...) sont ici,
+    // pour que les fournisseurs IA qui les gèrent (voir ApiClient.kt) puissent en tenir compte.
+    val attachments: List<Attachment> = emptyList()
 )
 
 /**
@@ -32,10 +37,11 @@ object ConversationStore {
         imageBase64: String? = null,
         imageMime: String? = null,
         attachmentPath: String? = null,
-        attachmentName: String? = null
+        attachmentName: String? = null,
+        attachments: List<Attachment> = emptyList()
     ) {
-        messages.add(Message(text, true, imageBase64, imageMime, attachmentPath, attachmentName))
-        history.add(HistoryEntry("user", text, imageBase64, imageMime))
+        messages.add(Message(text, true, imageBase64, imageMime, attachmentPath, attachmentName, attachments))
+        history.add(HistoryEntry("user", text, imageBase64, imageMime, attachments))
     }
 
     fun addAssistant(text: String, imageBase64: String? = null, imageMime: String? = null) {
@@ -64,7 +70,7 @@ object ConversationStore {
         messages.addAll(loaded)
         history.clear()
         for (m in loaded) {
-            history.add(HistoryEntry(if (m.isUser) "user" else "assistant", m.text, m.imageBase64, m.imageMimeType))
+            history.add(HistoryEntry(if (m.isUser) "user" else "assistant", m.text, m.imageBase64, m.imageMimeType, m.attachments))
         }
         currentConversationId = conversationId
     }

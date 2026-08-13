@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Environment
 import android.util.Base64
+import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -34,13 +35,19 @@ import java.util.concurrent.TimeUnit
  *    CPU de téléphone, et peut échouer par manque de mémoire sur des appareils
  *    avec peu de RAM disponible — c'est la réalité du calcul de diffusion sur
  *    mobile, pas un défaut de l'intégration.
- * 5. Pollinations AI (gratuit, sans clé) — réintégré à la demande de
- *    l'utilisateur comme DERNIER filet de secours uniquement. ⚠️ HONNÊTETÉ :
- *    leur service a déjà traversé une période de qualité dégradée reconnue
- *    par Pollinations eux-mêmes (issue GitHub #5372) — impossible de garantir
- *    un rendu ou une compréhension du prompt identiques à Gemini, ce n'est
- *    pas la même IA ni le même niveau de qualité, quel que soit le réglage
- *    côté JARVIS. Il vaut mieux que rien, pas un substitut équivalent.
+ * 5. AI Horde (aihorde.net, anciennement Stable Horde) — gratuit, SANS clé
+ *    (accès anonyme officiel avec la clé publique documentée "0000000000"),
+ *    DERNIER filet de secours uniquement. REMPLACE Pollinations (retiré à la
+ *    demande de l'utilisateur suite à des rendus jugés trop flous) : AI Horde
+ *    fait tourner de VRAIS modèles Stable Diffusion/SDXL sur des GPU de
+ *    volontaires (pas un modèle dégradé propriétaire), donc un rendu
+ *    généralement plus fidèle. ⚠️ HONNÊTETÉ, contrepartie réelle : les
+ *    requêtes anonymes ont la PRIORITÉ LA PLUS BASSE dans leur file d'attente
+ *    communautaire — la génération peut prendre de quelques secondes à
+ *    plusieurs minutes selon la charge du moment, contrairement à Pollinations
+ *    qui répondait quasi instantanément (mais avec un rendu régulièrement
+ *    flou). Ce n'est utilisé qu'en tout dernier recours de toute façon, donc
+ *    ce compromis vitesse/fiabilité est acceptable ici.
  *
  * Chaque échec (y compris ceux du SD embarqué) alimente un diagnostic partagé
  * affiché en cas d'échec total — un échec du SD local ne doit JAMAIS écraser
@@ -90,12 +97,11 @@ object ImageGenController {
         // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé.
         tryOnDeviceStableDiffusion(context, prompt, diagnostics)?.let { return it }
 
-        // 5. Pollinations AI (gratuit, sans clé) — en tout dernier recours seulement : leur
-        // service a déjà traversé une période de qualité dégradée qu'ils reconnaissaient
-        // eux-mêmes (issue GitHub #5372), donc ce n'est PAS un rendu garanti équivalent à
-        // Gemini malgré la demande — on ne peut pas promettre une qualité qu'on ne contrôle
-        // pas. Il sert juste de dernier filet gratuit quand tout le reste a échoué.
-        tryPollinations(context, prompt, diagnostics)?.let { return it }
+        // 5. AI Horde (gratuit, sans clé — accès anonyme officiel) — en tout dernier
+        // recours seulement : c'est un cluster communautaire, les requêtes anonymes
+        // passent en dernière priorité et peuvent prendre plusieurs minutes selon la
+        // charge. Remplace Pollinations (qualité jugée insuffisante par l'utilisateur).
+        tryAiHorde(context, prompt, diagnostics)?.let { return it }
 
         val detail = if (diagnostics.isNotEmpty()) {
             "\n\nDétail des échecs :\n" + diagnostics.joinToString("\n") { "• $it" }
@@ -103,7 +109,7 @@ object ImageGenController {
 
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +
-                "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué, Pollinations). " +
+                "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué, AI Horde). " +
                 "Configure au moins une clé API dans ⚙ → Clés API, ou importe un modèle " +
                 "Stable Diffusion local dans ⚙ → Modèles Locaux.$detail",
             null, null
@@ -168,42 +174,119 @@ object ImageGenController {
         }
     }
 
-    // ─── 5. Pollinations AI (gratuit, sans clé, dernier recours) ──────────────
+    // ─── 5. AI Horde (gratuit, sans clé, dernier recours) ─────────────────────
+    // Cluster communautaire de VRAIS modèles Stable Diffusion/SDXL — accès anonyme
+    // officiel et documenté (clé publique "0000000000", aucune inscription requise).
+    // Fonctionnement asynchrone : on soumet la demande, on interroge périodiquement
+    // son statut jusqu'à ce qu'elle soit prête, puis on récupère le résultat — contrairement
+    // aux autres fournisseurs de cette cascade qui répondent en un seul appel HTTP direct.
+    // Documentation officielle : https://aihorde.net/api (endpoints generate/async,
+    // generate/check/{id}, generate/status/{id}), vérifiée disponible et fonctionnelle.
 
-    private fun tryPollinations(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
+    private suspend fun tryAiHorde(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         return try {
-            val encodedPrompt = java.net.URLEncoder.encode(prompt, "UTF-8").replace("+", "%20")
-            // model=flux : leur modèle gratuit et illimité le plus net (turbo, plus rapide,
-            // rend nettement plus flou — c'est justement le symptôme signalé). enhance=true
-            // laisse leur propre IA enrichir le prompt pour un meilleur résultat — utile en
-            // complément de l'enrichissement déjà fait dans le prompt système, sans s'y
-            // substituer.
-            val request = Request.Builder()
-                .url("https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&model=flux&enhance=true")
+            val submitBody = JSONObject()
+                .put("prompt", prompt)
+                .put(
+                    "params",
+                    JSONObject()
+                        .put("width", 512)
+                        .put("height", 512)
+                        .put("steps", 20)
+                        .put("cfg_scale", 7)
+                        .put("sampler_name", "k_euler")
+                        .put("n", 1)
+                )
+                .put("nsfw", false)
+                // r2=false : demande le résultat directement encodé en base64 dans la réponse
+                // de statut, sans passer par un second téléchargement depuis un lien externe.
+                .put("r2", false)
+                .toString()
+                .toRequestBody(JSON)
+
+            val submitRequest = Request.Builder()
+                .url("https://aihorde.net/api/v2/generate/async")
+                .addHeader("apikey", "0000000000") // accès anonyme officiel documenté par AI Horde
+                .addHeader("Content-Type", "application/json")
+                .post(submitBody)
+                .build()
+
+            val jobId = client.newCall(submitRequest).execute().use { response ->
+                val bodyStr = response.body?.string() ?: ""
+                if (!response.isSuccessful) {
+                    diagnostics.add("AI Horde : HTTP ${response.code} lors de la soumission — ${bodyStr.take(200)}")
+                    return null
+                }
+                val id = JSONObject(bodyStr).optString("id")
+                if (id.isBlank()) {
+                    diagnostics.add("AI Horde : demande non acceptée — ${bodyStr.take(200)}")
+                    return null
+                }
+                id
+            }
+
+            // Sondage périodique (la horde recommande d'éviter plus d'1 requête/seconde ; on
+            // espace davantage par courtoisie) — budget total ~2 minutes, cohérent avec une
+            // file d'attente anonyme (priorité la plus basse) qui peut être lente sans pour
+            // autant faire attendre l'utilisateur indéfiniment sur un dernier recours gratuit.
+            var done = false
+            var faulted = false
+            var attempts = 0
+            while (attempts < 40 && !done && !faulted) {
+                delay(3000)
+                val checkRequest = Request.Builder()
+                    .url("https://aihorde.net/api/v2/generate/check/$jobId")
+                    .get().build()
+                client.newCall(checkRequest).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val checkJson = JSONObject(response.body?.string() ?: "")
+                        done = checkJson.optBoolean("done", false)
+                        faulted = checkJson.optBoolean("faulted", false)
+                    }
+                }
+                attempts++
+            }
+
+            if (faulted) {
+                diagnostics.add("AI Horde : la génération a échoué côté worker communautaire")
+                return null
+            }
+            if (!done) {
+                diagnostics.add(
+                    "AI Horde : délai d'attente dépassé (file d'attente anonyme surchargée) — " +
+                        "réessaie plus tard, ou crée un compte gratuit sur aihorde.net pour une priorité plus élevée"
+                )
+                return null
+            }
+
+            val statusRequest = Request.Builder()
+                .url("https://aihorde.net/api/v2/generate/status/$jobId")
                 .get().build()
 
-            client.newCall(request).execute().use { response ->
-                val contentType = response.header("Content-Type") ?: ""
-                if (!response.isSuccessful || !contentType.startsWith("image/")) {
-                    diagnostics.add("Pollinations : HTTP ${response.code} — réponse inexploitable")
+            client.newCall(statusRequest).execute().use { response ->
+                if (!response.isSuccessful) {
+                    diagnostics.add("AI Horde : HTTP ${response.code} lors de la récupération du résultat")
                     return null
                 }
-                val bytes = response.body?.bytes()
-                if (bytes == null || bytes.isEmpty()) {
-                    diagnostics.add("Pollinations : réponse vide")
+                val statusJson = JSONObject(response.body?.string() ?: "")
+                val first = statusJson.optJSONArray("generations")?.optJSONObject(0)
+                val b64 = first?.optString("img")
+                if (b64.isNullOrBlank()) {
+                    diagnostics.add("AI Horde : réponse terminée mais sans image exploitable")
                     return null
                 }
-                val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val bytes = Base64.decode(b64, Base64.DEFAULT)
                 val savedPath = saveToGallery(context, bytes, prompt)
+                val model = first.optString("model", "Stable Diffusion")
                 Result(
-                    "🎨 Image générée pour « $prompt » (Pollinations AI — moteur gratuit de dernier recours, qualité variable selon leur service).\n📁 Enregistrée dans : $savedPath",
-                    base64,
-                    "image/jpeg",
+                    "🎨 Image générée pour « $prompt » (AI Horde — $model, cluster Stable Diffusion communautaire gratuit).\n📁 Enregistrée dans : $savedPath",
+                    b64,
+                    "image/png",
                     savedPath
                 )
             }
         } catch (e: Exception) {
-            diagnostics.add("Pollinations : exception réseau — ${e.message}")
+            diagnostics.add("AI Horde : exception réseau — ${e.message}")
             null
         }
     }

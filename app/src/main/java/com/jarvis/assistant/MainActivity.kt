@@ -26,7 +26,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -49,9 +48,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var pendingImageMime: String? = null
     // Chemin disque + nom d'un fichier joint (photo OU document) en attente d'envoi — distinct
     // de pendingImageBase64 (qui ne sert qu'à la "vision" IA). Permet à attach_contact_file de
-    // retrouver le fichier original plus tard, même une fois le message envoyé.
+    // retrouver le fichier original plus tard, même une fois le message envoyé. Ce sont toujours
+    // ceux de la PREMIÈRE pièce jointe (compatibilité) — voir pendingExtraAttachments pour le reste.
     private var pendingAttachmentPath: String? = null
     private var pendingAttachmentName: String? = null
+
+    // Objet complet de la PREMIÈRE pièce jointe (y compris son extractedText éventuel, ex: un
+    // .docx en premier — les scalaires pendingImageBase64/pendingAttachmentPath ci-dessus n'en
+    // sont qu'un miroir partiel pour l'affichage/la compatibilité, la vraie source de vérité
+    // envoyée à l'IA est cet objet).
+    private var pendingPrimaryAttachment: Attachment? = null
+
+    // Pièces jointes au-delà de la première (plusieurs fichiers, ou contenu d'un dossier/PDF
+    // multi-pages) — voir Attachment.kt/AttachmentController.kt.
+    private val pendingExtraAttachments = mutableListOf<Attachment>()
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -61,10 +71,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private val pickImageLauncher = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) attachImage(uri)
+    // Sélection de PLUSIEURS fichiers en une fois (images, vidéos, documents, zip, pdf...) —
+    // GetMultipleContents renvoie une liste d'URI même si l'utilisateur n'en choisit qu'un seul.
+    private val pickFilesLauncher = registerForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<@JvmSuppressWildcards Uri> ->
+        if (uris.isNotEmpty()) attachFiles(uris)
+    }
+
+    // Sélection d'un DOSSIER entier (ACTION_OPEN_DOCUMENT_TREE) — tous les fichiers directement
+    // à l'intérieur sont joints pour analyse (voir AttachmentController.listFolderChildren).
+    private val pickFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            val children = AttachmentController.listFolderChildren(this, treeUri)
+            if (children.isEmpty()) {
+                Toast.makeText(this, "Dossier vide ou illisible", Toast.LENGTH_SHORT).show()
+            } else {
+                attachFiles(children)
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,8 +144,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         sendButton.setOnClickListener {
             val text = messageInput.text.toString().trim()
-            if (text.isNotEmpty() || pendingImageBase64 != null || pendingAttachmentPath != null) {
-                val defaultText = if (pendingImageBase64 != null) "Décris cette image." else "Voici un fichier joint."
+            val hasAttachment = pendingImageBase64 != null || pendingAttachmentPath != null || pendingExtraAttachments.isNotEmpty()
+            if (text.isNotEmpty() || hasAttachment) {
+                val totalCount = (if (pendingAttachmentPath != null) 1 else 0) + pendingExtraAttachments.size
+                val defaultText = when {
+                    totalCount > 1 -> "Analyse ces $totalCount fichiers joints."
+                    pendingImageBase64 != null -> "Décris cette image."
+                    else -> "Analyse ce fichier joint."
+                }
                 sendMessage(text.ifBlank { defaultText })
                 messageInput.text.clear()
             }
@@ -126,7 +159,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         micButton.setOnClickListener { checkPermissionAndOpenVoiceMode() }
 
-        photoButton.setOnClickListener { pickImageLauncher.launch("*/*") }
+        // Appui simple = choisir un ou plusieurs fichiers (image/vidéo/document/zip/pdf...).
+        // Appui long = choisir un DOSSIER entier dont tous les fichiers seront joints.
+        photoButton.setOnClickListener { pickFilesLauncher.launch("*/*") }
+        photoButton.setOnLongClickListener {
+            Toast.makeText(this, "📂 Choisis un dossier — tous ses fichiers seront joints", Toast.LENGTH_SHORT).show()
+            pickFolderLauncher.launch(null)
+            true
+        }
 
         removePendingImageButton.setOnClickListener { clearPendingImage() }
 
@@ -251,39 +291,71 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         startActivity(Intent(this, VoiceModeActivity::class.java))
     }
 
-    private fun attachImage(uri: Uri) {
-        val mimeType = contentResolver.getType(uri) ?: ""
-        val isImage = mimeType.startsWith("image/")
-
+    /**
+     * Traite une ou plusieurs pièces jointes d'un coup (choix multiple, ou contenu d'un
+     * dossier entier) — chaque fichier est copié en local, PUIS analysé par
+     * AttachmentController (extraction de texte, rendu de pages PDF en images, aperçu vidéo...).
+     * La toute première pièce jointe traitée alimente les champs legacy (pendingImageBase64/
+     * pendingAttachmentPath) pour rester compatible avec attach_contact_file ; tout le reste
+     * (y compris les pages supplémentaires d'un même PDF) va dans pendingExtraAttachments.
+     */
+    private fun attachFiles(uris: List<Uri>) {
         CoroutineScope(Dispatchers.IO).launch {
-            // Toute pièce jointe (photo OU document) est copiée sur le disque, pas seulement
-            // encodée en mémoire — c'est ce qui permet à attach_contact_file de la retrouver
-            // plus tard (JARVIS n'a aucun autre moyen d'accéder au fichier original une fois
-            // le sélecteur fermé, l'URI content:// n'étant pas garanti réutilisable ensuite).
-            val persisted = persistAttachmentCopy(uri, mimeType)
-            val visionResult = if (isImage) encodeImage(uri) else null
+            var anyFailed = false
+            val newAttachments = mutableListOf<Attachment>()
+            for (uri in uris) {
+                val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+                val persisted = persistAttachmentCopy(uri, mimeType)
+                if (persisted == null) {
+                    anyFailed = true
+                    continue
+                }
+                val (path, name) = persisted
+                newAttachments.addAll(AttachmentController.process(this@MainActivity, path, name, mimeType))
+            }
 
             withContext(Dispatchers.Main) {
-                if (persisted == null && visionResult == null) {
-                    Toast.makeText(this@MainActivity, "Impossible de lire ce fichier", Toast.LENGTH_SHORT).show()
+                if (newAttachments.isEmpty()) {
+                    Toast.makeText(this@MainActivity, "Impossible de lire ce(s) fichier(s)", Toast.LENGTH_SHORT).show()
                     return@withContext
                 }
-                pendingAttachmentPath = persisted?.first
-                pendingAttachmentName = persisted?.second
+                if (anyFailed) {
+                    Toast.makeText(this@MainActivity, "⚠️ Certains fichiers n'ont pas pu être lus", Toast.LENGTH_SHORT).show()
+                }
 
-                if (isImage && visionResult != null) {
-                    pendingImageBase64 = visionResult.first
-                    pendingImageMime = visionResult.second
-                    val bytes = Base64.decode(visionResult.first, Base64.NO_WRAP)
+                for (a in newAttachments) {
+                    if (pendingPrimaryAttachment == null) {
+                        // Première pièce jointe de ce lot — objet complet conservé tel quel
+                        // (extractedText inclus), + miroir dans les champs legacy pour
+                        // l'affichage/attach_contact_file.
+                        pendingPrimaryAttachment = a
+                        pendingAttachmentPath = a.path
+                        pendingAttachmentName = a.name
+                        if (a.imageBase64 != null) {
+                            pendingImageBase64 = a.imageBase64
+                            pendingImageMime = a.imageMime
+                        }
+                    } else {
+                        pendingExtraAttachments.add(a)
+                    }
+                }
+
+                if (pendingImageBase64 != null) {
+                    val bytes = Base64.decode(pendingImageBase64, Base64.NO_WRAP)
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     pendingImageThumbnail.setImageBitmap(bmp)
                     pendingImageThumbnail.visibility = View.VISIBLE
-                    removePendingImageButtonRef?.text = "✕ retirer la photo"
                 } else {
-                    pendingImageBase64 = null
-                    pendingImageMime = null
                     pendingImageThumbnail.visibility = View.GONE
-                    removePendingImageButtonRef?.text = "📎 ${pendingAttachmentName ?: "fichier"} — ✕ retirer"
+                }
+
+                val totalCount = 1 + pendingExtraAttachments.size
+                removePendingImageButtonRef?.text = if (totalCount > 1) {
+                    "📎 $totalCount fichiers joints — ✕ tout retirer"
+                } else if (pendingImageBase64 != null) {
+                    "✕ retirer la photo"
+                } else {
+                    "📎 ${pendingAttachmentName ?: "fichier"} — ✕ retirer"
                 }
                 pendingImageBar.visibility = View.VISIBLE
             }
@@ -319,46 +391,30 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun encodeImage(uri: Uri): Pair<String, String>? {
-        return try {
-            val input = contentResolver.openInputStream(uri) ?: return null
-            val original = BitmapFactory.decodeStream(input)
-            input.close()
-            if (original == null) return null
-
-            val maxDim = 1024
-            val scale = minOf(1f, maxDim.toFloat() / maxOf(original.width, original.height))
-            val resized = if (scale < 1f) {
-                Bitmap.createScaledBitmap(
-                    original,
-                    (original.width * scale).toInt().coerceAtLeast(1),
-                    (original.height * scale).toInt().coerceAtLeast(1),
-                    true
-                )
-            } else original
-
-            val out = ByteArrayOutputStream()
-            resized.compress(Bitmap.CompressFormat.JPEG, 80, out)
-            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP) to "image/jpeg"
-        } catch (e: Exception) {
-            null
-        }
-    }
-
     private fun clearPendingImage() {
         pendingImageBase64 = null
         pendingImageMime = null
         pendingAttachmentPath = null
         pendingAttachmentName = null
+        pendingPrimaryAttachment = null
+        pendingExtraAttachments.clear()
         pendingImageThumbnail.visibility = View.VISIBLE
         pendingImageBar.visibility = View.GONE
     }
 
     private fun sendMessage(text: String) {
+        // Liste complète des pièces jointes (première + reste) réellement envoyée à l'IA — les
+        // champs legacy imageBase64/attachmentPath restent en plus pour compatibilité (aperçu UI,
+        // attach_contact_file).
+        val allAttachments = mutableListOf<Attachment>()
+        pendingPrimaryAttachment?.let { allAttachments.add(it) }
+        allAttachments.addAll(pendingExtraAttachments)
+
         addMessage(
             text, isUser = true, speak = false,
             imageBase64 = pendingImageBase64, imageMime = pendingImageMime,
-            attachmentPath = pendingAttachmentPath, attachmentName = pendingAttachmentName
+            attachmentPath = pendingAttachmentPath, attachmentName = pendingAttachmentName,
+            attachments = allAttachments
         )
         clearPendingImage()
         statusText.text = "● JARVIS réfléchit…"
@@ -388,10 +444,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         imageBase64: String? = null,
         imageMime: String? = null,
         attachmentPath: String? = null,
-        attachmentName: String? = null
+        attachmentName: String? = null,
+        attachments: List<Attachment> = emptyList()
     ) {
         if (isUser) {
-            ConversationStore.addUser(text, imageBase64, imageMime, attachmentPath, attachmentName)
+            ConversationStore.addUser(text, imageBase64, imageMime, attachmentPath, attachmentName, attachments)
         } else {
             ConversationStore.addAssistant(text)
         }

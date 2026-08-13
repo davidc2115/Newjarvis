@@ -44,7 +44,7 @@ object JarvisCommandParser {
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact",
-        "github_list_repos", "github_read_file", "list_generations"
+        "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "list_generations"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -325,7 +325,39 @@ object JarvisCommandParser {
                 KmlExportController.exportToKml(context, category).message
             }
 
-            "github_list_repos" -> GitHubController.listRepos(context)
+            "github_list_repos" -> GitHubController.listRepos(context, json.optString("account", ""))
+
+            "github_list_accounts" -> GitHubController.listAccounts(context)
+
+            "github_add_account" -> {
+                val label = json.optString("label", "")
+                val token = json.optString("token", "")
+                if (label.isBlank() || token.isBlank()) "❌ Précise un libellé (ex: \"perso\", \"pro\") et le jeton d'accès personnel GitHub."
+                else {
+                    Prefs.addGithubAccount(context, Prefs.GitHubAccount(label = label, token = token))
+                    "✅ Compte GitHub « $label » ajouté."
+                }
+            }
+
+            "github_remove_account" -> {
+                val label = json.optString("label", "")
+                val account = Prefs.findGithubAccount(context, label)
+                if (account == null) "❌ Aucun compte GitHub trouvé pour « $label »."
+                else {
+                    Prefs.removeGithubAccount(context, account.id)
+                    "✅ Compte GitHub « ${account.label} » supprimé de JARVIS (le compte GitHub lui-même n'est pas affecté)."
+                }
+            }
+
+            "github_set_default_account" -> {
+                val label = json.optString("label", "")
+                val account = Prefs.findGithubAccount(context, label)
+                if (account == null) "❌ Aucun compte GitHub trouvé pour « $label »."
+                else {
+                    Prefs.setDefaultGithubAccount(context, account.id)
+                    "✅ Compte GitHub par défaut : « ${account.label} »."
+                }
+            }
 
             "github_create_repo" -> {
                 val name = json.optString("name", "")
@@ -333,7 +365,20 @@ object JarvisCommandParser {
                 else GitHubController.createRepo(
                     context, name,
                     json.optString("description", ""),
-                    json.optBoolean("private", false)
+                    json.optBoolean("private", false),
+                    json.optString("account", "")
+                )
+            }
+
+            "github_list_contents" -> {
+                val owner = json.optString("owner", "")
+                val repo = json.optString("repo", "")
+                if (owner.isBlank() || repo.isBlank()) "❌ Paramètres manquants (owner et repo sont requis)."
+                else GitHubController.listContents(
+                    context, owner, repo,
+                    json.optString("path", ""),
+                    json.optString("branch", "main"),
+                    json.optString("account", "")
                 )
             }
 
@@ -348,9 +393,43 @@ object JarvisCommandParser {
                     GitHubController.createOrUpdateFile(
                         context, owner, repo, path, content,
                         json.optString("message", "Mise à jour via JARVIS"),
-                        json.optString("branch", "main")
+                        json.optString("branch", "main"),
+                        json.optString("account", "")
                     )
                 }
+            }
+
+            "github_delete_file" -> {
+                val owner = json.optString("owner", "")
+                val repo = json.optString("repo", "")
+                val path = json.optString("path", "")
+                if (owner.isBlank() || repo.isBlank() || path.isBlank()) "❌ Paramètres manquants (owner, repo et path sont requis)."
+                else GitHubController.deleteFile(
+                    context, owner, repo, path,
+                    json.optString("message", "Suppression via JARVIS"),
+                    json.optString("branch", "main"),
+                    json.optString("account", "")
+                )
+            }
+
+            "github_delete_folder" -> {
+                val owner = json.optString("owner", "")
+                val repo = json.optString("repo", "")
+                val path = json.optString("path", "")
+                if (owner.isBlank() || repo.isBlank() || path.isBlank()) "❌ Paramètres manquants (owner, repo et path sont requis)."
+                else GitHubController.deleteFolder(
+                    context, owner, repo, path,
+                    json.optString("message", "Suppression de dossier via JARVIS"),
+                    json.optString("branch", "main"),
+                    json.optString("account", "")
+                )
+            }
+
+            "github_delete_repo" -> {
+                val owner = json.optString("owner", "")
+                val repo = json.optString("repo", "")
+                if (owner.isBlank() || repo.isBlank()) "❌ Paramètres manquants (owner et repo sont requis)."
+                else GitHubController.deleteRepo(context, owner, repo, json.optString("account", ""))
             }
 
             "github_read_file" -> {
@@ -358,7 +437,7 @@ object JarvisCommandParser {
                 val repo = json.optString("repo", "")
                 val path = json.optString("path", "")
                 if (owner.isBlank() || repo.isBlank() || path.isBlank()) "❌ Paramètres manquants."
-                else GitHubController.readFile(context, owner, repo, path, json.optString("branch", "main"))
+                else GitHubController.readFile(context, owner, repo, path, json.optString("branch", "main"), json.optString("account", ""))
             }
 
             "github_create_branch" -> {
@@ -366,7 +445,7 @@ object JarvisCommandParser {
                 val repo = json.optString("repo", "")
                 val newBranch = json.optString("newBranch", "")
                 if (owner.isBlank() || repo.isBlank() || newBranch.isBlank()) "❌ Paramètres manquants."
-                else GitHubController.createBranch(context, owner, repo, newBranch, json.optString("fromBranch", "main"))
+                else GitHubController.createBranch(context, owner, repo, newBranch, json.optString("fromBranch", "main"), json.optString("account", ""))
             }
 
             "github_create_pr" -> {
@@ -380,7 +459,8 @@ object JarvisCommandParser {
                     GitHubController.createPullRequest(
                         context, owner, repo, title, head,
                         json.optString("base", "main"),
-                        json.optString("body", "")
+                        json.optString("body", ""),
+                        json.optString("account", "")
                     )
                 }
             }
@@ -619,7 +699,14 @@ object JarvisCommandParser {
                     temperature = if (json.has("temperature")) json.optDouble("temperature") else null,
                     volumePct = if (json.has("volume")) json.optInt("volume") else null,
                     positionPct = if (json.has("position")) json.optInt("position") else null,
-                    speedPct = if (json.has("speed")) json.optInt("speed") else null
+                    speedPct = if (json.has("speed")) json.optInt("speed") else null,
+                    hvacMode = json.optString("hvacMode", "").ifBlank { null },
+                    presetMode = json.optString("presetMode", "").ifBlank { null },
+                    fanMode = json.optString("fanMode", "").ifBlank { null },
+                    option = json.optString("option", "").ifBlank { null },
+                    numberValue = if (json.has("value")) json.optDouble("value") else null,
+                    remoteCommand = json.optString("command", "").ifBlank { null },
+                    source = json.optString("source", "").ifBlank { null }
                 ).message
             }
             "ha_browse_media" -> {

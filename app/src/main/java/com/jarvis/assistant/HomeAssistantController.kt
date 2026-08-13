@@ -54,9 +54,20 @@ object HomeAssistantController {
     // "automation" et "script" inclus : turn_on/turn_off active/désactive une
     // automatisation existante, et automation.trigger permet de la déclencher
     // manuellement — le pilotage réel qu'expose honnêtement l'API HA.
+    // Élargi pour couvrir les intégrations tierces courantes (télé, poêle à granulés...) :
+    // "remote" (télécommandes — ex: intégration Samsung TV/LG webOS/Android TV, envoi de
+    // touches via remote.send_command), "select"/"input_select" (menus déroulants — ex:
+    // mode d'un poêle à granulés : Auto/Manuel/Eco/Chrono), "number"/"input_number"
+    // (curseurs — ex: niveau de puissance d'un poêle), "valve", "water_heater", "button",
+    // "alarm_control_panel". Sans ces domaines ici, leurs entités seraient invisibles pour
+    // JARVIS (filtrées silencieusement) même si ha_call_service pourrait techniquement les
+    // piloter — c'était un vrai trou dans le "contrôle total" pour tout appareil qui n'utilise
+    // pas un domaine HA "classique".
     private val CONTROLLABLE_DOMAINS = setOf(
         "light", "switch", "climate", "cover", "fan", "lock", "media_player",
-        "vacuum", "scene", "script", "input_boolean", "siren", "humidifier", "automation"
+        "vacuum", "scene", "script", "input_boolean", "siren", "humidifier", "automation",
+        "remote", "select", "input_select", "number", "input_number", "valve",
+        "water_heater", "button", "alarm_control_panel"
     )
     private val READONLY_DOMAINS = setOf("sensor", "binary_sensor", "person", "device_tracker", "weather")
 
@@ -317,7 +328,14 @@ object HomeAssistantController {
         temperature: Double? = null,
         volumePct: Int? = null,
         positionPct: Int? = null,
-        speedPct: Int? = null
+        speedPct: Int? = null,
+        hvacMode: String? = null,
+        presetMode: String? = null,
+        fanMode: String? = null,
+        option: String? = null,
+        numberValue: Double? = null,
+        remoteCommand: String? = null,
+        source: String? = null
     ): ActionResult {
         val domain = entityId.substringBefore(".")
         return when (domain) {
@@ -329,12 +347,43 @@ object HomeAssistantController {
                 callService(context, "light", "turn_on", entityId, extra)
             }
             "climate" -> {
-                if (temperature == null) return ActionResult(false, "❌ Précise la température souhaitée.")
-                callService(context, "climate", "set_temperature", entityId, mapOf("temperature" to temperature))
+                // Un poêle à granulés/thermostat exposé en "climate" propose souvent PLUSIEURS
+                // réglages distincts (pas juste la température) : hvac_mode (ex: off/heat/auto),
+                // preset_mode (souvent utilisé pour le niveau de puissance : Eco/Comfort/1-5...),
+                // fan_mode. On applique chaque paramètre fourni, dans l'ordre logique
+                // (mode général d'abord), et on rapporte le premier échec réel le cas échéant.
+                val actions = buildList<Pair<String, Map<String, Any>>> {
+                    hvacMode?.let { add("set_hvac_mode" to mapOf("hvac_mode" to it)) }
+                    presetMode?.let { add("set_preset_mode" to mapOf("preset_mode" to it)) }
+                    fanMode?.let { add("set_fan_mode" to mapOf("fan_mode" to it)) }
+                    temperature?.let { add("set_temperature" to mapOf("temperature" to it)) }
+                }
+                if (actions.isEmpty()) {
+                    return ActionResult(
+                        false,
+                        "❌ Précise ce que tu veux régler pour « $entityId » : température, mode (hvacMode : off/heat/auto...), " +
+                            "préréglage (presetMode : eco/comfort/niveau de puissance...) ou vitesse de ventilation (fanMode)."
+                    )
+                }
+                var last = ActionResult(true, "")
+                for ((service, extra) in actions) {
+                    last = callService(context, "climate", service, entityId, extra)
+                    if (!last.success) return last
+                }
+                ActionResult(true, "✅ Réglage(s) appliqué(s) sur « $entityId ».")
             }
             "media_player" -> {
-                if (volumePct == null) return ActionResult(false, "❌ Précise le volume souhaité (0 à 100).")
-                callService(context, "media_player", "volume_set", entityId, mapOf("volume_level" to (volumePct.coerceIn(0, 100) / 100.0)))
+                val actions = buildList<Pair<String, Map<String, Any>>> {
+                    volumePct?.let { add("volume_set" to mapOf("volume_level" to (it.coerceIn(0, 100) / 100.0))) }
+                    source?.let { add("select_source" to mapOf("source" to it)) }
+                }
+                if (actions.isEmpty()) return ActionResult(false, "❌ Précise le volume souhaité (0 à 100) ou la source à sélectionner (ex: \"HDMI 1\").")
+                var last = ActionResult(true, "")
+                for ((service, extra) in actions) {
+                    last = callService(context, "media_player", service, entityId, extra)
+                    if (!last.success) return last
+                }
+                ActionResult(true, "✅ Réglage(s) appliqué(s) sur « $entityId ».")
             }
             "cover" -> {
                 if (positionPct == null) return ActionResult(false, "❌ Précise la position du volet souhaitée (0 = fermé, 100 = ouvert).")
@@ -344,7 +393,32 @@ object HomeAssistantController {
                 if (speedPct == null) return ActionResult(false, "❌ Précise la vitesse du ventilateur souhaitée (0 à 100).")
                 callService(context, "fan", "set_percentage", entityId, mapOf("percentage" to speedPct.coerceIn(0, 100)))
             }
-            else -> ActionResult(false, "❌ « $entityId » ($domain) ne propose pas de réglage précis depuis JARVIS — seulement allumer/éteindre/basculer.")
+            // "remote" : télécommandes réseau exposées par Home Assistant pour de nombreuses
+            // télés (Samsung, LG webOS, Android TV...) — remoteCommand = nom exact de la
+            // touche tel qu'attendu par l'intégration HA concernée (ex: "KEY_VOLUP",
+            // "KEY_HOME", "KEY_SOURCE" pour Samsung ; varie selon l'intégration, à vérifier
+            // dans Home Assistant → Outils de développement → Actions si le nom exact est incertain).
+            "remote" -> {
+                if (remoteCommand.isNullOrBlank()) return ActionResult(false, "❌ Précise la commande à envoyer à la télécommande (ex: \"KEY_VOLUP\", \"KEY_HOME\").")
+                callService(context, "remote", "send_command", entityId, mapOf("command" to remoteCommand))
+            }
+            "select", "input_select" -> {
+                if (option.isNullOrBlank()) return ActionResult(false, "❌ Précise l'option à sélectionner pour « $entityId ».")
+                callService(context, domain, "select_option", entityId, mapOf("option" to option))
+            }
+            "number", "input_number" -> {
+                if (numberValue == null) return ActionResult(false, "❌ Précise la valeur numérique à appliquer pour « $entityId ».")
+                callService(context, domain, "set_value", entityId, mapOf("value" to numberValue))
+            }
+            "water_heater" -> {
+                if (temperature == null) return ActionResult(false, "❌ Précise la température souhaitée pour ce chauffe-eau.")
+                callService(context, "water_heater", "set_temperature", entityId, mapOf("temperature" to temperature))
+            }
+            "valve" -> {
+                if (positionPct == null) return ActionResult(false, "❌ Précise la position de la vanne souhaitée (0 = fermée, 100 = ouverte).")
+                callService(context, "valve", "set_valve_position", entityId, mapOf("position" to positionPct.coerceIn(0, 100)))
+            }
+            else -> ActionResult(false, "❌ « $entityId » ($domain) ne propose pas de réglage précis depuis JARVIS — seulement allumer/éteindre/basculer (ou utilise ha_call_service pour un service HA précis).")
         }
     }
 
