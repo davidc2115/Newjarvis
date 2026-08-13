@@ -362,8 +362,39 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    // Dossiers déjà gérés par JARVIS lui-même : si le fichier qu'on rejoint vit déjà dans l'un
+    // d'eux (ex: une image générée précédemment, rejointe depuis la galerie pour analyse), on ne
+    // doit PAS en faire une seconde copie dans Pieces-jointes-chat — le fichier original suffit.
+    private val jarvisManagedDirNames = listOf("JARVIS-Generated", "JARVIS-Generations", "JARVIS-Fichiers")
+
+    /**
+     * Si [uri] pointe déjà vers un fichier physiquement présent dans un dossier géré par JARVIS
+     * (voir jarvisManagedDirNames), renvoie directement son chemin réel sans copie — évite le
+     * doublon signalé ("cela ne les enregistre pas une seconde fois sur le smartphone").
+     * La colonne MediaStore "_data" est dépréciée mais reste renseignée pour les fichiers locaux
+     * issus de la galerie/du stockage partagé ; si absente ou hors dossier JARVIS, on retombe sur
+     * la copie classique.
+     */
+    private fun resolveExistingJarvisPath(uri: Uri): Pair<String, String>? {
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+                val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val name = if (nameIdx >= 0) cursor.getString(nameIdx) else null
+                val dataIdx = cursor.getColumnIndex("_data")
+                val dataPath = if (dataIdx >= 0) cursor.getString(dataIdx) else null
+                if (dataPath != null && jarvisManagedDirNames.any { dataPath.contains(it) } && java.io.File(dataPath).exists()) {
+                    dataPath to (name ?: java.io.File(dataPath).name)
+                } else null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Copie le fichier pointé par [uri] dans Documents/JARVIS-Fichiers/Pieces-jointes-chat/, retourne (chemin, nom). */
     private fun persistAttachmentCopy(uri: Uri, mimeType: String): Pair<String, String>? {
+        resolveExistingJarvisPath(uri)?.let { return it }
         return try {
             val input = contentResolver.openInputStream(uri) ?: return null
             val originalName = queryDisplayName(uri) ?: "piece_jointe_${System.currentTimeMillis()}"

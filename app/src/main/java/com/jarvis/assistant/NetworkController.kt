@@ -346,6 +346,60 @@ object NetworkController {
             ?: saved.firstOrNull { it.name.contains(q, ignoreCase = true) && it.remoteHost.isNotBlank() }?.remoteHost
     }
 
+    /**
+     * Récupère l'IP publique (WAN) du réseau actuel — best effort, via un service HTTP
+     * public qui renvoie juste l'IP en texte brut, sans clé ni compte. Best effort
+     * volontaire : un échec (pas de réseau, service indisponible...) renvoie simplement
+     * null, ne doit jamais faire échouer l'action appelante (ping/ouverture web) pour
+     * laquelle cette capture n'est qu'un bonus.
+     */
+    suspend fun fetchPublicIp(): String? = withContext(Dispatchers.IO) {
+        try {
+            val url = java.net.URL("https://api.ipify.org")
+            val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 4000
+                readTimeout = 4000
+            }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                conn.disconnect()
+                return@withContext null
+            }
+            val ip = conn.inputStream.bufferedReader().use { it.readText() }.trim()
+            conn.disconnect()
+            ip.takeIf { it.isNotBlank() && it.matches(Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$")) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Demandé explicitement : capture automatiquement l'IP publique courante comme accès
+     * distant pour [deviceName] dès qu'une connexion LOCALE à cet appareil réussit — pour
+     * que JARVIS puisse ensuite retenter cet accès depuis l'extérieur du réseau, sans que
+     * l'utilisateur ait à chercher et saisir lui-même son IP publique via set_remote_access.
+     *
+     * Limites honnêtes, assumées dans le message renvoyé : (1) ne s'applique qu'aux
+     * appareils déjà enregistrés par leur NOM (📡 Réseau local) — une IP tapée directement
+     * n'a pas de fiche où stocker l'info ; (2) NE REMPLACE JAMAIS un accès distant déjà
+     * configuré (ex: un DDNS+port mis en place manuellement) ; (3) la plupart des
+     * connexions grand public ont une IP dynamique qui peut changer — ce n'est pas un
+     * DDNS, juste un point de départ pratique, capturé à nouveau à chaque connexion locale
+     * réussie tant qu'aucun accès distant explicite n'a été défini ; (4) fonctionne
+     * seulement si le port nécessaire est déjà redirigé vers l'appareil sur la box/routeur
+     * — JARVIS ne peut pas créer cette redirection lui-même.
+     */
+    private suspend fun autoCaptureRemoteHost(context: Context, deviceName: String): String? {
+        val existing = resolveDeviceRemoteHost(context, deviceName)
+        if (!existing.isNullOrBlank()) return null // ne jamais écraser un réglage déjà en place
+        val saved = Prefs.getSavedNetworkDevices(context).firstOrNull { it.name.equals(deviceName, ignoreCase = true) }
+            ?: return null
+        val publicIp = fetchPublicIp() ?: return null
+        Prefs.setDeviceRemoteHost(context, saved.name, publicIp)
+        return publicIp
+    }
+
     private fun getBroadcastAddress(context: Context): InetAddress {
         val prefix = getLocalSubnetPrefix(context)
         if (prefix != null) {
@@ -405,7 +459,15 @@ object NetworkController {
             val device = Device(ip = ip, openPorts = openPorts)
             val webPart = guessWebUrl(device)?.let { "\n🌐 Interface web disponible : $it" } ?: ""
             val portsPart = if (openPorts.isNotEmpty()) "\n🔓 Ports ouverts : ${openPorts.joinToString(", ")}" else ""
-            return@withContext "✅ « $query » ($ip) répond en ${elapsedMs}ms — ${device.guessedType}.$portsPart$webPart"
+            // Capture automatique de l'IP publique pour un accès distant ultérieur — voir
+            // autoCaptureRemoteHost (n'écrase jamais un accès distant déjà configuré).
+            val capturedIp = autoCaptureRemoteHost(context, query)
+            val capturePart = if (capturedIp != null) {
+                "\n🌍 IP publique capturée pour un accès distant futur : $capturedIp (fonctionnera seulement si le port " +
+                    "nécessaire est redirigé vers cet appareil sur ta box — sinon utilise set_remote_access pour préciser " +
+                    "un DDNS+port fiable)."
+            } else ""
+            return@withContext "✅ « $query » ($ip) répond en ${elapsedMs}ms — ${device.guessedType}.$portsPart$webPart$capturePart"
         }
 
         // Injoignable en local (donc éventuellement hors Wi-Fi domestique) — bascule sur
@@ -443,6 +505,7 @@ object NetworkController {
         val openPorts = withContext(Dispatchers.IO) {
             WEB_PORTS.map { port -> async { port to isPortOpen(ip, port) } }.awaitAll()
         }.filter { it.second }.map { it.first }
+        val reachedLocally = openPorts.isNotEmpty()
 
         var url = guessWebUrl(Device(ip = ip, openPorts = openPorts))
         if (url == null) {
@@ -461,12 +524,21 @@ object NetworkController {
             return "❌ « $query » ($ip) ne semble pas exposer d'interface web accessible (aucun des ports 80/443/8080/631 n'est ouvert). Pour une imprimante, vérifie que le serveur web intégré est activé dans ses réglages."
         }
 
+        // Capture automatique de l'IP publique pour un accès distant ultérieur — uniquement
+        // quand l'appareil a bien été joint EN LOCAL cette fois-ci (pas via un accès
+        // distant déjà en place, ce qui n'apporterait rien).
+        val capturePart = if (reachedLocally) {
+            autoCaptureRemoteHost(context, query)?.let {
+                "\n🌍 IP publique capturée pour un accès distant futur : $it (nécessite que le port soit redirigé sur ta box)."
+            } ?: ""
+        } else ""
+
         return try {
             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
                 addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
-            "🌐 Ouverture de l'interface web de « $query » : $url"
+            "🌐 Ouverture de l'interface web de « $query » : $url$capturePart"
         } catch (e: Exception) {
             "❌ Impossible d'ouvrir le navigateur : ${e.message}"
         }

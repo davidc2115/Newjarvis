@@ -387,6 +387,22 @@ object Prefs {
         prefs(context).edit().remove(KEY_CONTACT_PRESENTATION_STYLE).apply()
     }
 
+    // Même principe que ci-dessus mais pour la présentation de la localisation d'une personne
+    // (ha_status{domain:"person"}) — demandé par l'utilisateur en même temps que la persistance
+    // du style des fiches contact.
+    private const val KEY_LOCATION_PRESENTATION_STYLE = "location_presentation_style"
+
+    fun getLocationPresentationStyle(context: Context): String =
+        prefs(context).getString(KEY_LOCATION_PRESENTATION_STYLE, "") ?: ""
+
+    fun saveLocationPresentationStyle(context: Context, style: String) {
+        prefs(context).edit().putString(KEY_LOCATION_PRESENTATION_STYLE, style.trim()).apply()
+    }
+
+    fun resetLocationPresentationStyle(context: Context) {
+        prefs(context).edit().remove(KEY_LOCATION_PRESENTATION_STYLE).apply()
+    }
+
     // ─── Liens cliquables (tel/mail/itinéraire) dans le texte des fiches ──────
     // Désactivé par défaut (false) : à la demande explicite de l'utilisateur, ces liens ne
     // doivent plus apparaître automatiquement dès qu'un numéro/email/adresse est détecté —
@@ -746,6 +762,34 @@ object Prefs {
 
     fun saveDefaultPrinterRemoteHost(context: Context, host: String) {
         prefs(context).edit().putString("default_printer_remote_host", host.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // ACCÈS SMB/CIFS GÉNÉRIQUE (voir SmbController) — remplace la réintégration
+    // complète de l'API Freebox par un accès standard au partage réseau
+    // (fonctionne aussi avec un NAS, un PC Windows partagé, etc.), à la
+    // demande explicite de l'utilisateur suite au retrait de FreeboxController.
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getSmbHost(context: Context): String =
+        prefs(context).getString("smb_host", "") ?: ""
+
+    fun saveSmbHost(context: Context, host: String) {
+        prefs(context).edit().putString("smb_host", host.trim()).apply()
+    }
+
+    fun getSmbUsername(context: Context): String =
+        prefs(context).getString("smb_username", "") ?: ""
+
+    fun saveSmbUsername(context: Context, username: String) {
+        prefs(context).edit().putString("smb_username", username.trim()).apply()
+    }
+
+    fun getSmbPassword(context: Context): String =
+        prefs(context).getString("smb_password", "") ?: ""
+
+    fun saveSmbPassword(context: Context, password: String) {
+        prefs(context).edit().putString("smb_password", password).apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════

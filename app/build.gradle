@@ -85,6 +85,11 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
     implementation 'org.json:json:20240303'
 
+    // ── Accès SMB/CIFS générique (voir SmbController) — partage réseau (NAS, PC
+    // Windows, disque dur Freebox une fois son partage SMB activé côté Freebox OS).
+    // Bibliothèque Java pure, aucune dépendance native, aucune clé/API requise.
+    implementation 'eu.agno3.jcifs:jcifs-ng:2.1.10'
+
     // ── IA embarquée : MediaPipe LLM Inference (.task) ────────────────────────
     implementation 'com.google.mediapipe:tasks-genai:0.10.14'
 

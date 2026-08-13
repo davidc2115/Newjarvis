@@ -84,13 +84,68 @@ object JarvisCommandParser {
      * réponse — utile par exemple pour créer un projet GitHub complet
      * (plusieurs fichiers) en une seule fois.
      */
+    private data class JarvisCmdMatch(val payload: String, val fullStart: Int, val fullEnd: Int)
+
+    /**
+     * Trouve les blocs [JARVIS_CMD:...] d'une réponse IA en COMPTANT les crochets imbriqués
+     * (en ignorant ceux à l'intérieur des chaînes JSON, échappements compris) pour repérer le
+     * VRAI crochet fermant du bloc.
+     *
+     * BUG RÉEL CORRIGÉ : l'ancien regex non-gourmand "\[JARVIS_CMD:(.*?)\]" s'arrêtait au TOUT
+     * PREMIER "]" rencontré — qui est souvent celui d'un tableau interne au payload lui-même
+     * (ex: images:[...] pour create_pdf/create_docx). Le JSON capturé était alors tronqué en
+     * plein milieu ("Unterminated array"), cassant l'action entière dès qu'une commande
+     * contenait son propre tableau — exactement le symptôme signalé sur create_pdf{images}.
+     * Utilisée à la fois par parseAndExecute (exécution) et cleanResponse (nettoyage de
+     * l'affichage) pour ne jamais dupliquer cette logique délicate à deux endroits différents.
+     */
+    private fun findJarvisCommands(text: String): List<JarvisCmdMatch> {
+        val marker = "[JARVIS_CMD:"
+        val results = mutableListOf<JarvisCmdMatch>()
+        var searchFrom = 0
+        while (true) {
+            val start = text.indexOf(marker, searchFrom)
+            if (start < 0) break
+            val contentStart = start + marker.length
+            var depth = 1 // le crochet ouvrant du marker lui-même
+            var inString = false
+            var escaped = false
+            var i = contentStart
+            var end = -1
+            while (i < text.length) {
+                val c = text[i]
+                if (inString) {
+                    when {
+                        escaped -> escaped = false
+                        c == '\\' -> escaped = true
+                        c == '"' -> inString = false
+                    }
+                } else {
+                    when (c) {
+                        '"' -> inString = true
+                        '[' -> depth++
+                        ']' -> {
+                            depth--
+                            if (depth == 0) end = i
+                        }
+                    }
+                }
+                if (end != -1) break
+                i++
+            }
+            if (end == -1) break // bloc non terminé (réponse tronquée par le fournisseur) — on abandonne, pas de crash
+            results.add(JarvisCmdMatch(text.substring(contentStart, end), start, end + 1))
+            searchFrom = end + 1
+        }
+        return results
+    }
+
     suspend fun parseAndExecute(context: Context, llmResponse: String): CommandResult {
-        val regex = Regex("\\[JARVIS_CMD:(.*?)\\]", RegexOption.DOT_MATCHES_ALL)
-        val matches = regex.findAll(llmResponse).toList()
+        val matches = findJarvisCommands(llmResponse)
         if (matches.isEmpty()) return CommandResult.None
 
         val results = matches.map { match ->
-            val jsonStr = match.groupValues[1].trim()
+            val jsonStr = match.payload.trim()
             try {
                 val json = JSONObject(jsonStr)
                 val action = json.optString("action", "").lowercase()
@@ -654,7 +709,23 @@ object JarvisCommandParser {
                 }
             }
 
-            "ha_status" -> HomeAssistantController.summarize(context, json.optString("filter", ""), json.optString("domain", ""))
+            "ha_status" -> {
+                val domain = json.optString("domain", "")
+                val raw = HomeAssistantController.summarize(context, json.optString("filter", ""), domain)
+                if (domain.equals("person", ignoreCase = true)) withLocationPresentationStyleNote(context, raw) else raw
+            }
+            "set_location_presentation_style" -> {
+                val style = json.optString("style", "")
+                if (style.isBlank()) "❌ Précise comment tu veux que la localisation soit présentée."
+                else {
+                    Prefs.saveLocationPresentationStyle(context, style)
+                    "✅ Compris, je présenterai désormais toujours la localisation comme ça : « $style ». Dis-moi « reset_location_presentation_style » (ou demande-le-moi en langage naturel) pour revenir au format par défaut."
+                }
+            }
+            "reset_location_presentation_style" -> {
+                Prefs.resetLocationPresentationStyle(context)
+                "✅ Style de présentation de la localisation réinitialisé au format par défaut."
+            }
             "ha_turn_on" -> {
                 val name = json.optString("device", "").ifBlank { json.optString("name", "") }
                 val entity = HomeAssistantController.findEntity(context, name)
@@ -789,6 +860,18 @@ object JarvisCommandParser {
                 }
             }
 
+            // Accès SMB/CIFS générique (disque dur Freebox une fois son partage réseau activé,
+            // ou tout autre NAS/PC partagé) — voir SmbController pour les limites honnêtes
+            // (client SMB standard, PAS l'API propriétaire Freebox OS).
+            "smb_configure" -> SmbController.configure(
+                context, json.optString("host", ""), json.optString("username", ""), json.optString("password", "")
+            )
+            "smb_list_files" -> SmbController.listFiles(context, json.optString("share", ""), json.optString("path", ""))
+            "smb_download_file" -> {
+                val result = SmbController.downloadFile(context, json.optString("share", ""), json.optString("path", ""))
+                result.message
+            }
+
             "test_api_keys" -> ApiKeyTestController.testAllConfiguredKeys(context)
 
             "set_chat_theme" -> {
@@ -839,6 +922,24 @@ object JarvisCommandParser {
                 }
                 if (path.isNullOrBlank()) "❌ Aucun fichier correspondant trouvé à imprimer. Utilise list_generations pour voir l'historique, ou précise le chemin exact."
                 else PrintController.printFile(context, path, json.optString("printer", "").ifBlank { null }).message
+            }
+            // BUG RÉEL CORRIGÉ : "imprime une page de test" faisait auparavant appeler print_file
+            // avec un chemin INVENTÉ par le modèle (aucun fichier de test n'existe réellement sur
+            // le téléphone), d'où le "fichier introuvable" signalé. Cette action génère un VRAI
+            // PDF minimal via FileGenController (même moteur PDF que create_pdf) puis l'imprime —
+            // ne dépend donc plus d'un fichier halluciné.
+            "print_test_page" -> {
+                val pdfResult = FileGenController.createPdf(
+                    "Page de test JARVIS",
+                    "Ceci est une page de test générée par JARVIS pour vérifier la connexion à l'imprimante.\n\n" +
+                        "Générée le : ${java.util.Date()}",
+                    "test_impression"
+                )
+                if (!pdfResult.success || pdfResult.filePath.isNullOrBlank()) {
+                    "❌ Impossible de générer la page de test : ${pdfResult.message}"
+                } else {
+                    PrintController.printFile(context, pdfResult.filePath, json.optString("printer", "").ifBlank { null }).message
+                }
             }
             "list_generations" -> {
                 val typeHint = json.optString("type", "")
@@ -966,6 +1067,24 @@ object JarvisCommandParser {
         return "$rawResult\n\n$CONTACT_FORMAT_MARKER $instructions"
     }
 
+    // Même principe que CONTACT_FORMAT_MARKER mais pour l'affichage de la localisation d'une
+    // personne (ha_status{domain:"person"}) — demandé explicitement par l'utilisateur en même
+    // temps que la persistance du style des fiches contact ("PEREIL POUR LA LOCALISATION").
+    const val LOCATION_FORMAT_MARKER = "[[LOCATION_FORMAT_INSTRUCTION]]"
+
+    /**
+     * Ajoute au résultat brut d'une consultation de localisation (ha_status domain="person")
+     * une consigne de présentation PERSISTÉE (set_location_presentation_style) si l'utilisateur
+     * en a défini une — sinon ne touche à rien. Contrairement aux fiches contact, il n'y a pas
+     * de format_hint ponctuel ici (pas de paramètre dédié côté ha_status), seulement la
+     * préférence durable.
+     */
+    private fun withLocationPresentationStyleNote(context: Context, rawResult: String): String {
+        val style = Prefs.getLocationPresentationStyle(context)
+        if (style.isBlank()) return rawResult
+        return "$rawResult\n\n$LOCATION_FORMAT_MARKER consigne permanente choisie par l'utilisateur pour l'affichage de la localisation : $style"
+    }
+
     // Noms de couleurs français courants → hex, pour set_chat_theme — Color.parseColor()
     // ne connaît que les noms anglais (CSS), inutilisables tels quels pour une commande
     // vocale/chat en français.
@@ -1014,6 +1133,20 @@ object JarvisCommandParser {
     }
 
     fun cleanResponse(llmResponse: String): String {
-        return llmResponse.replace(Regex("\\[JARVIS_CMD:.*?\\]", RegexOption.DOT_MATCHES_ALL), "").trim()
+        // Utilise le même parseur à comptage de crochets que parseAndExecute (voir
+        // findJarvisCommands) au lieu d'un regex séparé : l'ancien regex non-gourmand
+        // laissait un fragment JSON tronqué visible dans le chat dès qu'une commande
+        // contenait un tableau (ex: images:[...]), car il ne retirait que jusqu'au
+        // premier "]" au lieu du vrai crochet fermant du bloc [JARVIS_CMD:...].
+        val matches = findJarvisCommands(llmResponse)
+        if (matches.isEmpty()) return llmResponse.trim()
+        val sb = StringBuilder()
+        var last = 0
+        for (m in matches) {
+            sb.append(llmResponse, last, m.fullStart)
+            last = m.fullEnd
+        }
+        sb.append(llmResponse, last, llmResponse.length)
+        return sb.toString().trim()
     }
 }
