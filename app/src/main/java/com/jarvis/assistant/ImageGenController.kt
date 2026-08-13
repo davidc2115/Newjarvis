@@ -173,8 +173,13 @@ object ImageGenController {
     private fun tryPollinations(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         return try {
             val encodedPrompt = java.net.URLEncoder.encode(prompt, "UTF-8").replace("+", "%20")
+            // model=flux : leur modèle gratuit et illimité le plus net (turbo, plus rapide,
+            // rend nettement plus flou — c'est justement le symptôme signalé). enhance=true
+            // laisse leur propre IA enrichir le prompt pour un meilleur résultat — utile en
+            // complément de l'enrichissement déjà fait dans le prompt système, sans s'y
+            // substituer.
             val request = Request.Builder()
-                .url("https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true")
+                .url("https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&model=flux&enhance=true")
                 .get().build()
 
             client.newCall(request).execute().use { response ->
