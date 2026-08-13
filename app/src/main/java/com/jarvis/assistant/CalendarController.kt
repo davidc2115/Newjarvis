@@ -16,6 +16,80 @@ import java.util.TimeZone
 
 object CalendarController {
 
+    private val FRENCH_WEEKDAYS = mapOf(
+        "lundi" to Calendar.MONDAY, "mardi" to Calendar.TUESDAY, "mercredi" to Calendar.WEDNESDAY,
+        "jeudi" to Calendar.THURSDAY, "vendredi" to Calendar.FRIDAY, "samedi" to Calendar.SATURDAY,
+        "dimanche" to Calendar.SUNDAY
+    )
+
+    /**
+     * Résout une date en langage naturel FRANÇAIS (ou un format explicite) en un [Calendar]
+     * calculé à partir de l'horloge ACTUELLE de l'appareil — jamais laissé au LLM, qui n'a
+     * aucune connaissance fiable de "aujourd'hui" ni ne sait faire un calcul d'epoch
+     * millisecondes exact. Même principe que getEventsForWeek (voir son commentaire), appliqué
+     * ici à create_event pour que "demain à 14h" soit TOUJOURS calculé correctement.
+     *
+     * Formats acceptés pour [dateStr] (insensible à la casse/accents) :
+     *  - vide, "aujourd'hui", "auj" → aujourd'hui
+     *  - "demain" → +1 jour ; "après-demain" → +2 jours
+     *  - "hier" → -1 jour ; "avant-hier" → -2 jours
+     *  - un jour de la semaine ("lundi", "mardi"...) → sa PROCHAINE occurrence (jamais
+     *    aujourd'hui même si on est déjà ce jour-là, pour éviter l'ambiguïté "ce lundi" vs
+     *    "lundi prochain")
+     *  - "JJ/MM" ou "JJ/MM/AAAA" → date explicite (année courante si omise)
+     *  - "AAAA-MM-JJ" (ISO) → date explicite
+     *  - non reconnu → reste sur aujourd'hui (comportement de repli sûr, jamais une exception)
+     */
+    fun resolveDate(dateStr: String): Calendar {
+        val cal = Calendar.getInstance()
+        val d = dateStr.trim().lowercase()
+            .replace("é", "e").replace("è", "e").replace("ê", "e").replace("'", "")
+        when {
+            d.isBlank() || d == "aujourdhui" || d == "auj" -> Unit
+            d == "demain" -> cal.add(Calendar.DAY_OF_YEAR, 1)
+            d == "apres-demain" || d == "apresdemain" -> cal.add(Calendar.DAY_OF_YEAR, 2)
+            d == "hier" -> cal.add(Calendar.DAY_OF_YEAR, -1)
+            d == "avant-hier" || d == "avanthier" -> cal.add(Calendar.DAY_OF_YEAR, -2)
+            FRENCH_WEEKDAYS.containsKey(d) -> {
+                val target = FRENCH_WEEKDAYS.getValue(d)
+                do { cal.add(Calendar.DAY_OF_YEAR, 1) } while (cal.get(Calendar.DAY_OF_WEEK) != target)
+            }
+            Regex("^\\d{4}-\\d{2}-\\d{2}$").matches(d) -> {
+                val parts = d.split("-").map { it.toInt() }
+                cal.set(parts[0], parts[1] - 1, parts[2])
+            }
+            Regex("^\\d{1,2}/\\d{1,2}(/\\d{2,4})?$").matches(d) -> {
+                val parts = d.split("/")
+                val day = parts[0].toInt()
+                val month = parts[1].toInt()
+                val year = if (parts.size > 2) {
+                    val yr = parts[2].toInt()
+                    if (yr < 100) 2000 + yr else yr
+                } else cal.get(Calendar.YEAR)
+                cal.set(year, month - 1, day)
+            }
+            else -> Unit
+        }
+        return cal
+    }
+
+    /**
+     * Applique une heure en langage naturel/format libre à [cal] (déjà positionné sur le bon
+     * jour par [resolveDate]) — accepte "14:30", "14h30", "14h", "14". Vide → heure par défaut
+     * fournie par l'appelant (typiquement 9h, une heure raisonnable pour un événement du jour
+     * sans heure précisée).
+     */
+    fun resolveTime(timeStr: String, cal: Calendar, defaultHour: Int = 9, defaultMinute: Int = 0) {
+        val t = timeStr.trim().lowercase().replace("h", ":").trim(':')
+        val parts = t.split(":").filter { it.isNotBlank() }
+        val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: defaultHour
+        val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: defaultMinute
+        cal.set(Calendar.HOUR_OF_DAY, hour)
+        cal.set(Calendar.MINUTE, minute)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+    }
+
     fun getTodayEvents(context: Context, calendarRef: String? = null): String {
         val startOfDay = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
@@ -238,7 +312,11 @@ object CalendarController {
             val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
             if (uri != null) {
                 val sdf = SimpleDateFormat("dd/MM/yyyy à HH:mm", Locale.FRENCH)
-                "✅ Événement **$title** créé avec succès pour le ${sdf.format(Date(startTimeMillis))} !"
+                // Rappelle explicitement le calendrier ciblé — évite qu'un événement parte
+                // silencieusement sur le mauvais calendrier (ex: un calendrier local du
+                // fabricant plutôt que Google) sans que l'utilisateur puisse s'en rendre compte.
+                val calendarName = buildCalendarNameMap(context)[calendarId] ?: "calendrier par défaut"
+                "✅ Événement **$title** créé avec succès pour le ${sdf.format(Date(startTimeMillis))} ! (calendrier : $calendarName)"
             } else {
                 "❌ Impossible de créer l'événement."
             }
@@ -591,18 +669,57 @@ object CalendarController {
         return findCalendarId(context, calendarRef)
     }
 
+    /**
+     * BUG RÉEL CORRIGÉ : sans filtre ni tri, cette requête renvoyait le TOUT PREMIER calendrier
+     * de la table Calendars — souvent un calendrier LOCAL créé par l'appli d'agenda du
+     * fabricant (ex: Xiaomi/MIUI, un calendrier account_type="LOCAL" propre à l'appareil)
+     * plutôt que le calendrier du compte Google. C'est exactement ce qui a été signalé : les
+     * événements créés par JARVIS apparaissaient dans l'appli Agenda Xiaomi mais jamais dans
+     * Google Agenda — un calendrier "LOCAL" n'est PAS synchronisé vers les serveurs Google par
+     * définition, aucune app (JARVIS ou autre) ne peut le rendre visible ailleurs après coup.
+     *
+     * On choisit maintenant explicitement, par ordre de préférence :
+     *  1. Le calendrier Google DE L'UTILISATEUR (account_type="com.google" ET
+     *     owner_account == account_name — exclut un calendrier Google partagé/abonné qui
+     *     n'est pas le sien), avec la synchronisation active.
+     *  2. N'importe quel calendrier Google synchronisé, à défaut du 1er cas.
+     *  3. N'importe quel calendrier synchronisé (autre compte : Outlook, Samsung...).
+     *  4. Le tout premier calendrier trouvé, en dernier repli (comportement historique,
+     *     garantit que la création d'événement continue de fonctionner même sans aucun
+     *     compte cloud configuré).
+     */
     private fun getDefaultCalendarId(context: Context): Long? {
-        val cursor = context.contentResolver.query(
+        data class Candidate(val id: Long, val accountType: String, val isOwn: Boolean, val syncEvents: Boolean)
+        val candidates = mutableListOf<Candidate>()
+        context.contentResolver.query(
             CalendarContract.Calendars.CONTENT_URI,
-            arrayOf(CalendarContract.Calendars._ID),
-            null,
-            null,
-            null
-        )
-
-        cursor?.use { c ->
-            if (c.moveToFirst()) return c.getLong(0)
+            arrayOf(
+                CalendarContract.Calendars._ID,
+                CalendarContract.Calendars.ACCOUNT_TYPE,
+                CalendarContract.Calendars.ACCOUNT_NAME,
+                CalendarContract.Calendars.OWNER_ACCOUNT,
+                CalendarContract.Calendars.SYNC_EVENTS
+            ),
+            null, null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val accountName = c.getString(2) ?: ""
+                val owner = c.getString(3) ?: ""
+                candidates.add(
+                    Candidate(
+                        id = c.getLong(0),
+                        accountType = c.getString(1) ?: "",
+                        isOwn = owner.isNotBlank() && owner == accountName,
+                        syncEvents = c.getInt(4) != 0
+                    )
+                )
+            }
         }
-        return null
+        if (candidates.isEmpty()) return null
+
+        return candidates.firstOrNull { it.accountType == "com.google" && it.isOwn && it.syncEvents }?.id
+            ?: candidates.firstOrNull { it.accountType == "com.google" && it.syncEvents }?.id
+            ?: candidates.firstOrNull { it.syncEvents }?.id
+            ?: candidates.first().id
     }
 }

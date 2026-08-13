@@ -218,11 +218,40 @@ object JarvisCommandParser {
             "week_events" -> CalendarController.getEventsForWeek(context, json.optInt("offset", 0), json.optString("calendar", "").ifBlank { null })
             "create_event" -> {
                 val title = json.optString("title", "Événement")
-                val start = json.optLong("startTime", System.currentTimeMillis() + 3600000)
-                val end = json.optLong("endTime", start + 3600000)
+                val dateStr = json.optString("date", "")
+                val timeStr = json.optString("time", "")
+                val durationMinutes = json.optInt("durationMinutes", 60).coerceAtLeast(1)
                 val desc = json.optString("description", "")
                 val loc = json.optString("location", "")
                 val calendarRef = json.optString("calendar", "").ifBlank { null }
+
+                // BUG RÉEL CORRIGÉ : create_event exigeait auparavant que le modèle calcule
+                // lui-même des epoch millisecondes (startTime/endTime) pour "demain à 14h" —
+                // exactement le genre de calcul de date que les LLM ratent régulièrement (pas
+                // de connaissance fiable de "aujourd'hui", arithmétique d'epoch peu fiable).
+                // Même principe déjà appliqué à getEventsForWeek (voir son commentaire) : le
+                // modèle fournit maintenant date="demain"/"lundi"/"15/03"/... et time="14h30"
+                // en LANGAGE, et c'est CalendarController.resolveDate/resolveTime — calculé à
+                // partir de l'horloge RÉELLE de l'appareil — qui fait le calcul, jamais le LLM.
+                val start: Long
+                val end: Long
+                if (json.has("startTime")) {
+                    // Compatibilité avec d'anciens appels qui fourniraient encore des epoch
+                    // millis directement — honorés tels quels, mais plus documentés/encouragés
+                    // dans le prompt système désormais.
+                    start = json.optLong("startTime", System.currentTimeMillis() + 3600000)
+                    end = json.optLong("endTime", start + durationMinutes * 60000L)
+                } else if (dateStr.isBlank() && timeStr.isBlank()) {
+                    // Ni date ni heure précisée : comportement historique par défaut, dans 1h.
+                    start = System.currentTimeMillis() + 3600000
+                    end = start + durationMinutes * 60000L
+                } else {
+                    val cal = CalendarController.resolveDate(dateStr)
+                    CalendarController.resolveTime(timeStr, cal)
+                    start = cal.timeInMillis
+                    end = start + durationMinutes * 60000L
+                }
+
                 CalendarController.createEvent(context, title, start, end, desc, loc, calendarRef)
             }
             "list_calendars" -> CalendarController.getCalendarList(context)
@@ -344,12 +373,29 @@ object JarvisCommandParser {
                 if (eventId == -1L) {
                     "❌ Identifiant d'événement manquant."
                 } else {
+                    // Même correctif que create_event : newDate/newTime en langage naturel
+                    // ("demain", "14h30"...) plutôt que de faire calculer un epoch millis au
+                    // LLM — voir CalendarController.resolveDate/resolveTime. newStartTime/
+                    // newEndTime restent acceptés tels quels pour compatibilité.
+                    val newDateStr = json.optString("newDate", "")
+                    val newTimeStr = json.optString("newTime", "")
+                    var newStart: Long? = if (json.has("newStartTime")) json.optLong("newStartTime") else null
+                    var newEnd: Long? = if (json.has("newEndTime")) json.optLong("newEndTime") else null
+                    if (newStart == null && (newDateStr.isNotBlank() || newTimeStr.isNotBlank())) {
+                        val cal = CalendarController.resolveDate(newDateStr)
+                        CalendarController.resolveTime(newTimeStr, cal)
+                        newStart = cal.timeInMillis
+                        if (newEnd == null) {
+                            val durationMinutes = json.optInt("newDurationMinutes", 60).coerceAtLeast(1)
+                            newEnd = newStart + durationMinutes * 60000L
+                        }
+                    }
                     CalendarController.updateEvent(
                         context,
                         eventId,
                         newTitle = json.optString("newTitle", "").ifBlank { null },
-                        newStartTimeMillis = if (json.has("newStartTime")) json.optLong("newStartTime") else null,
-                        newEndTimeMillis = if (json.has("newEndTime")) json.optLong("newEndTime") else null,
+                        newStartTimeMillis = newStart,
+                        newEndTimeMillis = newEnd,
                         newDescription = json.optString("newDescription", "").ifBlank { null },
                         newLocation = json.optString("newLocation", "").ifBlank { null }
                     )
