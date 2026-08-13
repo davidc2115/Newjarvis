@@ -31,11 +31,22 @@ import java.util.concurrent.TimeUnit
  * 4. Stable Diffusion EMBARQUÉ sur le téléphone (stable-diffusion.cpp compilé
  *    nativement, aucun réseau) — si un modèle a été importé dans les
  *    paramètres. ⚠️ Sans GPU dédié, compte plusieurs MINUTES par image sur
- *    CPU de téléphone — c'est la réalité du calcul de diffusion sur mobile,
- *    pas un défaut de l'intégration.
+ *    CPU de téléphone, et peut échouer par manque de mémoire sur des appareils
+ *    avec peu de RAM disponible — c'est la réalité du calcul de diffusion sur
+ *    mobile, pas un défaut de l'intégration.
+ * 5. Pollinations AI (gratuit, sans clé) — réintégré à la demande de
+ *    l'utilisateur comme DERNIER filet de secours uniquement. ⚠️ HONNÊTETÉ :
+ *    leur service a déjà traversé une période de qualité dégradée reconnue
+ *    par Pollinations eux-mêmes (issue GitHub #5372) — impossible de garantir
+ *    un rendu ou une compréhension du prompt identiques à Gemini, ce n'est
+ *    pas la même IA ni le même niveau de qualité, quel que soit le réglage
+ *    côté JARVIS. Il vaut mieux que rien, pas un substitut équivalent.
  *
- * Pollinations AI a été retiré : leur service traverse une période de
- * qualité dégradée reconnue par Pollinations eux-mêmes (issue GitHub #5372).
+ * Chaque échec (y compris ceux du SD embarqué) alimente un diagnostic partagé
+ * affiché en cas d'échec total — un échec du SD local ne doit JAMAIS écraser
+ * silencieusement les diagnostics des fournisseurs essayés avant lui (bug
+ * réel corrigé : l'utilisateur ne voyait que "mémoire insuffisante" même
+ * quand sa clé Gemini, pourtant valide, avait échoué pour une autre raison).
  *
  * ⚠️ Microsoft Copilot n'a PAS d'API publique de génération d'image
  * accessible aux applications tierces — impossible à intégrer honnêtement.
@@ -76,10 +87,15 @@ object ImageGenController {
         // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
         tryHuggingFace(context, prompt, diagnostics)?.let { return it }
 
-        // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé — remis dans
-        // la cascade à la demande explicite de l'utilisateur (revenu sur sa décision précédente
-        // de le désactiver).
-        tryOnDeviceStableDiffusion(context, prompt)?.let { return it }
+        // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé.
+        tryOnDeviceStableDiffusion(context, prompt, diagnostics)?.let { return it }
+
+        // 5. Pollinations AI (gratuit, sans clé) — en tout dernier recours seulement : leur
+        // service a déjà traversé une période de qualité dégradée qu'ils reconnaissaient
+        // eux-mêmes (issue GitHub #5372), donc ce n'est PAS un rendu garanti équivalent à
+        // Gemini malgré la demande — on ne peut pas promettre une qualité qu'on ne contrôle
+        // pas. Il sert juste de dernier filet gratuit quand tout le reste a échoué.
+        tryPollinations(context, prompt, diagnostics)?.let { return it }
 
         val detail = if (diagnostics.isNotEmpty()) {
             "\n\nDétail des échecs :\n" + diagnostics.joinToString("\n") { "• $it" }
@@ -87,7 +103,7 @@ object ImageGenController {
 
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +
-                "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué). " +
+                "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué, Pollinations). " +
                 "Configure au moins une clé API dans ⚙ → Clés API, ou importe un modèle " +
                 "Stable Diffusion local dans ⚙ → Modèles Locaux.$detail",
             null, null
@@ -96,26 +112,27 @@ object ImageGenController {
 
     // ─── 4. Stable Diffusion EMBARQUÉ (stable-diffusion.cpp natif) ─────────────
 
-    private fun tryOnDeviceStableDiffusion(context: Context, prompt: String): Result? {
+    private fun tryOnDeviceStableDiffusion(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val modelPath = Prefs.getLocalSdModelPath(context)
         if (modelPath.isBlank()) return null
 
+        // IMPORTANT : chaque échec ici ajoute au diagnostic PARTAGÉ et renvoie null (continue
+        // vers le fournisseur suivant), au lieu de renvoyer directement un Result — avant ce
+        // correctif, un échec du SD local écrasait silencieusement les diagnostics Gemini/
+        // OpenAI/Hugging Face déjà collectés : l'utilisateur ne voyait QUE l'erreur du SD
+        // local (ex: "mémoire insuffisante"), même quand une clé Gemini pourtant valide avait
+        // échoué pour une tout autre raison plus haut dans la cascade — cause réelle du
+        // symptôme "la génération échoue toujours sans qu'on comprenne pourquoi".
         if (!NativeStableDiffusion.isAvailable()) {
-            return Result(
-                "❌ Le moteur Stable Diffusion embarqué n'a pas pu être chargé sur cet appareil.\n" +
-                    "Détail : ${NativeStableDiffusion.getLoadError() ?: "bibliothèque native introuvable"}",
-                null, null
-            )
+            diagnostics.add("Stable Diffusion embarqué : moteur non chargé sur cet appareil (${NativeStableDiffusion.getLoadError() ?: "bibliothèque native introuvable"})")
+            return null
         }
 
         return try {
             val loaded = NativeStableDiffusion.loadModel(modelPath)
             if (!loaded) {
-                return Result(
-                    "❌ Échec du chargement du modèle Stable Diffusion local. " +
-                        "Vérifie qu'il s'agit bien d'un modèle compatible (.safetensors, .ckpt ou .gguf).",
-                    null, null
-                )
+                diagnostics.add("Stable Diffusion embarqué : échec du chargement du modèle (vérifie qu'il est compatible .safetensors/.ckpt/.gguf)")
+                return null
             }
 
             // Résolution modeste et peu d'étapes pour rester dans un temps raisonnable sur CPU mobile.
@@ -124,7 +141,10 @@ object ImageGenController {
             val steps = 20
 
             val rgbBytes = NativeStableDiffusion.generate(prompt, width, height, steps)
-                ?: return Result("❌ Échec de la génération d'image embarquée (mémoire insuffisante ou erreur interne).", null, null)
+            if (rgbBytes == null) {
+                diagnostics.add("Stable Diffusion embarqué : échec de la génération (mémoire insuffisante ou erreur interne)")
+                return null
+            }
 
             val channels = NativeStableDiffusion.getChannelCount()
             val bitmap = rgbBytesToBitmap(rgbBytes, width, height, channels)
@@ -143,7 +163,43 @@ object ImageGenController {
                 savedPath
             )
         } catch (e: Exception) {
-            Result("❌ Erreur du moteur Stable Diffusion embarqué : ${e.message}", null, null)
+            diagnostics.add("Stable Diffusion embarqué : erreur — ${e.message}")
+            null
+        }
+    }
+
+    // ─── 5. Pollinations AI (gratuit, sans clé, dernier recours) ──────────────
+
+    private fun tryPollinations(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
+        return try {
+            val encodedPrompt = java.net.URLEncoder.encode(prompt, "UTF-8").replace("+", "%20")
+            val request = Request.Builder()
+                .url("https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true")
+                .get().build()
+
+            client.newCall(request).execute().use { response ->
+                val contentType = response.header("Content-Type") ?: ""
+                if (!response.isSuccessful || !contentType.startsWith("image/")) {
+                    diagnostics.add("Pollinations : HTTP ${response.code} — réponse inexploitable")
+                    return null
+                }
+                val bytes = response.body?.bytes()
+                if (bytes == null || bytes.isEmpty()) {
+                    diagnostics.add("Pollinations : réponse vide")
+                    return null
+                }
+                val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val savedPath = saveToGallery(context, bytes, prompt)
+                Result(
+                    "🎨 Image générée pour « $prompt » (Pollinations AI — moteur gratuit de dernier recours, qualité variable selon leur service).\n📁 Enregistrée dans : $savedPath",
+                    base64,
+                    "image/jpeg",
+                    savedPath
+                )
+            }
+        } catch (e: Exception) {
+            diagnostics.add("Pollinations : exception réseau — ${e.message}")
+            null
         }
     }
 
