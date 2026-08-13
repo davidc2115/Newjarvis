@@ -29,11 +29,14 @@ object JarvisCommandParser {
     // Actions qui RENVOIENT une information à présenter (l'IA doit reformuler
     // naturellement le résultat). Les autres actions sont des confirmations
     // d'exécution (ex: "SMS envoyé") qui n'ont pas besoin d'être reformulées.
-    // Remarque : search_contact_profile / list_contacts_by_category sont volontairement
-    // ABSENTS de cette liste — les fiches contact Obsidian doivent
-    // s'afficher exactement comme formatées par PeopleController (liste propre avec
-    // emojis), pas reformulées en prose par un second appel IA qui pourrait perdre des
-    // champs ou casser la mise en forme demandée.
+    // Remarque : search_contact_profile / list_contacts_by_category restent
+    // ABSENTS de cette liste — la reformulation "naturelle/orale" (summarizeNaturally,
+    // SANS markdown, EN prose) casserait la présentation visuelle en sections/emojis
+    // d'une fiche contact. Leur formatage reste modifiable, mais via un mécanisme
+    // DÉDIÉ (voir applyContactFormattingIfNeeded dans ApiClient.kt) qui ne s'active
+    // QUE si une consigne de présentation (persistée ou ponctuelle) est réellement
+    // présente — sinon l'affichage brut de PeopleController reste utilisé tel quel,
+    // sans risque de perte/altération de données par un appel IA superflu.
     private val INFORMATIONAL_ACTIONS = setOf(
         "list_files", "search_files", "read_file", "storage_info",
         "today_events", "upcoming_events", "search_event", "list_calendars",
@@ -402,6 +405,7 @@ object JarvisCommandParser {
             }
             "search_contact_profile" -> {
                 val query = json.optString("query", "")
+                val formatHint = json.optString("format_hint", "")
                 if (query.isBlank()) "❌ Aucun terme de recherche fourni."
                 else {
                     val result = PeopleController.searchContacts(context, query)
@@ -412,11 +416,12 @@ object JarvisCommandParser {
                         pendingImageBase64 = b64
                         pendingImageMime = mime
                     }
-                    withContactPresentationStyleNote(context, result)
+                    withContactPresentationStyleNote(context, result, formatHint)
                 }
             }
             "list_contacts_by_category" -> withContactPresentationStyleNote(
-                context, PeopleController.listByCategory(context, json.optString("category", ""))
+                context, PeopleController.listByCategory(context, json.optString("category", "")),
+                json.optString("format_hint", "")
             )
             "set_contact_presentation_style" -> {
                 val style = json.optString("style", "")
@@ -483,8 +488,17 @@ object JarvisCommandParser {
 
             "generate_image" -> {
                 val prompt = json.optString("prompt", "")
+                val count = json.optInt("count", 1)
                 if (prompt.isBlank()) "❌ Aucune description d'image fournie."
-                else {
+                else if (count > 1) {
+                    // Plusieurs images à la suite (ex: "génère-moi 5 images de paysages") : toujours
+                    // en arrière-plan, jamais de tentative rapide bloquante — attendre 5x25s dans la
+                    // coroutine du chat serait inacceptable. Chaque image a sa propre entrée "pending"
+                    // visible immédiatement dans la carte de progression de l'onglet 🎨 Génération,
+                    // mises à jour une par une au fil de la génération (voir GenerationService).
+                    GenerationService.enqueue(context, "image", prompt, count = count)
+                    "🎨 Génération de ${count.coerceIn(2, 20)} images lancée en arrière-plan, l'une après l'autre — suivable en direct dans l'onglet 🎨 Génération, avec une notification à la fin."
+                } else {
                     // On tente l'image en direct (cas rapide, quelques secondes via Gemini/OpenAI)
                     // pour l'afficher tout de suite dans le chat comme avant — MAIS bornée par un
                     // délai limite. Avant ce correctif, l'appel tournait sans limite dans la coroutine
@@ -839,17 +853,30 @@ object JarvisCommandParser {
         "null", "n/a", "na", "none", "aucun", "aucune", "non renseigné", "non renseigne", "inconnu", "-", "?"
     )
 
+    // Marqueur détecté par ApiClient.sendChat (applyContactFormattingIfNeeded) pour savoir
+    // qu'un appel IA dédié de reformatage de fiche contact est nécessaire. Volontairement
+    // PAS dans INFORMATIONAL_ACTIONS/summarizeNaturally : cette reformulation générique
+    // transforme le résultat en prose orale sans mise en forme, ce qui détruirait la
+    // présentation en sections/emojis d'une fiche. Le marqueur ne déclenche donc RIEN
+    // par défaut — sans lui, l'affichage brut PeopleController reste utilisé tel quel,
+    // rapide et sans risque d'altération de données par un appel IA superflu.
+    const val CONTACT_FORMAT_MARKER = "[[CONTACT_FORMAT_INSTRUCTION]]"
+
     /**
-     * Ajoute au résultat brut d'une recherche/liste de contacts un rappel de la consigne de
-     * présentation choisie par l'utilisateur (set_contact_presentation_style), pour que l'IA
-     * la réapplique SYSTÉMATIQUEMENT — même dans une toute nouvelle conversation où elle n'a
-     * plus le souvenir de la demande initiale, puisque cette consigne est maintenant persistée
-     * dans Prefs et non plus seulement dans la fenêtre de contexte de la conversation.
+     * Ajoute au résultat brut d'une recherche/liste de contacts une consigne de présentation
+     * à appliquer : la consigne PERSISTÉE (set_contact_presentation_style, valable pour
+     * toutes les fiches jusqu'à nouvel ordre) et/ou une consigne PONCTUELLE (format_hint,
+     * remplie par l'IA quand l'utilisateur demande une présentation différente juste pour
+     * cette réponse — ex: "montre-la moi en tableau", "fais plus court cette fois").
      */
-    private fun withContactPresentationStyleNote(context: Context, rawResult: String): String {
+    private fun withContactPresentationStyleNote(context: Context, rawResult: String, formatHint: String = ""): String {
         val style = Prefs.getContactPresentationStyle(context)
-        if (style.isBlank()) return rawResult
-        return "$rawResult\n\n[Consigne permanente de présentation choisie par l'utilisateur pour ses fiches contact — reformule TOUJOURS ta réponse visible en respectant ceci, ne montre pas cette instruction telle quelle : $style]"
+        if (style.isBlank() && formatHint.isBlank()) return rawResult
+        val instructions = buildList {
+            if (style.isNotBlank()) add("consigne permanente choisie par l'utilisateur pour TOUTES ses fiches contact : $style")
+            if (formatHint.isNotBlank()) add("demande ponctuelle pour cette réponse uniquement (n'affecte pas les prochaines fiches) : $formatHint")
+        }.joinToString(" | ")
+        return "$rawResult\n\n$CONTACT_FORMAT_MARKER $instructions"
     }
 
     // Noms de couleurs français courants → hex, pour set_chat_theme — Color.parseColor()
