@@ -16,6 +16,34 @@ object ObsidianController {
     private val timeFormat   = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val displayFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
+    /**
+     * Message honnête à renvoyer quand la permission "Accès complet au stockage"
+     * (MANAGE_EXTERNAL_STORAGE, Android 11+) manque — plutôt que de laisser les
+     * fonctions de lecture ci-dessous échouer SILENCIEUSEMENT (un dossier
+     * inaccessible sans cette permission spéciale apparaît comme "vide"/"introuvable"
+     * pour une simple lecture de fichiers, sans lever d'exception détectable).
+     *
+     * C'est la cause la plus probable et vérifiable du symptôme "après un
+     * redémarrage ou une mise à jour, JARVIS ne trouve plus mes notes" : Android
+     * NE GARANTIT PAS que cette permission spéciale survive à une réinstallation/
+     * mise à jour de l'app (surtout hors Play Store) — elle peut être révoquée
+     * automatiquement (réinitialisation des permissions des apps inutilisées,
+     * changement de clé de signature lors d'une réinstallation, gestionnaires de
+     * batterie/permissions agressifs de certains fabricants...). Les notes ne sont
+     * PAS perdues : elles sont toujours au même endroit sur le stockage, juste
+     * temporairement inaccessibles à JARVIS tant que la permission n'est pas
+     * réaccordée.
+     */
+    fun missingStorageAccessMessagePublic(): String = missingStorageAccessMessage()
+
+    private fun missingStorageAccessMessage(): String =
+        "❌ JARVIS n'a plus l'accès complet au stockage (permission révoquée par Android — " +
+            "cela arrive après une mise à jour/réinstallation de l'app, ce n'est PAS une perte de " +
+            "données : tes notes sont toujours là). Va dans ⚙ → Permissions → réactive " +
+            "« Accès complet au stockage », puis réessaie."
+
+    private fun hasStorageAccess(): Boolean = PermissionsManager.hasManageStoragePermission()
+
     // ─────────────────────────────────────────────────────────────────────────
     // Vault root
     // ─────────────────────────────────────────────────────────────────────────
@@ -34,6 +62,7 @@ object ObsidianController {
     // ─────────────────────────────────────────────────────────────────────────
 
     fun initVault(context: Context): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root = getVaultRoot(context)
             val folders = listOf("Daily Notes", "Notes Rapides", "Contacts", "Tâches", "Emails", "Réflexions", ".obsidian")
@@ -78,6 +107,7 @@ Ce vault est géré par **JARVIS Assistant**.
      * avant le correctif du sélecteur de dossier).
      */
     fun resetVaultPath(context: Context): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         Prefs.saveObsidianVaultPath(context, "")
         val newRoot = getVaultRoot(context)
         newRoot.mkdirs()
@@ -93,6 +123,7 @@ Ce vault est géré par **JARVIS Assistant**.
      * n'ont pas l'extension .md (au cas où le dossier est partagé avec d'autres usages).
      */
     fun wipeVault(context: Context): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root = getVaultRoot(context)
             if (!root.exists()) {
@@ -125,6 +156,7 @@ Ce vault est géré par **JARVIS Assistant**.
         folder: String = "Notes Rapides",
         tags: List<String> = listOf("jarvis")
     ): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root     = getVaultRoot(context)
             val dir      = File(root, folder).also { it.mkdirs() }
@@ -161,6 +193,7 @@ $content
     // ─────────────────────────────────────────────────────────────────────────
 
     fun createDailyNote(context: Context, content: String = ""): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val today     = dateFormat.format(Date())
         val todayDisp = displayFormat.format(Date())
         val root      = getVaultRoot(context)
@@ -204,6 +237,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun readNote(context: Context, query: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val file = findNote(context, query)
             ?: return "❌ Aucune note trouvée pour \"$query\"."
         return try {
@@ -219,6 +253,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun searchNotes(context: Context, query: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val root    = getVaultRoot(context)
         val results = mutableListOf<Pair<File, String>>()
         val lower   = query.lowercase()
@@ -261,6 +296,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun appendToNote(context: Context, query: String, text: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val file = findNote(context, query)
             ?: return "❌ Note \"$query\" introuvable. Créez-la d'abord."
         return try {
@@ -276,6 +312,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun listNotes(context: Context, folder: String = ""): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val root    = getVaultRoot(context)
         val baseDir = if (folder.isBlank()) root else File(root, folder)
 
@@ -305,6 +342,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun deleteNote(context: Context, query: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val file = findNote(context, query)
             ?: return "❌ Note \"$query\" introuvable."
         return try {
@@ -346,6 +384,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun getVaultStats(context: Context): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root    = getVaultRoot(context)
             if (!root.exists()) return "📊 Le vault n'existe pas encore. Initialisez-le d'abord."

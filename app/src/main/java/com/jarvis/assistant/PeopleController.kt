@@ -164,6 +164,7 @@ object PeopleController {
         notes: String? = null
     ): String {
         if (name.isBlank()) return "❌ Nom du contact manquant."
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val cat = category.lowercase().trim().let { if (it in VALID_CATEGORIES) it else "autre" }
 
         return try {
@@ -226,6 +227,7 @@ object PeopleController {
 
     /** Ajoute une ligne à l'historique des rendez-vous d'un contact (créé si besoin). */
     fun addVisit(context: Context, name: String, visitLabel: String): String {
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val contact = findContact(context, name)
         val category = contact?.category ?: "client"
         val updatedVisits = (contact?.visits ?: emptyList()) + visitLabel
@@ -289,6 +291,7 @@ object PeopleController {
 
     /** Version structurée (sans le texte formaté) pour l'export KML. */
     fun getContactsByCategory(context: Context, category: String): List<ContactSummary> {
+        if (!PermissionsManager.hasManageStoragePermission()) return emptyList()
         val folder = contactsFolder(context)
         val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
         val cat = category.lowercase().trim()
@@ -301,11 +304,13 @@ object PeopleController {
     }
 
     fun getContactDetails(context: Context, name: String): String {
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val contact = findContact(context, name) ?: return "❌ Aucune fiche trouvée pour « $name »."
         return formatFullDetails(contact)
     }
 
     fun searchContacts(context: Context, query: String): String {
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val folder = contactsFolder(context)
         val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
         val q = query.lowercase()
@@ -344,6 +349,7 @@ object PeopleController {
     }
 
     fun listByCategory(context: Context, category: String): String {
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val folder = contactsFolder(context)
         val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
         val cat = category.lowercase().trim()
@@ -372,6 +378,7 @@ object PeopleController {
     }
 
     fun deleteContact(context: Context, name: String): String {
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val contact = findContact(context, name) ?: return "❌ Aucune fiche trouvée pour « $name »."
         return if (contact.file.delete()) {
             "🗑️ Fiche de **${contact.name}** supprimée du vault Obsidian."
@@ -382,6 +389,7 @@ object PeopleController {
 
     /** Trouve la fiche d'un contact et ouvre Maps sur son adresse (ou ses coordonnées GPS si connues). */
     fun navigateToContact(context: Context, name: String): String {
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val contact = findContact(context, name)
             ?: return "❌ Aucune fiche trouvée pour « $name ». Ajoute d'abord son adresse avec save_contact_profile."
 

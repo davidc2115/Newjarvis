@@ -477,7 +477,16 @@ object Prefs {
     // RÉSEAU LOCAL — appareils enregistrés (pour Wake-on-LAN rapide)
     // ═════════════════════════════════════════════════════════════════════════
 
-    data class SavedDevice(val name: String, val mac: String, val ip: String = "")
+    /**
+     * [remoteHost] = adresse publique/DDNS (optionnellement suivie de ":port") vers laquelle
+     * basculer quand l'appareil n'est plus joignable en local (donc hors du Wi-Fi domestique).
+     * JARVIS ne peut PAS créer cet accès lui-même : l'utilisateur doit avoir configuré une
+     * redirection de port (port forwarding) sur sa box/routeur vers cet appareil, idéalement
+     * avec une IP fixe ou un nom DDNS (No-IP, DuckDNS...) puisque l'IP publique change souvent.
+     * Une fois ce champ renseigné, network_ping/network_open_web/wake_on_lan/print_file
+     * basculent automatiquement dessus si l'accès local échoue.
+     */
+    data class SavedDevice(val name: String, val mac: String, val ip: String = "", val remoteHost: String = "")
 
     fun getSavedNetworkDevices(context: Context): List<SavedDevice> {
         val json = prefs(context).getString("network_saved_devices", "[]") ?: "[]"
@@ -485,7 +494,7 @@ object Prefs {
             val arr = JSONArray(json)
             (0 until arr.length()).map {
                 val o = arr.getJSONObject(it)
-                SavedDevice(o.optString("name"), o.optString("mac"), o.optString("ip", ""))
+                SavedDevice(o.optString("name"), o.optString("mac"), o.optString("ip", ""), o.optString("remoteHost", ""))
             }
         } catch (_: Exception) { emptyList() }
     }
@@ -498,6 +507,18 @@ object Prefs {
 
     fun removeNetworkDevice(context: Context, name: String) {
         writeSavedNetworkDevices(context, getSavedNetworkDevices(context).filter { it.name != name })
+    }
+
+    /** Enregistre/actualise l'adresse distante (publique/DDNS) d'un appareil déjà connu (ou nouveau). */
+    fun setDeviceRemoteHost(context: Context, name: String, remoteHost: String) {
+        val list = getSavedNetworkDevices(context).toMutableList()
+        val idx = list.indexOfFirst { it.name.equals(name, ignoreCase = true) }
+        if (idx >= 0) {
+            list[idx] = list[idx].copy(remoteHost = remoteHost.trim())
+        } else {
+            list.add(SavedDevice(name = name, mac = "", ip = "", remoteHost = remoteHost.trim()))
+        }
+        writeSavedNetworkDevices(context, list)
     }
 
     /**
@@ -538,7 +559,7 @@ object Prefs {
     private fun writeSavedNetworkDevices(context: Context, list: List<SavedDevice>) {
         val arr = JSONArray()
         list.forEach { d ->
-            arr.put(JSONObject().put("name", d.name).put("mac", d.mac).put("ip", d.ip))
+            arr.put(JSONObject().put("name", d.name).put("mac", d.mac).put("ip", d.ip).put("remoteHost", d.remoteHost))
         }
         prefs(context).edit().putString("network_saved_devices", arr.toString()).apply()
     }
@@ -565,6 +586,19 @@ object Prefs {
 
     fun saveDefaultPrinterIp(context: Context, ip: String) {
         prefs(context).edit().putString("default_printer_ip", ip.trim()).apply()
+    }
+
+    /**
+     * Adresse distante (publique/DDNS, ex: "monreseau.ddns.net:6310") de l'imprimante par
+     * défaut, utilisée en repli si l'IP locale est injoignable (donc aussi hors Wi-Fi
+     * domestique) — nécessite que l'utilisateur ait redirigé le port 631 (ou un port de son
+     * choix) de sa box/routeur vers l'imprimante.
+     */
+    fun getDefaultPrinterRemoteHost(context: Context): String =
+        prefs(context).getString("default_printer_remote_host", "") ?: ""
+
+    fun saveDefaultPrinterRemoteHost(context: Context, host: String) {
+        prefs(context).edit().putString("default_printer_remote_host", host.trim()).apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════

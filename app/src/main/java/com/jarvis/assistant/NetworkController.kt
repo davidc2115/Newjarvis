@@ -271,7 +271,7 @@ object NetworkController {
      * (doit avoir le WoL activé dans son BIOS/UEFI ou ses paramètres réseau).
      * @param mac adresse MAC au format "AA:BB:CC:DD:EE:FF" ou "AA-BB-CC-DD-EE-FF"
      */
-    suspend fun sendWakeOnLan(context: Context, mac: String): String = withContext(Dispatchers.IO) {
+    suspend fun sendWakeOnLan(context: Context, mac: String, deviceName: String? = null): String = withContext(Dispatchers.IO) {
         val cleanMac = mac.trim().replace("-", ":").replace(".", ":")
         val macBytes = try {
             cleanMac.split(":").map { it.toInt(16).toByte() }.toByteArray()
@@ -280,23 +280,70 @@ object NetworkController {
         }
         if (macBytes.size != 6) return@withContext "❌ Adresse MAC invalide : « $mac »."
 
-        return@withContext try {
-            val magicPacket = ByteArray(6 + 16 * 6)
-            for (i in 0 until 6) magicPacket[i] = 0xFF.toByte()
-            for (i in 6 until magicPacket.size step 6) {
-                System.arraycopy(macBytes, 0, magicPacket, i, 6)
-            }
+        val magicPacket = ByteArray(6 + 16 * 6)
+        for (i in 0 until 6) magicPacket[i] = 0xFF.toByte()
+        for (i in 6 until magicPacket.size step 6) {
+            System.arraycopy(macBytes, 0, magicPacket, i, 6)
+        }
 
+        var localOk = false
+        var localError: String? = null
+        try {
             val broadcast = getBroadcastAddress(context)
             DatagramSocket().use { socket ->
                 socket.broadcast = true
                 val packet = DatagramPacket(magicPacket, magicPacket.size, broadcast, 9)
                 socket.send(packet)
             }
-            "⚡ Paquet Wake-on-LAN envoyé à $mac. L'appareil devrait démarrer dans quelques secondes s'il est bien configuré."
+            localOk = true
         } catch (e: Exception) {
-            "❌ Échec de l'envoi Wake-on-LAN : ${e.message}"
+            localError = e.message
         }
+
+        // Réveil à distance (hors Wi-Fi local) : nécessite que l'utilisateur ait redirigé
+        // un port UDP (souvent 9) de sa box vers son réseau local pour cet appareil — JARVIS
+        // ne peut pas créer cette redirection lui-même, seulement l'utiliser si configurée
+        // via set_remote_access. Le paquet magique est alors envoyé en UNICAST direct à cet
+        // hôte plutôt qu'en broadcast (le broadcast ne traverse jamais Internet).
+        var remoteOk = false
+        val remoteHost = deviceName?.let { resolveDeviceRemoteHost(context, it) }
+        if (!remoteHost.isNullOrBlank()) {
+            try {
+                val (host, port) = parseHostPort(remoteHost, 9)
+                DatagramSocket().use { socket ->
+                    val packet = DatagramPacket(magicPacket, magicPacket.size, InetAddress.getByName(host), port)
+                    socket.send(packet)
+                }
+                remoteOk = true
+            } catch (_: Exception) { /* remoteOk reste false, reflété dans le message ci-dessous */ }
+        }
+
+        return@withContext when {
+            localOk && remoteOk -> "⚡ Paquet Wake-on-LAN envoyé à $mac en local ET vers l'accès distant ($remoteHost). L'appareil devrait démarrer dans quelques secondes s'il est bien configuré."
+            localOk -> "⚡ Paquet Wake-on-LAN envoyé à $mac (réseau local). L'appareil devrait démarrer dans quelques secondes s'il est bien configuré."
+            remoteOk -> "⚡ Paquet Wake-on-LAN envoyé à $mac via l'accès distant ($remoteHost) — le réseau local n'a pas pu être utilisé directement."
+            else -> "❌ Échec de l'envoi Wake-on-LAN : ${localError ?: "erreur inconnue"}."
+        }
+    }
+
+    /** Sépare un "host" ou "host:port" ; retourne [defaultPort] si aucun port n'est précisé. */
+    private fun parseHostPort(hostPort: String, defaultPort: Int): Pair<String, Int> {
+        val trimmed = hostPort.trim()
+        val idx = trimmed.lastIndexOf(':')
+        return if (idx > 0 && trimmed.substring(idx + 1).toIntOrNull() != null) {
+            trimmed.substring(0, idx) to trimmed.substring(idx + 1).toInt()
+        } else {
+            trimmed to defaultPort
+        }
+    }
+
+    /** Adresse distante (publique/DDNS) enregistrée pour un appareil, ou null si aucune. */
+    fun resolveDeviceRemoteHost(context: Context, query: String): String? {
+        val q = query.trim()
+        if (q.isBlank()) return null
+        val saved = Prefs.getSavedNetworkDevices(context)
+        return saved.firstOrNull { it.name.equals(q, ignoreCase = true) && it.remoteHost.isNotBlank() }?.remoteHost
+            ?: saved.firstOrNull { it.name.contains(q, ignoreCase = true) && it.remoteHost.isNotBlank() }?.remoteHost
     }
 
     private fun getBroadcastAddress(context: Context): InetAddress {
@@ -354,15 +401,35 @@ object NetworkController {
         val openPorts = portResults.filter { it.second }.map { it.first }
         val reachable = openPorts.isNotEmpty() || isIcmpReachable(ip)
 
-        if (!reachable) {
-            return@withContext "❌ « $query » ($ip) ne répond pas — éteint, hors de portée Wi-Fi, ou pare-feu qui bloque le sondage."
+        if (reachable) {
+            val device = Device(ip = ip, openPorts = openPorts)
+            val webPart = guessWebUrl(device)?.let { "\n🌐 Interface web disponible : $it" } ?: ""
+            val portsPart = if (openPorts.isNotEmpty()) "\n🔓 Ports ouverts : ${openPorts.joinToString(", ")}" else ""
+            return@withContext "✅ « $query » ($ip) répond en ${elapsedMs}ms — ${device.guessedType}.$portsPart$webPart"
         }
 
-        val device = Device(ip = ip, openPorts = openPorts)
-        val webPart = guessWebUrl(device)?.let { "\n🌐 Interface web disponible : $it" } ?: ""
-        val portsPart = if (openPorts.isNotEmpty()) "\n🔓 Ports ouverts : ${openPorts.joinToString(", ")}" else ""
-        "✅ « $query » ($ip) répond en ${elapsedMs}ms — ${device.guessedType}.$portsPart$webPart"
+        // Injoignable en local (donc éventuellement hors Wi-Fi domestique) — bascule sur
+        // l'accès distant s'il a été configuré via set_remote_access pour cet appareil.
+        val remoteHost = resolveDeviceRemoteHost(context, query)
+        if (!remoteHost.isNullOrBlank()) {
+            val (remoteIp, _) = parseHostPort(remoteHost, 0)
+            val remoteStart = System.currentTimeMillis()
+            val remotePortResults = PROBE_PORTS.map { port -> async { port to isPortOpen(remoteIp, port) } }.awaitAll()
+            val remoteElapsed = System.currentTimeMillis() - remoteStart
+            val remoteOpenPorts = remotePortResults.filter { it.second }.map { it.first }
+            if (remoteOpenPorts.isNotEmpty()) {
+                val device = Device(ip = remoteIp, openPorts = remoteOpenPorts)
+                return@withContext "✅ « $query » ($remoteHost, accès distant) répond en ${remoteElapsed}ms — ${device.guessedType}."
+            }
+            return@withContext "❌ « $query » ne répond ni en local ($ip) ni via l'accès distant configuré ($remoteHost)."
+        }
+
+        "❌ « $query » ($ip) ne répond pas — éteint, hors de portée Wi-Fi, ou pare-feu qui bloque le sondage." +
+            (if (isOffLocalNetwork(context)) " Tu sembles être hors de ton réseau local : configure un accès distant avec set_remote_access si tu veux le joindre de l'extérieur." else "")
     }
+
+    /** Vrai si le téléphone n'est actuellement pas connecté au Wi-Fi (donc probablement hors réseau local). */
+    private fun isOffLocalNetwork(context: Context): Boolean = getLocalSubnetPrefix(context) == null
 
     /**
      * Ouvre l'interface web d'un appareil (nom connu ou IP) dans le navigateur du
@@ -377,8 +444,22 @@ object NetworkController {
             WEB_PORTS.map { port -> async { port to isPortOpen(ip, port) } }.awaitAll()
         }.filter { it.second }.map { it.first }
 
-        val url = guessWebUrl(Device(ip = ip, openPorts = openPorts))
-            ?: return "❌ « $query » ($ip) ne semble pas exposer d'interface web accessible (aucun des ports 80/443/8080/631 n'est ouvert). Pour une imprimante, vérifie que le serveur web intégré est activé dans ses réglages."
+        var url = guessWebUrl(Device(ip = ip, openPorts = openPorts))
+        if (url == null) {
+            // Injoignable/pas d'interface web en local — bascule sur l'accès distant si configuré.
+            val remoteHost = resolveDeviceRemoteHost(context, query)
+            if (!remoteHost.isNullOrBlank()) {
+                val (remoteIp, remotePort) = parseHostPort(remoteHost, 0)
+                val remoteOpenPorts = withContext(Dispatchers.IO) {
+                    WEB_PORTS.map { port -> async { port to isPortOpen(remoteIp, port) } }.awaitAll()
+                }.filter { it.second }.map { it.first }
+                url = guessWebUrl(Device(ip = remoteIp, openPorts = remoteOpenPorts))
+                    ?: if (remotePort > 0) "http://$remoteIp:$remotePort" else null
+            }
+        }
+        if (url == null) {
+            return "❌ « $query » ($ip) ne semble pas exposer d'interface web accessible (aucun des ports 80/443/8080/631 n'est ouvert). Pour une imprimante, vérifie que le serveur web intégré est activé dans ses réglages."
+        }
 
         return try {
             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {

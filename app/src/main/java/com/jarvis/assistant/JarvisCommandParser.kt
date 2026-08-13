@@ -626,7 +626,16 @@ object JarvisCommandParser {
                     }?.mac ?: ""
                 }
                 if (resolvedMac.isBlank()) "❌ Adresse MAC inconnue. Précise l'adresse MAC ou enregistre d'abord l'appareil dans 🏠 → Réseau local."
-                else NetworkController.sendWakeOnLan(context, resolvedMac)
+                else NetworkController.sendWakeOnLan(context, resolvedMac, deviceName.ifBlank { null })
+            }
+            "set_remote_access" -> {
+                val device = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val host = json.optString("host", "")
+                if (device.isBlank() || host.isBlank()) "❌ Précise le nom de l'appareil ET son adresse distante (ex: device=\"Imprimante\", host=\"monreseau.ddns.net:6310\")."
+                else {
+                    Prefs.setDeviceRemoteHost(context, device, host)
+                    "✅ Accès distant enregistré pour « $device » : $host. Assure-toi d'avoir bien redirigé le port correspondant sur ta box/routeur vers cet appareil, sinon ça ne fonctionnera pas."
+                }
             }
 
             "test_api_keys" -> ApiKeyTestController.testAllConfiguredKeys(context)
@@ -671,6 +680,11 @@ object JarvisCommandParser {
                 }
             }
             "list_printers" -> PrintController.listPrinters(context)
+            "set_printer_remote_host" -> {
+                val host = json.optString("host", "")
+                if (host.isBlank()) "❌ Adresse distante manquante (ex: host=\"monreseau.ddns.net:6310\")."
+                else PrintController.setRemotePrinterHost(context, host)
+            }
             "set_default_printer" -> {
                 val ip = json.optString("ip", "")
                 if (ip.isBlank()) "❌ Adresse IP d'imprimante manquante."

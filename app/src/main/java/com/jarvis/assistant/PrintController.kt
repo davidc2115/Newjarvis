@@ -66,53 +66,91 @@ object PrintController {
                 )
             }
 
-            try {
-                val requestBody = buildIppPrintJobRequest(printerIp, file.name, mimeType, file.readBytes())
+            val documentBytes = file.readBytes()
+            val localResult = sendIppToHost(printerIp, IPP_PORT, file.name, mimeType, documentBytes)
+            if (localResult.success) return@withContext localResult
 
-                val url = URL("http://$printerIp:$IPP_PORT/ipp/print")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    connectTimeout = CONNECT_TIMEOUT_MS
-                    readTimeout = READ_TIMEOUT_MS
-                    setRequestProperty("Content-Type", "application/ipp")
-                    setFixedLengthStreamingMode(requestBody.size)
-                }
+            // Injoignable en local (donc éventuellement hors Wi-Fi domestique) — bascule sur
+            // l'hôte distant configuré via set_printer_remote_host, si présent. Nécessite que
+            // l'utilisateur ait redirigé le port IPP (631, ou un port de son choix) de sa
+            // box/routeur vers l'imprimante — JARVIS ne peut pas créer cette redirection lui-même.
+            val remoteHost = Prefs.getDefaultPrinterRemoteHost(context).takeIf { it.isNotBlank() }
+                ?: return@withContext localResult
+            val (remoteIp, remotePort) = parseHostPort(remoteHost, IPP_PORT)
+            val remoteResult = sendIppToHost(remoteIp, remotePort, file.name, mimeType, documentBytes)
+            if (remoteResult.success) remoteResult
+            else Result(
+                false,
+                "❌ Impression échouée en local ET via l'accès distant ($remoteHost).\n" +
+                    "Local : ${localResult.message}\nDistant : ${remoteResult.message}"
+            )
+        }
 
-                conn.outputStream.use { it.write(requestBody) }
+    private fun parseHostPort(hostPort: String, defaultPort: Int): Pair<String, Int> {
+        val trimmed = hostPort.trim()
+        val idx = trimmed.lastIndexOf(':')
+        return if (idx > 0 && trimmed.substring(idx + 1).toIntOrNull() != null) {
+            trimmed.substring(0, idx) to trimmed.substring(idx + 1).toInt()
+        } else {
+            trimmed to defaultPort
+        }
+    }
 
-                val httpCode = conn.responseCode
-                val responseBytes = try {
-                    (if (httpCode in 200..299) conn.inputStream else conn.errorStream)?.readBytes() ?: ByteArray(0)
-                } finally {
-                    conn.disconnect()
-                }
+    private fun sendIppToHost(host: String, port: Int, fileName: String, mimeType: String, documentBytes: ByteArray): Result {
+        return try {
+            val requestBody = buildIppPrintJobRequest(host, fileName, mimeType, documentBytes)
 
-                if (httpCode !in 200..299) {
-                    return@withContext Result(false, "❌ L'imprimante ($printerIp) a refusé la connexion HTTP (code $httpCode).")
-                }
+            val url = URL("http://$host:$port/ipp/print")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                setRequestProperty("Content-Type", "application/ipp")
+                setFixedLengthStreamingMode(requestBody.size)
+            }
 
-                val statusCode = if (responseBytes.size >= 4) {
-                    ((responseBytes[2].toInt() and 0xFF) shl 8) or (responseBytes[3].toInt() and 0xFF)
-                } else -1
+            conn.outputStream.use { it.write(requestBody) }
 
-                if (statusCode in 0x0000..0x00FF) {
-                    Result(true, "🖨️ Impression de « ${file.name} » envoyée à l'imprimante ($printerIp).")
-                } else {
-                    Result(
-                        false,
-                        "❌ L'imprimante ($printerIp) a rejeté le document (code de statut IPP : 0x${statusCode.toString(16)}). " +
-                            "Vérifie qu'elle supporte bien IPP/AirPrint et le format $mimeType."
-                    )
-                }
-            } catch (e: Exception) {
+            val httpCode = conn.responseCode
+            val responseBytes = try {
+                (if (httpCode in 200..299) conn.inputStream else conn.errorStream)?.readBytes() ?: ByteArray(0)
+            } finally {
+                conn.disconnect()
+            }
+
+            if (httpCode !in 200..299) {
+                return Result(false, "❌ L'imprimante ($host) a refusé la connexion HTTP (code $httpCode).")
+            }
+
+            val statusCode = if (responseBytes.size >= 4) {
+                ((responseBytes[2].toInt() and 0xFF) shl 8) or (responseBytes[3].toInt() and 0xFF)
+            } else -1
+
+            if (statusCode in 0x0000..0x00FF) {
+                Result(true, "🖨️ Impression de « $fileName » envoyée à l'imprimante ($host).")
+            } else {
                 Result(
                     false,
-                    "❌ Impossible de joindre l'imprimante ($printerIp) : ${e.message}. " +
-                        "Vérifie qu'elle est bien allumée, connectée au même réseau Wi-Fi, et compatible IPP/AirPrint."
+                    "❌ L'imprimante ($host) a rejeté le document (code de statut IPP : 0x${statusCode.toString(16)}). " +
+                        "Vérifie qu'elle supporte bien IPP/AirPrint et le format $mimeType."
                 )
             }
+        } catch (e: Exception) {
+            Result(
+                false,
+                "❌ Impossible de joindre l'imprimante ($host) : ${e.message}. " +
+                    "Vérifie qu'elle est bien allumée, accessible sur ce réseau, et compatible IPP/AirPrint."
+            )
         }
+    }
+
+    fun setRemotePrinterHost(context: Context, host: String): String {
+        if (host.isBlank()) return "❌ Aucune adresse fournie."
+        Prefs.saveDefaultPrinterRemoteHost(context, host)
+        return "✅ Accès distant enregistré pour l'imprimante par défaut : $host. " +
+            "Vérifie que le port correspondant est bien redirigé vers l'imprimante sur ta box/routeur."
+    }
 
     /**
      * Découvre les imprimantes sur le réseau local en réutilisant le scan réseau
