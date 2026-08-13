@@ -332,7 +332,9 @@ object CalendarController {
             CalendarContract.Calendars._ID,
             CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
             CalendarContract.Calendars.ACCOUNT_NAME,
-            CalendarContract.Calendars.OWNER_ACCOUNT
+            CalendarContract.Calendars.OWNER_ACCOUNT,
+            CalendarContract.Calendars.SYNC_EVENTS,
+            CalendarContract.Calendars.VISIBLE
         )
 
         return try {
@@ -348,13 +350,37 @@ object CalendarController {
                 if (c.count == 0) return "📅 Aucun calendrier disponible."
 
                 val sb = StringBuilder("📅 **Calendriers disponibles** :\n\n")
+                var hasSyncIssue = false
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
                     val name = c.getString(1) ?: "Inconnu"
                     val account = c.getString(2) ?: "?"
+                    val syncEvents = c.getInt(4) != 0
+                    val visible = c.getInt(5) != 0
                     val nickname = Prefs.getCalendarNickname(context, id)
                     val nicknameStr = if (nickname.isNotBlank()) " — surnom : « $nickname »" else ""
                     sb.append("• **$name** (compte : $account, ID: $id)$nicknameStr\n")
+                    // SYNC_EVENTS à 0 = la table Instances/Events reste VIDE pour ce calendrier
+                    // côté Android, même si l'utilisateur le voit très bien dans son appli
+                    // d'agenda (Google Calendar, etc.) — c'est un réglage de synchronisation
+                    // par calendrier, distinct de la visibilité. Cause la plus fréquente d'un
+                    // planning partagé (Skello, calendrier d'équipe, abonnement iCal...) invisible
+                    // pour JARVIS alors qu'il apparaît bien dans l'agenda natif du téléphone.
+                    if (!syncEvents) {
+                        hasSyncIssue = true
+                        sb.append("   ⚠️ Synchronisation désactivée pour ce calendrier — JARVIS ne peut voir AUCUN de ses événements tant que ce n'est pas corrigé (voir note ci-dessous).\n")
+                    } else if (!visible) {
+                        sb.append("   ⚠️ Calendrier masqué (non visible) — vérifie qu'il est bien coché dans ton appli d'agenda.\n")
+                    }
+                }
+                if (hasSyncIssue) {
+                    sb.append(
+                        "\n🔧 Pour activer un calendrier marqué « synchronisation désactivée » : ouvre l'appli " +
+                            "Google Agenda (ou l'appli concernée) → Paramètres → sélectionne ce calendrier " +
+                            "précis (pas juste le compte) → active « Synchroniser » — c'est un réglage séparé " +
+                            "de la simple visibilité, propre à Android, rien à voir avec un bug de JARVIS. " +
+                            "Une fois activé, les événements deviennent immédiatement lisibles par JARVIS.\n"
+                    )
                 }
                 sb.append(
                     "\n💡 Pour distinguer deux calendriers similaires, donne-leur un surnom avec " +
