@@ -31,7 +31,7 @@ object Prefs {
     private const val KEY_ROTATION_STRATEGY = "rotation_strategy"  // "ROUNDROBIN"|"FALLBACK"|"RANDOM"
     private const val KEY_OBSIDIAN_VAULT_PATH = "obsidian_vault_path"
 
-    const val DEFAULT_ACCENT_COLOR = -16724737 // #FF00E5FF (cyan)
+    const val DEFAULT_ACCENT_COLOR = -1525685 // #FFE8B84B (or — thème Apex Studio)
 
     // ═════════════════════════════════════════════════════════════════════════
     // MULTI-CLÉS API PAR PROVIDER

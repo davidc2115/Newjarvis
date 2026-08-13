@@ -1,6 +1,7 @@
 package com.jarvis.assistant
 
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +15,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSnapHelper
+import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -45,13 +49,14 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var downloadProgressText: TextView
 
 
-    private lateinit var styleOrbPulse: TextView
-    private lateinit var styleOrbNetwork: TextView
-    private val colorSwatchIds = listOf(
-        R.id.colorCyan, R.id.colorRed, R.id.colorBlue,
-        R.id.colorPurple, R.id.colorGold, R.id.colorGreen
+    private lateinit var colorCarousel: RecyclerView
+    private lateinit var orbStyleCarousel: RecyclerView
+    private lateinit var colorCarouselAdapter: ColorCarouselAdapter
+    private lateinit var orbStyleCarouselAdapter: OrbStyleCarouselAdapter
+    private val carouselColors = listOf(
+        Color.parseColor("#00E5FF"), Color.parseColor("#FF3B30"), Color.parseColor("#2979FF"),
+        Color.parseColor("#B388FF"), Color.parseColor("#FFC400"), Color.parseColor("#00E676")
     )
-    private lateinit var colorSwatches: List<View>
 
     private var selectedProvider: Provider = Provider.GROQ
     private var selectedAccentColor: Int = Prefs.DEFAULT_ACCENT_COLOR
@@ -111,14 +116,12 @@ class SettingsActivity : AppCompatActivity() {
         downloadProgressText  = findViewById(R.id.downloadProgressText)
 
 
-        styleOrbPulse         = findViewById(R.id.styleOrbPulse)
-        styleOrbNetwork       = findViewById(R.id.styleOrbNetwork)
-        colorSwatches         = colorSwatchIds.map { findViewById(it) }
+        colorCarousel         = findViewById(R.id.colorCarousel)
+        orbStyleCarousel      = findViewById(R.id.orbStyleCarousel)
 
         setupTabs()
         setupProviderSpinner()
-        setupColorSwatches()
-        setupOrbStyleSelector()
+        setupColorAndStyleCarousels()
         buildApiKeyFields()
         loadSavedValues()
         setupButtons()
@@ -411,40 +414,31 @@ class SettingsActivity : AppCompatActivity() {
     }
 
 
-    private fun setupColorSwatches() {
+    /**
+     * Carrousels défilants pour la couleur et le style de l'orbe — remplacent les
+     * anciennes rangées fixes de pastilles/boutons. Les deux restent synchronisés :
+     * changer la couleur met immédiatement à jour l'aperçu live dans le carrousel
+     * de styles, puisque chaque carte y affiche une vraie mini-instance d'OrbView.
+     */
+    private fun setupColorAndStyleCarousels() {
         selectedAccentColor = Prefs.getAccentColor(this)
-        highlightSelectedSwatch()
-        for ((index, _) in colorSwatchIds.withIndex()) {
-            val swatch = colorSwatches[index]
-            swatch.setOnClickListener {
-                val bg = swatch.background
-                selectedAccentColor = if (bg is android.graphics.drawable.ColorDrawable) bg.color else Prefs.DEFAULT_ACCENT_COLOR
-                highlightSelectedSwatch()
-            }
-        }
-    }
-
-    private fun highlightSelectedSwatch() {
-        for (swatch in colorSwatches) {
-            val bg = swatch.background
-            val isSelected = bg is android.graphics.drawable.ColorDrawable && bg.color == selectedAccentColor
-            swatch.alpha  = if (isSelected) 1f else 0.45f
-            swatch.scaleX = if (isSelected) 1.15f else 1f
-            swatch.scaleY = if (isSelected) 1.15f else 1f
-        }
-    }
-
-    private fun setupOrbStyleSelector() {
         selectedOrbStyle = Prefs.getOrbStyle(this)
-        highlightOrbStyle()
-        styleOrbPulse.setOnClickListener   { selectedOrbStyle = "PULSE";          highlightOrbStyle() }
-        styleOrbNetwork.setOnClickListener { selectedOrbStyle = "NETWORK_SPHERE"; highlightOrbStyle() }
-    }
 
-    private fun highlightOrbStyle() {
-        val pulseSelected = selectedOrbStyle == "PULSE"
-        styleOrbPulse.alpha   = if (pulseSelected) 1f else 0.5f
-        styleOrbNetwork.alpha = if (pulseSelected) 0.5f else 1f
+        colorCarouselAdapter = ColorCarouselAdapter(this, carouselColors, selectedAccentColor) { color ->
+            selectedAccentColor = color
+            orbStyleCarouselAdapter.updateAccentColor(color)
+        }
+        colorCarousel.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
+        colorCarousel.adapter = colorCarouselAdapter
+        LinearSnapHelper().attachToRecyclerView(colorCarousel)
+
+        val styleOptions = listOf("PULSE" to "Orbe pulsante", "NETWORK_SPHERE" to "Sphère réseau")
+        orbStyleCarouselAdapter = OrbStyleCarouselAdapter(this, styleOptions, selectedOrbStyle, selectedAccentColor) { styleId ->
+            selectedOrbStyle = styleId
+        }
+        orbStyleCarousel.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
+        orbStyleCarousel.adapter = orbStyleCarouselAdapter
+        LinearSnapHelper().attachToRecyclerView(orbStyleCarousel)
     }
 
     private fun startDownload(url: String, format: LocalLlmManager.LocalModelFormat, useToken: Boolean) {

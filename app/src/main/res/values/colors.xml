@@ -1,30 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- ── Fond : bleu-nuit profond légèrement violacé, plus riche qu'un noir plat ── -->
-    <color name="background_dark">#0A0A16</color>
-    <color name="background_dark_2">#0E0E22</color>
-    <color name="surface_dark">#131328</color>
-    <color name="surface_dark_2">#191940</color>
+    <!-- ── Thème "Apex Studio" : noir profond quasi neutre + cartes sombres,
+         façon dashboard/terminal premium plutôt que le bleu-nuit néon précédent.
+         Ces mêmes noms de couleur sont référencés dans TOUTE l'application (cartes,
+         boutons, en-têtes) — les changer ici suffit à reskin l'app entière sans
+         toucher chaque écran un par un. ────────────────────────────────────── -->
+    <color name="background_dark">#0A0A0C</color>
+    <color name="background_dark_2">#101012</color>
+    <color name="surface_dark">#141416</color>
+    <color name="surface_dark_2">#1B1B1F</color>
 
-    <!-- ── Accents vifs : duo cyan électrique / violet-magenta néon ─────────────── -->
-    <color name="cyan_accent">#00E5FF</color>
-    <color name="cyan_dim">#0097A7</color>
-    <color name="cyan_glow">#6600E5FF</color>
-    <color name="violet_accent">#B14CFF</color>
-    <color name="violet_dim">#7B2FCC</color>
-    <color name="magenta_accent">#FF3DCB</color>
-    <color name="electric_blue">#3D6BFF</color>
+    <!-- ── Accent principal : or/ambre chaud (façon terminal premium), plus
+         d'accent secondaire bronze pour les libellés de section ───────────────── -->
+    <color name="cyan_accent">#E8B84B</color>
+    <color name="cyan_dim">#A9793A</color>
+    <color name="cyan_glow">#66E8B84B</color>
+    <color name="violet_accent">#C9975A</color>
+    <color name="violet_dim">#8C6A3F</color>
+    <color name="magenta_accent">#E8B84B</color>
+    <color name="electric_blue">#E8B84B</color>
 
-    <!-- ── États sémantiques (succès / erreur / avertissement), version néon ────── -->
-    <color name="success_glow">#00FFA3</color>
-    <color name="error_glow">#FF3D5A</color>
-    <color name="warning_glow">#FFC93D</color>
+    <!-- ── États sémantiques (succès / erreur / avertissement) ──────────────────── -->
+    <color name="success_glow">#4ADE80</color>
+    <color name="error_glow">#F87171</color>
+    <color name="warning_glow">#E8B84B</color>
 
-    <color name="bubble_user">#1A1A3D</color>
-    <color name="bubble_ai">#0F1F33</color>
-    <color name="text_primary">#F0F4FF</color>
-    <color name="text_secondary">#8B93B8</color>
+    <color name="bubble_user">#1C1A14</color>
+    <color name="bubble_ai">#16161A</color>
+    <color name="text_primary">#F2F0EA</color>
+    <color name="text_secondary">#8D8A82</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="ripple_cyan">#3300E5FF</color>
+    <color name="ripple_cyan">#33E8B84B</color>
 </resources>

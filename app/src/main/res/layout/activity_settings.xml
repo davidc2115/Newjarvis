@@ -24,6 +24,7 @@
             android:textColor="@color/cyan_accent"
             android:textSize="20sp"
             android:textStyle="bold"
+            android:fontFamily="monospace"
             android:layout_marginBottom="4dp" />
 
         <TextView
@@ -91,21 +92,18 @@
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
-        <LinearLayout
+        <!-- Sélecteur défilant (carrousel) : glisser horizontalement pour parcourir
+             les couleurs, la sélection s'agrandit et prend un contour blanc. -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/colorCarousel"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="76dp"
             android:orientation="horizontal"
+            android:clipToPadding="false"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="12dp">
-
-            <TextView android:id="@+id/colorCyan"   style="@style/ColorSwatch" android:background="#00E5FF" />
-            <TextView android:id="@+id/colorRed"    style="@style/ColorSwatch" android:background="#FF3B30" />
-            <TextView android:id="@+id/colorBlue"   style="@style/ColorSwatch" android:background="#2979FF" />
-            <TextView android:id="@+id/colorPurple" style="@style/ColorSwatch" android:background="#B388FF" />
-            <TextView android:id="@+id/colorGold"   style="@style/ColorSwatch" android:background="#FFC400" />
-            <TextView android:id="@+id/colorGreen"  style="@style/ColorSwatch" android:background="#00E676" />
-
-        </LinearLayout>
+            android:layout_marginBottom="12dp" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -114,37 +112,18 @@
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
-        <LinearLayout
+        <!-- Sélecteur défilant : chaque carte montre un VRAI aperçu animé du style
+             (mini orbe live), pas juste un nom — glisse pour comparer avant de choisir. -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/orbStyleCarousel"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="130dp"
             android:orientation="horizontal"
+            android:clipToPadding="false"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="20dp">
-
-            <TextView
-                android:id="@+id/styleOrbPulse"
-                android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_weight="1"
-                android:layout_marginEnd="8dp"
-                android:text="Orbe pulsante"
-                android:textSize="12sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:textColor="@color/text_primary" />
-
-            <TextView
-                android:id="@+id/styleOrbNetwork"
-                android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_weight="1"
-                android:text="Sphère réseau"
-                android:textSize="12sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:textColor="@color/text_primary" />
-
-        </LinearLayout>
+            android:layout_marginBottom="20dp" />
 
         <!-- Provider actif -->
         <TextView

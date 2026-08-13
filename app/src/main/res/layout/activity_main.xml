@@ -53,7 +53,8 @@
                     android:layout_height="wrap_content"
                     android:text="● en veille"
                     android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
 
             </LinearLayout>
 
