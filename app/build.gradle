@@ -105,5 +105,60 @@ dependencies {
     implementation 'androidx.media3:media3-session:1.4.1'
 
     // ── Détection de mot-clé dédiée (écoute permanente basse consommation) ────
+    // Picovoice/Porcupine : optionnel, nécessite une clé d'accès (voir ⚙ → Réglages).
     implementation 'ai.picovoice:porcupine-android:4.0.0'
+    // openWakeWord : alternative 100% gratuite, sans clé, hors-ligne et basse consommation
+    // (modèles ONNX exécutés via onnxruntime-android, déjà présent ci-dessus). C'est le
+    // moteur utilisé par défaut dès que Picovoice n'est pas configuré — voir WakeWordService.
+    implementation 'xyz.rementia:openwakeword:0.1.5'
 }
+
+// ── Modèles openWakeWord : téléchargés au moment du build (pas commités dans git, pour ne
+// pas alourdir le dépôt de binaires) depuis les releases officielles GitHub du projet
+// open-source openWakeWord (Apache-2.0, https://github.com/dscripka/openWakeWord). Le script
+// est idempotent (un fichier déjà présent n'est pas re-téléchargé) et résilient : un échec
+// réseau ponctuel n'interrompt pas le build, juste un avertissement (le moteur basse
+// consommation restera simplement indisponible tant que les fichiers ne sont pas là).
+task downloadWakeWordModels {
+    doLast {
+        def assetsDir = file("src/main/assets")
+        assetsDir.mkdirs()
+        def release = "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1"
+        def files = [
+            "melspectrogram.onnx" : "${release}/melspectrogram.onnx",
+            "embedding_model.onnx": "${release}/embedding_model.onnx",
+            "hey_jarvis.onnx"     : "${release}/hey_jarvis_v0.1.onnx",
+            "alexa.onnx"          : "${release}/alexa_v0.1.onnx",
+            "hey_mycroft.onnx"    : "${release}/hey_mycroft_v0.1.onnx"
+        ]
+        files.each { name, url ->
+            def dest = new File(assetsDir, name)
+            if (dest.exists() && dest.length() > 0L) return
+
+            def maxAttempts = 3
+            def attempt = 1
+            def done = false
+            while (attempt <= maxAttempts && !done) {
+                try {
+                    println "📥 Téléchargement du modèle mot-clé (openWakeWord) : ${name} (tentative ${attempt}/${maxAttempts})"
+                    new URL(url).openConnection().with { conn ->
+                        conn.connectTimeout = 20000
+                        conn.readTimeout = 30000
+                        conn.instanceFollowRedirects = true
+                        dest.withOutputStream { out -> out << conn.inputStream }
+                    }
+                    done = dest.exists() && dest.length() > 0L
+                } catch (Exception e) {
+                    println "⚠️ Tentative ${attempt}/${maxAttempts} échouée pour ${name} : ${e.message}"
+                    dest.delete()
+                    if (attempt < maxAttempts) Thread.sleep(3000)
+                }
+                attempt++
+            }
+            if (!done) {
+                println "❌ Impossible de télécharger ${name} après ${maxAttempts} tentatives — le moteur d'écoute basse consommation (openWakeWord) ne fonctionnera pas tant que ce fichier n'est pas dans app/src/main/assets/. Relance le build avec une connexion internet active."
+            }
+        }
+    }
+}
+preBuild.dependsOn downloadWakeWordModels

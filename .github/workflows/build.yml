@@ -55,6 +55,17 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
+      # Met en cache les modèles ONNX openWakeWord (détection de mot-clé basse
+      # consommation, alternative gratuite à Picovoice) : ils sont téléchargés au
+      # premier build depuis les releases GitHub officielles du projet openWakeWord
+      # (voir la tâche downloadWakeWordModels dans app/build.gradle) et ne changent
+      # jamais pour une version de release donnée — la clé est donc statique.
+      - name: Cache openWakeWord models
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/*.onnx
+          key: openwakeword-models-v0.5.1
+
       - name: Build debug APK
         run: |
           set +e
