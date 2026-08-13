@@ -43,7 +43,7 @@ object BottomNav {
     }
 
     private fun applyState(container: LinearLayout, icon: TextView, label: TextView, active: Boolean) {
-        container.setBackgroundResource(if (active) R.drawable.bg_nav_active else android.R.color.transparent)
+        container.setBackgroundResource(if (active) R.drawable.bg_nav_active else R.drawable.bg_nav_ripple)
         icon.alpha = if (active) 1f else 0.5f
         label.setTextColor(
             container.context.getColor(if (active) R.color.cyan_accent else R.color.text_secondary)

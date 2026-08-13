@@ -149,7 +149,7 @@
         <activity
             android:name=".SmartHomeActivity"
             android:exported="false"
-            android:label="🏠 Maison connectée"
+            android:label="☰ Menu JARVIS"
             android:theme="@style/Theme.Jarvis"
             android:windowSoftInputMode="adjustResize" />
 

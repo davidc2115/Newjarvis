@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val micButton = findViewById<TextView>(R.id.micButton)
         val sendButton = findViewById<TextView>(R.id.sendButton)
         val settingsButton = findViewById<TextView>(R.id.settingsButton)
-        val controlButton = findViewById<TextView>(R.id.controlButton)
+        val hubButton = findViewById<TextView>(R.id.hubButton)
         val photoButton = findViewById<TextView>(R.id.photoButton)
         val removePendingImageButton = findViewById<TextView>(R.id.removePendingImageButton)
 
@@ -123,17 +123,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        controlButton.setOnClickListener {
-            startActivity(Intent(this, PhoneControlActivity::class.java))
-        }
-
-        // Bouton Second Brain Obsidian (si présent dans le layout)
-        findViewById<android.view.View?>(R.id.obsidianButton)?.setOnClickListener {
-            startActivity(Intent(this, ObsidianActivity::class.java))
-        }
-
-        // Bouton Maison connectée (Home Assistant, réseau local, musique, génération)
-        findViewById<android.view.View?>(R.id.smartHomeButton)?.setOnClickListener {
+        // Un seul bouton vers le menu complet — domotique, création IA, Second Brain
+        // Obsidian, contrôle téléphone, GitHub, réglages... tout est regroupé et
+        // organisé par sections dans SmartHomeActivity (voir son layout dédié).
+        hubButton.setOnClickListener {
             startActivity(Intent(this, SmartHomeActivity::class.java))
         }
 
