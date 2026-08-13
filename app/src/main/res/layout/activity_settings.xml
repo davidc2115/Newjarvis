@@ -416,7 +416,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Clé d'accès Picovoice (optionnelle, mais fortement recommandée)"
+                android:text="Clé d'accès Picovoice (optionnelle — le mot d'activation fonctionne très bien sans)"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -437,7 +437,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="💡 Sans cette clé, l'écoute utilise la reconnaissance vocale standard (fonctionne, mais plus gourmande en batterie). Avec elle, JARVIS utilise un moteur dédié 100% hors-ligne et économe (Porcupine). Gratuit : crée un compte sur console.picovoice.ai → AccessKey, et colle-la ici. Ne fonctionne en mode économe que si le mot-clé est « jarvis » (ou l'un des autres mots intégrés : computer, alexa, picovoice...)."
+                android:text="💡 Laisse ce champ vide si tu veux : sans clé, JARVIS utilise automatiquement la reconnaissance vocale standard d'Android en repli, avec N'IMPORTE QUEL mot d'activation de ton choix (pas juste « jarvis »), et privilégie déjà le mode hors-ligne quand ton téléphone le permet pour économiser batterie/data. Avec une clé Picovoice (gratuite sur console.picovoice.ai → AccessKey), JARVIS bascule sur un moteur encore plus économe en batterie, mais UNIQUEMENT si le mot-clé choisi est l'un des mots intégrés (jarvis, computer, alexa, picovoice...). Aucune des deux solutions ne coûte rien."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp"

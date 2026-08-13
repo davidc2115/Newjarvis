@@ -1,13 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="background_dark">#0A0E14</color>
-    <color name="surface_dark">#111823</color>
+    <!-- ── Fond : bleu-nuit profond légèrement violacé, plus riche qu'un noir plat ── -->
+    <color name="background_dark">#0A0A16</color>
+    <color name="background_dark_2">#0E0E22</color>
+    <color name="surface_dark">#131328</color>
+    <color name="surface_dark_2">#191940</color>
+
+    <!-- ── Accents vifs : duo cyan électrique / violet-magenta néon ─────────────── -->
     <color name="cyan_accent">#00E5FF</color>
     <color name="cyan_dim">#0097A7</color>
-    <color name="bubble_user">#1A2A38</color>
-    <color name="bubble_ai">#062B33</color>
-    <color name="text_primary">#E8F6FF</color>
-    <color name="text_secondary">#7FA8B8</color>
+    <color name="cyan_glow">#6600E5FF</color>
+    <color name="violet_accent">#B14CFF</color>
+    <color name="violet_dim">#7B2FCC</color>
+    <color name="magenta_accent">#FF3DCB</color>
+    <color name="electric_blue">#3D6BFF</color>
+
+    <!-- ── États sémantiques (succès / erreur / avertissement), version néon ────── -->
+    <color name="success_glow">#00FFA3</color>
+    <color name="error_glow">#FF3D5A</color>
+    <color name="warning_glow">#FFC93D</color>
+
+    <color name="bubble_user">#1A1A3D</color>
+    <color name="bubble_ai">#0F1F33</color>
+    <color name="text_primary">#F0F4FF</color>
+    <color name="text_secondary">#8B93B8</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
+    <color name="ripple_cyan">#3300E5FF</color>
 </resources>

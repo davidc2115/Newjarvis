@@ -95,7 +95,8 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.Jarvis">
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -106,74 +107,86 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="Paramètres"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".VoiceModeActivity"
             android:exported="false"
             android:label="Mode vocal"
             android:theme="@style/Theme.Jarvis"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".PhoneControlActivity"
             android:exported="false"
             android:label="Contrôle téléphone"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".GitHubActivity"
             android:exported="false"
             android:label="GitHub"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".EmailConfigActivity"
             android:exported="false"
             android:label="Configuration Email IMAP/SMTP"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ObsidianActivity"
             android:exported="false"
             android:label="🧠 Second Brain — Obsidian"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".SmartHomeActivity"
             android:exported="false"
             android:label="🏠 Maison connectée"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".HomeAssistantActivity"
             android:exported="false"
             android:label="Home Assistant"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".NetworkActivity"
             android:exported="false"
             android:label="Réseau local"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".MusicActivity"
             android:exported="false"
             android:label="Musique"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".GenerationActivity"
             android:exported="false"
             android:label="Génération IA"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".FreeboxActivity"
             android:exported="false"
             android:label="Freebox Server"
-            android:theme="@style/Theme.Jarvis" />
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
 
         <!-- ── Receiver SMS (Validation des permissions SMS sur Android 10+) ── -->

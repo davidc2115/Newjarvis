@@ -35,16 +35,17 @@ class GenerationService : Service() {
     private var resultNotifId = RESULT_NOTIF_ID_BASE
 
     companion object {
-        const val EXTRA_TYPE = "type"     // "image" | "video" | "website"
+        const val EXTRA_TYPE = "type"     // "image" | "video" | "website" | "website_edit"
         const val EXTRA_PROMPT = "prompt"
         const val EXTRA_ID = "id"
+        const val EXTRA_EXISTING_PATH = "existingPath"
 
         private const val CHANNEL_ID = "jarvis_generation"
         private const val PROGRESS_NOTIF_ID = 501
         private const val RESULT_NOTIF_ID_BASE = 600
 
         /** Enregistre une génération dans l'historique et démarre le service pour l'exécuter. */
-        fun enqueue(context: Context, type: String, prompt: String): String {
+        fun enqueue(context: Context, type: String, prompt: String, existingPath: String? = null): String {
             val id = "${System.currentTimeMillis()}_${(0..9999).random()}"
             Prefs.addGenerationRecord(
                 context,
@@ -54,6 +55,7 @@ class GenerationService : Service() {
                 putExtra(EXTRA_TYPE, type)
                 putExtra(EXTRA_PROMPT, prompt)
                 putExtra(EXTRA_ID, id)
+                existingPath?.let { putExtra(EXTRA_EXISTING_PATH, it) }
             }
             ContextCompat.startForegroundService(context, intent)
             return id
@@ -63,6 +65,7 @@ class GenerationService : Service() {
             "image" -> "Image"
             "video" -> "Vidéo"
             "website" -> "Site web"
+            "website_edit" -> "Modification de site"
             else -> "Génération"
         }
     }
@@ -78,6 +81,7 @@ class GenerationService : Service() {
         val type = intent?.getStringExtra(EXTRA_TYPE)
         val prompt = intent?.getStringExtra(EXTRA_PROMPT)
         val id = intent?.getStringExtra(EXTRA_ID)
+        val existingPath = intent?.getStringExtra(EXTRA_EXISTING_PATH)
 
         if (type == null || prompt == null || id == null) {
             stopIfIdle()
@@ -88,7 +92,7 @@ class GenerationService : Service() {
         startForeground(PROGRESS_NOTIF_ID, buildProgressNotification())
 
         scope.launch {
-            runJob(id, type, prompt)
+            runJob(id, type, prompt, existingPath)
             if (activeJobs.decrementAndGet() <= 0) {
                 stopIfIdle()
             }
@@ -104,7 +108,7 @@ class GenerationService : Service() {
         }
     }
 
-    private suspend fun runJob(id: String, type: String, prompt: String) {
+    private suspend fun runJob(id: String, type: String, prompt: String, existingPath: String?) {
         var success = false
         var message = "❌ Type de génération inconnu."
         var resultPath: String? = null
@@ -128,6 +132,16 @@ class GenerationService : Service() {
                     success = r.success
                     message = r.message
                     resultPath = r.filePath
+                }
+                "website_edit" -> {
+                    if (existingPath.isNullOrBlank()) {
+                        message = "❌ Aucun site existant à modifier."
+                    } else {
+                        val r = WebsiteGenController.editWebsite(applicationContext, existingPath, prompt)
+                        success = r.success
+                        message = r.message
+                        resultPath = r.filePath
+                    }
                 }
             }
         } catch (e: Exception) {

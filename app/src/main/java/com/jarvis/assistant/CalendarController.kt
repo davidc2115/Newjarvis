@@ -413,6 +413,17 @@ object CalendarController {
     }
 
     /**
+     * Efface tous les surnoms de calendrier (name_calendar) enregistrés. Ils sont stockés
+     * dans les préférences de l'app, indépendamment du vault Obsidian — un "réinitialiser
+     * Obsidian" ne les efface donc jamais, il faut passer par ici explicitement.
+     */
+    fun resetCalendarNicknames(context: Context): String {
+        val count = Prefs.clearAllCalendarNicknames(context)
+        return if (count == 0) "ℹ️ Aucun surnom de calendrier n'était enregistré."
+        else "✅ $count surnom(s) de calendrier effacé(s). Les calendriers seront à nouveau identifiés par leur nom/compte d'origine."
+    }
+
+    /**
      * Attribue un surnom mémorisable à un calendrier (ex: "Perso", "Boulot"), pour le
      * distinguer facilement. [calendarRef] accepte un ID numérique, un surnom déjà
      * existant, ou un nom affiché / nom de compte (recherche partielle, insensible à

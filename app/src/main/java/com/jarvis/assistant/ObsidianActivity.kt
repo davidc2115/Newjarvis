@@ -195,6 +195,14 @@ class ObsidianActivity : AppCompatActivity() {
                 .setNegativeButton("Annuler", null)
                 .show()
         }
+
+        // ── Effacer les surnoms de calendrier (stockés hors du vault) ───────
+        // Ne fait volontairement PAS partie de "Vider le vault" : les surnoms
+        // (name_calendar) vivent dans les préférences de l'app, pas dans les
+        // fichiers Obsidian — vider le vault ne les touche jamais.
+        findViewById<TextView>(R.id.btnResetCalendarNicknames).setOnClickListener {
+            runAsync { CalendarController.resetCalendarNicknames(this) }
+        }
     }
 
     /** Lance une coroutine IO et affiche le résultat dans resultText. */

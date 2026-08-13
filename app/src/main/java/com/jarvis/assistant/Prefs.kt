@@ -392,6 +392,21 @@ object Prefs {
         return null
     }
 
+    /**
+     * Efface TOUS les surnoms de calendrier enregistrés. Ces surnoms vivent dans les
+     * SharedPreferences de l'app (pas dans le vault Obsidian) — "réinitialiser Obsidian"
+     * ne les touche donc jamais, ce qui explique qu'ils survivent à un vidage du vault.
+     * Cette fonction est le vrai bouton de réinitialisation pour eux spécifiquement.
+     */
+    fun clearAllCalendarNicknames(context: Context): Int {
+        val p = prefs(context)
+        val keysToRemove = p.all.keys.filter { it.startsWith("calendar_nickname_") }
+        val editor = p.edit()
+        keysToRemove.forEach { editor.remove(it) }
+        editor.apply()
+        return keysToRemove.size
+    }
+
 
     fun saveGithubToken(context: Context, token: String) {
         prefs(context).edit().putString("github_token", token).apply()

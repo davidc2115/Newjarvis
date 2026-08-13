@@ -30,10 +30,15 @@ import java.util.Locale
  *    Fonctionne 100% hors-ligne, consommation très faible — c'est le moteur
  *    normalement utilisé.
  *
- * 2. Reconnaissance vocale standard Android en boucle — repli automatique
- *    si aucune clé Picovoice n'est configurée, ou si le mot-clé choisi n'est
- *    pas un mot-clé intégré Porcupine. Fonctionne avec n'importe quel mot,
- *    mais consomme plus de batterie et nécessite internet.
+ * 2. Reconnaissance vocale standard Android en boucle — repli AUTOMATIQUE et
+ *    ENTIÈREMENT GRATUIT, utilisé si aucune clé Picovoice n'est configurée
+ *    (le champ peut rester vide, Picovoice est 100% optionnel), ou si le
+ *    mot-clé choisi n'est pas un mot-clé intégré Porcupine. Fonctionne avec
+ *    N'IMPORTE QUEL mot d'activation (pas de liste limitée), préfère la
+ *    reconnaissance hors-ligne quand le téléphone en dispose (pack de langue
+ *    Google téléchargé) pour économiser batterie/data, et retombe sur la
+ *    reconnaissance en ligne sinon. C'est l'alternative complète à Picovoice :
+ *    aucune clé API, aucun compte, aucun quota à surveiller.
  *
  * ⚠️ Sur certains téléphones (Xiaomi/MIUI, Huawei, Oppo...), Android tue
  * agressivement les services en arrière-plan par défaut. Il faut autoriser
@@ -160,7 +165,12 @@ class WakeWordService : Service(), RecognitionListener {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.FRENCH)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+                // true = "utilise la reconnaissance hors-ligne si le téléphone en a une
+                // (pack de langue Google téléchargé) sinon retombe automatiquement en
+                // ligne" — ce n'est qu'une préférence, jamais une obligation, donc ça
+                // ne casse rien sur les appareils sans pack hors-ligne. Ça réduit la
+                // conso data/batterie de ce moteur de repli sans perdre en fiabilité.
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             }
 
             try {

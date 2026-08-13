@@ -145,6 +145,7 @@ object JarvisCommandParser {
                 if (calendarRef.isBlank() || nickname.isBlank()) "❌ Calendrier ou surnom manquant. Précise le nom affiché du calendrier, son compte (email), ou son ID (via list_calendars)."
                 else CalendarController.nameCalendar(context, calendarRef, nickname)
             }
+            "reset_calendar_nicknames" -> CalendarController.resetCalendarNicknames(context)
 
             "read_emails" -> EmailController.readInbox(context, json.optInt("count", 5))
             "read_unread_emails" -> EmailController.readUnread(context)
@@ -434,6 +435,23 @@ object JarvisCommandParser {
                     GenerationService.enqueue(context, "website", description)
                     "🌐 Génération du site lancée en arrière-plan. Une notification t'avertira " +
                         "dès que c'est prêt (ou en cas d'échec)."
+                }
+            }
+            "edit_website" -> {
+                val instructions = json.optString("instructions", "").ifBlank { json.optString("changes", "") }
+                if (instructions.isBlank()) "❌ Précise la modification à apporter au site."
+                else {
+                    // Si aucun chemin n'est fourni, on modifie le dernier site généré avec succès.
+                    val path = json.optString("path", "").ifBlank {
+                        Prefs.getGenerationHistory(context)
+                            .firstOrNull { it.type in setOf("website", "website_edit") && it.status == "success" && !it.resultPath.isNullOrBlank() }
+                            ?.resultPath
+                    }
+                    if (path.isNullOrBlank()) "❌ Aucun site généré à modifier pour l'instant. Génère-en un d'abord avec generate_website."
+                    else {
+                        GenerationService.enqueue(context, "website_edit", instructions, existingPath = path)
+                        "✏️ Modification du site lancée en arrière-plan (« $instructions »). Une notification t'avertira dès que c'est prêt."
+                    }
                 }
             }
 

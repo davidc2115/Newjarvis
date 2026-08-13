@@ -28,7 +28,7 @@
                 android:textSize="20sp"
                 android:textColor="@color/cyan_accent"
                 android:gravity="center"
-                android:background="@color/surface_dark" />
+                android:background="@drawable/bg_icon_button" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -65,7 +65,7 @@
                 android:text="📱"
                 android:textSize="20sp"
                 android:gravity="center"
-                android:background="@color/surface_dark" />
+                android:background="@drawable/bg_icon_button" />
 
             <TextView
                 android:id="@+id/obsidianButton"
@@ -75,7 +75,7 @@
                 android:text="🧠"
                 android:textSize="20sp"
                 android:gravity="center"
-                android:background="@color/surface_dark" />
+                android:background="@drawable/bg_icon_button" />
 
             <TextView
                 android:id="@+id/smartHomeButton"
@@ -85,7 +85,7 @@
                 android:text="🏠"
                 android:textSize="22sp"
                 android:gravity="center"
-                android:background="@color/surface_dark" />
+                android:background="@drawable/bg_icon_button" />
 
             <TextView
                 android:id="@+id/settingsButton"
@@ -95,7 +95,7 @@
                 android:textSize="22sp"
                 android:textColor="@color/cyan_accent"
                 android:gravity="center"
-                android:background="@color/surface_dark" />
+                android:background="@drawable/bg_icon_button" />
 
         </LinearLayout>
 
@@ -128,9 +128,11 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
+                android:padding="8dp"
                 android:text="✕ retirer la photo"
                 android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
+                android:textSize="12sp"
+                android:background="?attr/selectableItemBackground" />
 
         </LinearLayout>
 

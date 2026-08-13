@@ -59,23 +59,34 @@ object ImageGenController {
             return Result("❌ Aucune description d'image fournie.", null, null)
         }
 
+        // Diagnostic collecté au fil des tentatives — auparavant, un échec HTTP sur un
+        // provider CONFIGURÉ (mauvaise clé, quota, erreur serveur...) était avalé
+        // silencieusement pour passer au suivant ; si tous échouaient, l'utilisateur ne
+        // voyait qu'un message générique "configure une clé" même quand une clé était
+        // bel et bien configurée mais rejetée pour une raison précise (ex: HTTP 400/403).
+        val diagnostics = mutableListOf<String>()
+
         // 1. Google Gemini, si une clé est configurée.
-        tryGemini(context, prompt)?.let { return it }
+        tryGemini(context, prompt, diagnostics)?.let { return it }
 
         // 2. OpenAI DALL-E 3, si une clé est configurée.
-        tryOpenAI(context, prompt)?.let { return it }
+        tryOpenAI(context, prompt, diagnostics)?.let { return it }
 
         // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
-        tryHuggingFace(context, prompt)?.let { return it }
+        tryHuggingFace(context, prompt, diagnostics)?.let { return it }
 
         // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé.
         tryOnDeviceStableDiffusion(context, prompt)?.let { return it }
+
+        val detail = if (diagnostics.isNotEmpty()) {
+            "\n\nDétail des échecs :\n" + diagnostics.joinToString("\n") { "• $it" }
+        } else ""
 
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +
                 "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué). " +
                 "Configure au moins une clé API dans ⚙ → Clés API, ou importe un modèle " +
-                "Stable Diffusion local dans ⚙ → Modèles Locaux.",
+                "Stable Diffusion local dans ⚙ → Modèles Locaux.$detail",
             null, null
         )
     }
@@ -149,7 +160,7 @@ object ImageGenController {
 
     // ─── 1. Google Gemini (Nano Banana) ────────────────────────────────────────
 
-    private fun tryGemini(context: Context, prompt: String): Result? {
+    private fun tryGemini(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
         if (keys.isEmpty()) return null
 
@@ -190,20 +201,33 @@ object ImageGenController {
                         if (response.code == 429 || response.code == 401) {
                             Prefs.markKeyFailed(context, Provider.GEMINI, apiKey)
                         }
+                        diagnostics.add("Gemini : HTTP ${response.code} — ${bodyStr.take(200)}")
                         return@use // essaie la clé suivante s'il y en a une
                     }
 
                     val json = JSONObject(bodyStr)
-                    val candidates = json.optJSONArray("candidates") ?: return@use
-                    if (candidates.length() == 0) return@use
+                    val candidates = json.optJSONArray("candidates")
+                    if (candidates == null || candidates.length() == 0) {
+                        diagnostics.add("Gemini : réponse HTTP 200 sans « candidates » exploitable — ${bodyStr.take(200)}")
+                        return@use
+                    }
+                    // L'API Gemini répond en camelCase ("inlineData"/"mimeType"), mais on
+                    // vérifie aussi le snake_case par sécurité : une réponse HTTP 200 sans
+                    // aucune image détectée à cause d'un nom de champ inattendu se traduisait
+                    // auparavant par un échec silencieux, impossible à distinguer d'un vrai
+                    // manque d'image dans la réponse.
                     val parts = candidates.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
-                        ?: return@use
+                    if (parts == null) {
+                        diagnostics.add("Gemini : réponse sans contenu exploitable — ${bodyStr.take(200)}")
+                        return@use
+                    }
 
                     for (i in 0 until parts.length()) {
-                        val inlineData = parts.getJSONObject(i).optJSONObject("inline_data")
+                        val part = parts.getJSONObject(i)
+                        val inlineData = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data")
                         val b64 = inlineData?.optString("data")
                         if (!b64.isNullOrBlank()) {
-                            val mime = inlineData.optString("mime_type", "image/png")
+                            val mime = inlineData.optString("mimeType", inlineData.optString("mime_type", "image/png"))
                             val bytes = Base64.decode(b64, Base64.DEFAULT)
                             val savedPath = saveToGallery(context, bytes, prompt)
                             return Result(
@@ -214,9 +238,10 @@ object ImageGenController {
                             )
                         }
                     }
+                    diagnostics.add("Gemini : réponse reçue mais aucune image dans les parts (texte seul renvoyé ?) — ${bodyStr.take(200)}")
                 }
             } catch (e: Exception) {
-                // essaie la clé suivante
+                diagnostics.add("Gemini : exception réseau — ${e.message}")
             }
         }
         return null
@@ -224,7 +249,7 @@ object ImageGenController {
 
     // ─── 2. OpenAI DALL-E 3 ─────────────────────────────────────────────────────
 
-    private fun tryOpenAI(context: Context, prompt: String): Result? {
+    private fun tryOpenAI(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val keys = Prefs.getApiKeysFor(context, Provider.OPENAI)
         if (keys.isEmpty()) return null
 
@@ -252,13 +277,17 @@ object ImageGenController {
                         if (response.code == 429 || response.code == 401) {
                             Prefs.markKeyFailed(context, Provider.OPENAI, apiKey)
                         }
+                        diagnostics.add("OpenAI : HTTP ${response.code} — ${bodyStr.take(200)}")
                         return@use // essaie la clé OpenAI suivante s'il y en a une
                     }
 
                     val json = JSONObject(bodyStr)
                     val dataArr = json.optJSONArray("data")
                     val b64 = dataArr?.optJSONObject(0)?.optString("b64_json")
-                    if (b64.isNullOrBlank()) return@use
+                    if (b64.isNullOrBlank()) {
+                        diagnostics.add("OpenAI : réponse HTTP 200 sans image encodée — ${bodyStr.take(200)}")
+                        return@use
+                    }
 
                     val bytes = Base64.decode(b64, Base64.DEFAULT)
                     val savedPath = saveToGallery(context, bytes, prompt)
@@ -270,7 +299,7 @@ object ImageGenController {
                     )
                 }
             } catch (e: Exception) {
-                // essaie la clé suivante
+                diagnostics.add("OpenAI : exception réseau — ${e.message}")
             }
         }
         return null
@@ -278,7 +307,7 @@ object ImageGenController {
 
     // ─── 3. Stable Diffusion via Hugging Face Inference API ───────────────────
 
-    private fun tryHuggingFace(context: Context, prompt: String): Result? {
+    private fun tryHuggingFace(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val token = Prefs.getHfToken(context)
         if (token.isBlank()) return null
 
@@ -293,7 +322,11 @@ object ImageGenController {
 
             client.newCall(request).execute().use { response ->
                 val contentType = response.header("Content-Type") ?: ""
-                if (!response.isSuccessful || !contentType.startsWith("image/")) return null
+                if (!response.isSuccessful || !contentType.startsWith("image/")) {
+                    val bodyPreview = if (!response.isSuccessful) response.body?.string()?.take(200) else "Content-Type inattendu: $contentType"
+                    diagnostics.add("Hugging Face : HTTP ${response.code} — $bodyPreview")
+                    return null
+                }
 
                 val bytes = response.body?.bytes() ?: return null
                 val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
@@ -306,6 +339,7 @@ object ImageGenController {
                 )
             }
         } catch (e: Exception) {
+            diagnostics.add("Hugging Face : exception réseau — ${e.message}")
             null
         }
     }

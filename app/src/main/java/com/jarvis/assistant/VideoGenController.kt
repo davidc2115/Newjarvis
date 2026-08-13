@@ -2,6 +2,7 @@ package com.jarvis.assistant
 
 import android.content.Context
 import android.os.Environment
+import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -77,23 +78,30 @@ object VideoGenController {
             var status: String
             var outputVal: Any?
 
+            var lastErrorDetail: String? = null
+
             client.newCall(createRequest).execute().use { response ->
                 val bodyStr = response.body?.string() ?: ""
                 if (!response.isSuccessful) {
-                    return Result(false, "❌ Replicate a refusé la demande (HTTP ${response.code}) : ${bodyStr.take(200)}")
+                    return Result(false, "❌ Replicate a refusé la demande (HTTP ${response.code}) : ${bodyStr.take(300)}")
                 }
                 val json = JSONObject(bodyStr)
                 predictionUrl = json.optJSONObject("urls")?.optString("get") ?: ""
                 status = json.optString("status", "starting")
                 outputVal = json.opt("output")
+                if (status == "failed") {
+                    lastErrorDetail = json.optString("error", bodyStr.take(300))
+                }
             }
 
-            if (predictionUrl.isBlank()) return Result(false, "❌ Réponse Replicate invalide (pas d'URL de suivi).")
+            if (predictionUrl.isBlank()) return Result(false, "❌ Réponse Replicate invalide (pas d'URL de suivi). Vérifie que le modèle « $model » existe toujours sur Replicate (⚙ → Génération → Vidéo pour en changer).")
 
             // Poll jusqu'à ce que la prédiction soit terminée si elle ne l'était pas déjà.
+            // Utilise delay() (suspension coroutine) plutôt que Thread.sleep() pour ne pas
+            // bloquer inutilement le thread du dispatcher IO pendant l'attente.
             var attempts = 0
             while (status != "succeeded" && status != "failed" && status != "canceled" && attempts < MAX_POLL_ATTEMPTS) {
-                Thread.sleep(POLL_INTERVAL_MS)
+                delay(POLL_INTERVAL_MS)
                 attempts++
                 val pollRequest = Request.Builder()
                     .url(predictionUrl)
@@ -105,12 +113,18 @@ object VideoGenController {
                         val json = JSONObject(bodyStr)
                         status = json.optString("status", status)
                         outputVal = json.opt("output")
+                        if (status == "failed") {
+                            lastErrorDetail = json.optString("error", bodyStr.take(300))
+                        }
+                    } else {
+                        lastErrorDetail = "HTTP ${response.code} lors du suivi — ${bodyStr.take(200)}"
                     }
                 }
             }
 
             if (status != "succeeded") {
-                return Result(false, "❌ Génération vidéo échouée ou trop longue (statut : $status). Réessaie avec une description plus simple.")
+                val reason = lastErrorDetail?.let { " Détail : $it" } ?: ""
+                return Result(false, "❌ Génération vidéo échouée ou trop longue (statut : $status).$reason Réessaie avec une description plus simple, ou change de modèle dans ⚙ → Génération → Vidéo.")
             }
 
             val videoUrl = when (outputVal) {
