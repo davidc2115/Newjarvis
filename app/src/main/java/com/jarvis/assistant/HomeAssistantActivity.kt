@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 class HomeAssistantActivity : AppCompatActivity() {
 
     private lateinit var urlInput: EditText
+    private lateinit var remoteUrlInput: EditText
     private lateinit var tokenInput: EditText
     private lateinit var searchInput: EditText
     private lateinit var renameInput: EditText
@@ -24,16 +25,19 @@ class HomeAssistantActivity : AppCompatActivity() {
         setContentView(R.layout.activity_home_assistant)
 
         urlInput = findViewById(R.id.haUrlInput)
+        remoteUrlInput = findViewById(R.id.haRemoteUrlInput)
         tokenInput = findViewById(R.id.haTokenInput)
         searchInput = findViewById(R.id.haSearchInput)
         renameInput = findViewById(R.id.haRenameInput)
         outputText = findViewById(R.id.haOutputText)
 
         urlInput.setText(Prefs.getHaUrl(this))
+        remoteUrlInput.setText(Prefs.getHaRemoteUrl(this))
         tokenInput.setText(Prefs.getHaToken(this))
 
         findViewById<TextView>(R.id.btnHaSave).setOnClickListener {
             Prefs.saveHaUrl(this, urlInput.text.toString())
+            Prefs.saveHaRemoteUrl(this, remoteUrlInput.text.toString())
             Prefs.saveHaToken(this, tokenInput.text.toString())
             outputText.text = "⏳ Test de connexion..."
             CoroutineScope(Dispatchers.Main).launch {

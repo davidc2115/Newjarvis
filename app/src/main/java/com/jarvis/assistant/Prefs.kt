@@ -460,22 +460,17 @@ object Prefs {
         prefs(context).edit().putString("ha_token", token.trim()).apply()
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // FREEBOX SERVER (stockage + Wi-Fi de la box)
-    // ═════════════════════════════════════════════════════════════════════════
+    /**
+     * URL distante de secours pour Home Assistant (ex: URL Nabu Casa
+     * "https://xxxx.ui.nabu.casa", ou une URL externe/DDNS + reverse-proxy configurée
+     * par l'utilisateur) — utilisée UNIQUEMENT quand l'URL locale (ha_url) est
+     * injoignable, pour piloter la maison même hors du réseau Wi-Fi local.
+     */
+    fun getHaRemoteUrl(context: Context): String =
+        prefs(context).getString("ha_remote_url", "") ?: ""
 
-    fun getFreeboxHost(context: Context): String =
-        prefs(context).getString("freebox_host", "http://mafreebox.freebox.fr") ?: "http://mafreebox.freebox.fr"
-
-    fun saveFreeboxHost(context: Context, host: String) {
-        prefs(context).edit().putString("freebox_host", host.trim().trimEnd('/').ifBlank { "http://mafreebox.freebox.fr" }).apply()
-    }
-
-    fun getFreeboxAppToken(context: Context): String =
-        prefs(context).getString("freebox_app_token", "") ?: ""
-
-    fun saveFreeboxAppToken(context: Context, token: String) {
-        prefs(context).edit().putString("freebox_app_token", token.trim()).apply()
+    fun saveHaRemoteUrl(context: Context, url: String) {
+        prefs(context).edit().putString("ha_remote_url", url.trim().trimEnd('/')).apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════

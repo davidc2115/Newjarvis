@@ -33,7 +33,19 @@
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:background="@drawable/bg_input"
-            android:hint="URL Home Assistant (ex: http://192.168.1.50:8123)"
+            android:hint="URL locale Home Assistant (ex: http://192.168.1.50:8123)"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"
+            android:inputType="textUri"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/haRemoteUrlInput"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_input"
+            android:hint="URL distante (optionnel, ex: Nabu Casa) — pour piloter hors Wi-Fi"
             android:textColorHint="@color/text_secondary"
             android:textColor="@color/text_primary"
             android:inputType="textUri"

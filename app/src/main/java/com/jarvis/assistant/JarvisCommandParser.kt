@@ -40,8 +40,39 @@ object JarvisCommandParser {
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact",
-        "github_list_repos", "github_read_file"
+        "github_list_repos", "github_read_file", "list_generations"
     )
+
+    // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
+    // « word », « le fichier excel »...) aux vraies valeurs de type stockées dans
+    // Prefs.GenerationRecord, pour retrouver un fichier déjà généré sans connaître son
+    // chemin exact — condition sine qua non pour que "ouvre/imprime le PDF que tu as créé"
+    // fonctionne même si la création a eu lieu dans un tour de conversation antérieur.
+    private val GENERATION_TYPE_ALIASES: Map<String, Set<String>> = mapOf(
+        "pdf" to setOf("file_pdf"),
+        "docx" to setOf("file_docx"), "word" to setOf("file_docx"), "doc" to setOf("file_docx"),
+        "xlsx" to setOf("file_xlsx"), "excel" to setOf("file_xlsx"), "tableur" to setOf("file_xlsx"),
+        "zip" to setOf("file_zip"), "archive" to setOf("file_zip"),
+        "image" to setOf("image"), "photo" to setOf("image"), "img" to setOf("image"),
+        "video" to setOf("video"), "vidéo" to setOf("video"),
+        "chart" to setOf("chart"), "graphique" to setOf("chart"),
+        "website" to setOf("website", "website_edit"), "site" to setOf("website", "website_edit")
+    )
+
+    /**
+     * Retrouve le chemin du dernier fichier généré avec succès correspondant à [typeHint]
+     * (ex: "pdf", "excel"...) — ou toute génération réussie si [typeHint] est vide/inconnu.
+     * Utilisé en repli par open_file/print_file quand aucun chemin exact n'est fourni.
+     */
+    private fun findRecentGenerationPath(context: Context, typeHint: String): String? {
+        val types = GENERATION_TYPE_ALIASES[typeHint.trim().lowercase()]
+        return Prefs.getGenerationHistory(context)
+            .firstOrNull { rec ->
+                rec.status == "success" && !rec.resultPath.isNullOrBlank() &&
+                    (types == null || rec.type in types)
+            }
+            ?.resultPath
+    }
 
     /**
      * Exécute une ou plusieurs commandes trouvées dans la réponse de l'IA.
@@ -537,6 +568,38 @@ object JarvisCommandParser {
                     json.optString("mediaType", "").ifBlank { null }
                 )
             }
+            "ha_call_service" -> {
+                val domainSvc = json.optString("domain", "")
+                val service = json.optString("service", "")
+                if (domainSvc.isBlank() || service.isBlank()) "❌ Précise le domaine et le service Home Assistant à appeler (ex: domain=\"light\", service=\"turn_on\")."
+                else {
+                    val data = json.optJSONObject("data") ?: JSONObject()
+                    val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                    if (name.isNotBlank()) {
+                        val entity = HomeAssistantController.findEntity(context, name)
+                        if (entity != null) data.put("entity_id", entity.entityId)
+                    }
+                    HomeAssistantController.callServiceRaw(context, domainSvc, service, data).message
+                }
+            }
+            "ha_list_automations" -> HomeAssistantController.listAutomations(context)
+            "ha_create_automation" -> {
+                val id = json.optString("id", "").ifBlank { System.currentTimeMillis().toString() }
+                val config = json.optJSONObject("config")
+                if (config == null) "❌ Configuration d'automatisation manquante (attendu : objet JSON avec alias/trigger/action, comme dans l'éditeur d'automatisations Home Assistant)."
+                else HomeAssistantController.createOrUpdateAutomation(context, id, config).message
+            }
+            "ha_delete_automation" -> {
+                val id = json.optString("id", "")
+                if (id.isBlank()) "❌ Identifiant d'automatisation manquant (voir ha_list_automations)."
+                else HomeAssistantController.deleteAutomation(context, id).message
+            }
+            "ha_trigger_automation" -> {
+                val name = json.optString("device", "").ifBlank { json.optString("name", "") }
+                val entity = HomeAssistantController.findEntity(context, name)
+                if (entity == null) "❌ Aucune automatisation Home Assistant trouvée pour « $name »."
+                else HomeAssistantController.triggerAutomation(context, entity.entityId).message
+            }
 
             "network_scan" -> {
                 val devices = NetworkController.scanNetwork(context)
@@ -554,39 +617,6 @@ object JarvisCommandParser {
                 else NetworkController.openWebInterface(context, device)
             }
 
-            "freebox_list" -> {
-                val path = json.optString("path", "/")
-                val result = FreeboxController.listDirectory(context, path)
-                FreeboxController.formatDirectoryListing(path, result)
-            }
-            "freebox_mkdir" -> {
-                val parent = json.optString("parent", "/")
-                val name = json.optString("name", "")
-                if (name.isBlank()) "❌ Nom de dossier manquant."
-                else FreeboxController.createFolder(context, parent, name).message
-            }
-            "freebox_rename" -> {
-                val path = json.optString("path", "")
-                val newName = json.optString("newName", "")
-                if (path.isBlank() || newName.isBlank()) "❌ Chemin ou nouveau nom manquant."
-                else FreeboxController.renameEntry(context, path, newName).message
-            }
-            "freebox_delete" -> {
-                val path = json.optString("path", "")
-                if (path.isBlank()) "❌ Chemin manquant."
-                else FreeboxController.deleteEntry(context, path).message
-            }
-            "freebox_move" -> {
-                val path = json.optString("path", "")
-                val dest = json.optString("dest", "")
-                if (path.isBlank() || dest.isBlank()) "❌ Chemin source ou destination manquant."
-                else FreeboxController.moveEntry(context, path, dest).message
-            }
-            "freebox_wifi_on" -> FreeboxController.setWifiState(context, true).message
-            "freebox_wifi_off" -> FreeboxController.setWifiState(context, false).message
-            "freebox_wifi_status" -> FreeboxController.getWifiStatus(context).message
-            "freebox_status" -> FreeboxController.getSystemStatus(context).message
-            "freebox_permissions" -> FreeboxController.getPermissionsStatus(context).message
             "wake_on_lan" -> {
                 val mac = json.optString("mac", "")
                 val deviceName = json.optString("device", "").ifBlank { json.optString("name", "") }
@@ -602,14 +632,43 @@ object JarvisCommandParser {
             "test_api_keys" -> ApiKeyTestController.testAllConfiguredKeys(context)
 
             "open_file" -> {
-                val path = json.optString("path", "")
-                if (path.isBlank()) "❌ Chemin de fichier manquant."
+                // Si aucun chemin exact n'est fourni, on retrouve le dernier fichier généré
+                // avec succès correspondant au type demandé (ex: "le PDF que tu as créé") —
+                // avant ce correctif, l'IA n'ayant aucune mémoire persistante du chemin exact
+                // au-delà de la fenêtre de contexte de la conversation, elle prétendait à tort
+                // ne pas se souvenir avoir créé le fichier, alors qu'il était bien enregistré
+                // dans l'historique de génération.
+                val path = json.optString("path", "").ifBlank {
+                    findRecentGenerationPath(context, json.optString("type", ""))
+                }
+                if (path.isNullOrBlank()) "❌ Aucun fichier correspondant trouvé. Utilise list_generations pour voir l'historique des fichiers créés, ou précise le chemin exact."
                 else FileGenController.openFile(context, path)
             }
             "print_file" -> {
-                val path = json.optString("path", "")
-                if (path.isBlank()) "❌ Chemin de fichier à imprimer manquant."
+                val path = json.optString("path", "").ifBlank {
+                    findRecentGenerationPath(context, json.optString("type", ""))
+                }
+                if (path.isNullOrBlank()) "❌ Aucun fichier correspondant trouvé à imprimer. Utilise list_generations pour voir l'historique, ou précise le chemin exact."
                 else PrintController.printFile(context, path, json.optString("printer", "").ifBlank { null }).message
+            }
+            "list_generations" -> {
+                val typeHint = json.optString("type", "")
+                val count = json.optInt("count", 10).coerceIn(1, 50)
+                val types = GENERATION_TYPE_ALIASES[typeHint.trim().lowercase()]
+                val history = Prefs.getGenerationHistory(context)
+                    .filter { types == null || it.type in types }
+                    .take(count)
+                if (history.isEmpty()) "📂 Aucune génération trouvée dans l'historique" + (if (typeHint.isNotBlank()) " pour « $typeHint »." else ".")
+                else {
+                    val sdf = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.FRENCH)
+                    val sb = StringBuilder("📂 **Historique des générations**" + (if (typeHint.isNotBlank()) " ($typeHint)" else "") + " :\n\n")
+                    history.forEach { rec ->
+                        val statusIcon = when (rec.status) { "success" -> "✅"; "failed" -> "❌"; else -> "⏳" }
+                        sb.append("$statusIcon ${rec.type} — « ${rec.prompt.take(60)} » — ${sdf.format(java.util.Date(rec.timestamp))}\n")
+                        if (!rec.resultPath.isNullOrBlank()) sb.append("   📁 ${rec.resultPath}\n")
+                    }
+                    sb.toString().trim()
+                }
             }
             "list_printers" -> PrintController.listPrinters(context)
             "set_default_printer" -> {

@@ -5,18 +5,27 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * HomeAssistantController — intégration Home Assistant (REST API).
+ * HomeAssistantController — intégration Home Assistant (REST + WebSocket API),
+ * conçue comme le point de contrôle CENTRAL de la maison depuis JARVIS : c'est
+ * délibérément par ici que passe tout pilotage réseau qui doit aussi fonctionner
+ * hors du réseau local (là où un accès direct au téléphone/à un appareil précis
+ * ne fonctionnerait plus), tant qu'une URL distante Home Assistant est configurée.
  *
  * Nécessite dans Home Assistant : Paramètres → Compte → Sécurité →
  * "Jetons d'accès à long terme" → créer un jeton, puis le coller dans
- * JARVIS (⚙ → Domotique). L'URL doit être accessible depuis le téléphone
- * (ex: http://192.168.1.50:8123 en local sur le même Wi-Fi, ou une URL
- * distante si tu as configuré Nabu Casa / un reverse-proxy).
+ * JARVIS (⚙ → Domotique). Deux URLs peuvent être configurées :
+ *  • URL locale (ex: http://192.168.1.50:8123) — utilisée en priorité, la plus rapide.
+ *  • URL distante (ex: https://xxxx.ui.nabu.casa, ou un DDNS/reverse-proxy perso) —
+ *    utilisée automatiquement en repli si l'URL locale est injoignable (donc
+ *    aussi hors du Wi-Fi domestique). Sans URL distante configurée, JARVIS reste
+ *    honnêtement limité au réseau local pour la domotique, comme avant.
  *
  * Documentation officielle : https://developers.home-assistant.io/docs/api/rest/
  */
@@ -27,7 +36,9 @@ object HomeAssistantController {
         val state: String,
         val friendlyName: String,
         val domain: String,
-        val unit: String?
+        val unit: String?,
+        val latitude: Double? = null,
+        val longitude: Double? = null
     )
 
     data class ActionResult(val success: Boolean, val message: String)
@@ -40,34 +51,70 @@ object HomeAssistantController {
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
     // Domaines HA les plus pertinents à afficher/contrôler depuis le mobile.
+    // "automation" et "script" inclus : turn_on/turn_off active/désactive une
+    // automatisation existante, et automation.trigger permet de la déclencher
+    // manuellement — le pilotage réel qu'expose honnêtement l'API HA.
     private val CONTROLLABLE_DOMAINS = setOf(
         "light", "switch", "climate", "cover", "fan", "lock", "media_player",
-        "vacuum", "scene", "script", "input_boolean", "siren", "humidifier"
+        "vacuum", "scene", "script", "input_boolean", "siren", "humidifier", "automation"
     )
     private val READONLY_DOMAINS = setOf("sensor", "binary_sensor", "person", "device_tracker", "weather")
 
     fun isConfigured(context: Context): Boolean =
-        Prefs.getHaUrl(context).isNotBlank() && Prefs.getHaToken(context).isNotBlank()
+        (Prefs.getHaUrl(context).isNotBlank() || Prefs.getHaRemoteUrl(context).isNotBlank()) &&
+            Prefs.getHaToken(context).isNotBlank()
 
-    private fun baseUrl(context: Context): String = Prefs.getHaUrl(context).trimEnd('/')
-
-    private fun authedRequest(context: Context, path: String): Request.Builder =
+    private fun authedRequestBuilder(baseUrl: String, token: String, path: String): Request.Builder =
         Request.Builder()
-            .url("${baseUrl(context)}$path")
-            .addHeader("Authorization", "Bearer ${Prefs.getHaToken(context)}")
+            .url("$baseUrl$path")
+            .addHeader("Authorization", "Bearer $token")
             .addHeader("Content-Type", "application/json")
+
+    /**
+     * Exécute une requête REST Home Assistant en essayant d'abord l'URL locale
+     * (rapide, réseau Wi-Fi domestique), puis l'URL distante de secours si elle
+     * est configurée ET que l'URL locale est injoignable ou échoue — c'est ce
+     * mécanisme qui permet de piloter la maison même hors réseau local. Si
+     * aucune des deux ne fonctionne, l'erreur réelle de la dernière tentative
+     * remonte telle quelle (pas de faux succès).
+     */
+    private fun executeWithFallback(
+        context: Context,
+        path: String,
+        configure: (Request.Builder) -> Request.Builder = { it }
+    ): Response {
+        val token = Prefs.getHaToken(context)
+        val localUrl = Prefs.getHaUrl(context).trimEnd('/')
+        val remoteUrl = Prefs.getHaRemoteUrl(context).trimEnd('/')
+
+        if (localUrl.isBlank() && remoteUrl.isBlank()) {
+            throw IOException("Aucune URL Home Assistant configurée (⚙ → Domotique).")
+        }
+
+        if (localUrl.isNotBlank()) {
+            try {
+                val request = configure(authedRequestBuilder(localUrl, token, path)).build()
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful || remoteUrl.isBlank() || remoteUrl == localUrl) return response
+                response.close()
+            } catch (e: Exception) {
+                if (remoteUrl.isBlank() || remoteUrl == localUrl) throw e
+            }
+        }
+        val request = configure(authedRequestBuilder(remoteUrl, token, path)).build()
+        return client.newCall(request).execute()
+    }
 
     /** Vérifie la connexion (GET /api/ → {"message":"API running."}). */
     fun testConnection(context: Context): ActionResult {
         if (!isConfigured(context)) return ActionResult(false, "❌ URL ou jeton Home Assistant manquant.")
         return try {
-            val request = authedRequest(context, "/api/").build()
-            client.newCall(request).execute().use { response ->
+            executeWithFallback(context, "/api/").use { response ->
                 if (response.isSuccessful) ActionResult(true, "✅ Connecté à Home Assistant.")
                 else ActionResult(false, "❌ Échec de connexion (HTTP ${response.code}). Vérifie l'URL et le jeton.")
             }
         } catch (e: Exception) {
-            ActionResult(false, "❌ Impossible de joindre Home Assistant : ${e.message}")
+            ActionResult(false, "❌ Impossible de joindre Home Assistant (local et distant) : ${e.message}")
         }
     }
 
@@ -75,8 +122,7 @@ object HomeAssistantController {
     fun getAllEntities(context: Context): List<Entity> {
         if (!isConfigured(context)) return emptyList()
         return try {
-            val request = authedRequest(context, "/api/states").build()
-            client.newCall(request).execute().use { response ->
+            executeWithFallback(context, "/api/states").use { response ->
                 if (!response.isSuccessful) return emptyList()
                 val body = response.body?.string() ?: return emptyList()
                 val arr = JSONArray(body)
@@ -86,12 +132,22 @@ object HomeAssistantController {
                     val domain = entityId.substringBefore(".")
                     if (domain !in CONTROLLABLE_DOMAINS && domain !in READONLY_DOMAINS) return@mapNotNull null
                     val attrs = obj.optJSONObject("attributes") ?: JSONObject()
+                    // Latitude/longitude uniquement pour "person" : c'est le point de localisation
+                    // précis exposé par HA sous une entité person.xxx (GPS du téléphone/tracker
+                    // associé). HA n'affiche par défaut que le nom de la ZONE (ex: "home",
+                    // "not_home") comme état — la position réelle est bien là, dans les attributs,
+                    // juste pas montrée par défaut. On ne le fait QUE pour "person" (jamais
+                    // device_tracker, potentiellement nombreux) pour ne pas ralentir un scan général.
+                    val lat = if (domain == "person") attrs.optDouble("latitude", Double.NaN).takeIf { !it.isNaN() } else null
+                    val lon = if (domain == "person") attrs.optDouble("longitude", Double.NaN).takeIf { !it.isNaN() } else null
                     Entity(
                         entityId = entityId,
                         state = obj.optString("state", "unknown"),
                         friendlyName = attrs.optString("friendly_name", entityId),
                         domain = domain,
-                        unit = attrs.optString("unit_of_measurement", null.toString()).takeIf { it != "null" }
+                        unit = attrs.optString("unit_of_measurement", null.toString()).takeIf { it != "null" },
+                        latitude = lat,
+                        longitude = lon
                     )
                 }.sortedBy { it.friendlyName.lowercase() }
             }
@@ -111,10 +167,11 @@ object HomeAssistantController {
     }
 
     /** Appelle un service HA générique : POST /api/services/{domain}/{service}. */
-    fun callService(context: Context, domain: String, service: String, entityId: String, extra: Map<String, Any> = emptyMap()): ActionResult {
+    fun callService(context: Context, domain: String, service: String, entityId: String? = null, extra: Map<String, Any> = emptyMap()): ActionResult {
         if (!isConfigured(context)) return ActionResult(false, "❌ Home Assistant n'est pas configuré (⚙ → Domotique).")
         return try {
-            val payload = JSONObject().put("entity_id", entityId)
+            val payload = JSONObject()
+            if (!entityId.isNullOrBlank()) payload.put("entity_id", entityId)
             extra.forEach { (k, v) ->
                 when (v) {
                     is Int -> payload.put(k, v)
@@ -123,17 +180,102 @@ object HomeAssistantController {
                     else -> payload.put(k, v.toString())
                 }
             }
-            val request = authedRequest(context, "/api/services/$domain/$service")
-                .post(payload.toString().toRequestBody(JSON))
-                .build()
-            client.newCall(request).execute().use { response ->
+            executeWithFallback(context, "/api/services/$domain/$service") {
+                it.post(payload.toString().toRequestBody(JSON))
+            }.use { response ->
                 if (response.isSuccessful) ActionResult(true, "✅ Commande envoyée.")
-                else ActionResult(false, "❌ Home Assistant a refusé la commande (HTTP ${response.code}).")
+                else ActionResult(false, "❌ Home Assistant a refusé la commande (HTTP ${response.code}) : ${response.body?.string()?.take(200) ?: ""}")
             }
         } catch (e: Exception) {
             ActionResult(false, "❌ Erreur de communication avec Home Assistant : ${e.message}")
         }
     }
+
+    /**
+     * Appelle N'IMPORTE QUEL service Home Assistant sur N'IMPORTE QUEL domaine, avec des
+     * données arbitraires — le contrôle le plus étendu que l'API REST de HA autorise
+     * honnêtement (c'est littéralement ce que le tableau de bord HA utilise en interne
+     * pour chaque bouton/action). Sert à couvrir tout ce que les actions dédiées
+     * (ha_turn_on/ha_set/etc.) ne couvrent pas explicitement.
+     */
+    fun callServiceRaw(context: Context, domain: String, service: String, dataJson: JSONObject): ActionResult {
+        if (!isConfigured(context)) return ActionResult(false, "❌ Home Assistant n'est pas configuré (⚙ → Domotique).")
+        if (domain.isBlank() || service.isBlank()) return ActionResult(false, "❌ Domaine ou service manquant.")
+        return try {
+            executeWithFallback(context, "/api/services/$domain/$service") {
+                it.post(dataJson.toString().toRequestBody(JSON))
+            }.use { response ->
+                if (response.isSuccessful) ActionResult(true, "✅ Service $domain.$service appelé avec succès.")
+                else ActionResult(false, "❌ Home Assistant a refusé l'appel (HTTP ${response.code}) : ${response.body?.string()?.take(300) ?: ""}")
+            }
+        } catch (e: Exception) {
+            ActionResult(false, "❌ Erreur de communication avec Home Assistant : ${e.message}")
+        }
+    }
+
+    // ─── Automatisations (API de configuration REST) ───────────────────────────
+    // https://developers.home-assistant.io/docs/api/rest/#config-api
+
+    /** Liste toutes les automatisations avec leur configuration réelle (déclencheurs/actions), pas juste leur état. */
+    fun listAutomations(context: Context): String {
+        if (!isConfigured(context)) return "❌ Home Assistant n'est pas configuré (⚙ → Domotique)."
+        return try {
+            executeWithFallback(context, "/api/config/automation/config").use { response ->
+                if (!response.isSuccessful) return "❌ Impossible de récupérer les automatisations (HTTP ${response.code})."
+                val body = response.body?.string() ?: return "❌ Réponse vide."
+                val arr = JSONArray(body)
+                if (arr.length() == 0) return "📜 Aucune automatisation configurée dans Home Assistant."
+                val sb = StringBuilder("📜 **Automatisations Home Assistant** :\n\n")
+                for (i in 0 until arr.length()) {
+                    val a = arr.getJSONObject(i)
+                    val id = a.optString("id", "?")
+                    val alias = a.optString("alias", "(sans nom)")
+                    sb.append("• $alias (id: $id)\n")
+                }
+                sb.toString().trim()
+            }
+        } catch (e: Exception) {
+            "❌ Erreur : ${e.message}"
+        }
+    }
+
+    /**
+     * Crée une nouvelle automatisation, ou remplace entièrement celle d'[id] si elle
+     * existe déjà — [configJson] doit contenir la configuration complète au format HA
+     * (alias, trigger, condition?, action). C'est la même route que l'éditeur
+     * d'automatisations intégré de Home Assistant utilise.
+     */
+    fun createOrUpdateAutomation(context: Context, id: String, configJson: JSONObject): ActionResult {
+        if (!isConfigured(context)) return ActionResult(false, "❌ Home Assistant n'est pas configuré (⚙ → Domotique).")
+        if (id.isBlank()) return ActionResult(false, "❌ Identifiant d'automatisation manquant.")
+        return try {
+            executeWithFallback(context, "/api/config/automation/config/$id") {
+                it.post(configJson.toString().toRequestBody(JSON))
+            }.use { response ->
+                if (response.isSuccessful) ActionResult(true, "✅ Automatisation « $id » enregistrée.")
+                else ActionResult(false, "❌ Home Assistant a refusé l'automatisation (HTTP ${response.code}) : ${response.body?.string()?.take(300) ?: ""}")
+            }
+        } catch (e: Exception) {
+            ActionResult(false, "❌ Erreur : ${e.message}")
+        }
+    }
+
+    fun deleteAutomation(context: Context, id: String): ActionResult {
+        if (!isConfigured(context)) return ActionResult(false, "❌ Home Assistant n'est pas configuré (⚙ → Domotique).")
+        if (id.isBlank()) return ActionResult(false, "❌ Identifiant d'automatisation manquant.")
+        return try {
+            executeWithFallback(context, "/api/config/automation/config/$id") { it.delete() }.use { response ->
+                if (response.isSuccessful) ActionResult(true, "✅ Automatisation « $id » supprimée.")
+                else ActionResult(false, "❌ Échec de la suppression (HTTP ${response.code}).")
+            }
+        } catch (e: Exception) {
+            ActionResult(false, "❌ Erreur : ${e.message}")
+        }
+    }
+
+    /** Déclenche manuellement une automatisation, sans attendre son déclencheur normal. */
+    fun triggerAutomation(context: Context, entityId: String): ActionResult =
+        callService(context, "automation", "trigger", entityId)
 
     /** Allume/éteint/bascule une entité, en devinant le bon service selon son domaine. */
     fun turnOn(context: Context, entityId: String): ActionResult = domainAction(context, entityId, "turn_on")
@@ -323,7 +465,17 @@ object HomeAssistantController {
             sb.append("• ${domainLabel(d)} :\n")
             list.take(20).forEach { e ->
                 val unitStr = e.unit?.let { " $it" } ?: ""
-                sb.append("   - ${e.friendlyName} : ${e.state}$unitStr\n")
+                // Pour une "person", Home Assistant ne renvoie par défaut que le nom de la
+                // ZONE comme état (ex: "home", "not_home", ou le nom d'une zone perso) — pas
+                // une adresse. Les coordonnées GPS précises existent bien dans les attributs
+                // de l'entité ; on les convertit ici en adresse réelle via le même moteur de
+                // géocodage inverse déjà utilisé pour la position du téléphone (Geocoder
+                // Android), pour donner une réponse concrète plutôt que juste "à la maison".
+                val addressStr = if (d == "person" && e.latitude != null && e.longitude != null) {
+                    val address = LocationController.reverseGeocode(context, e.latitude, e.longitude)
+                    " ($address)"
+                } else ""
+                sb.append("   - ${e.friendlyName} : ${e.state}$unitStr$addressStr\n")
             }
         }
 

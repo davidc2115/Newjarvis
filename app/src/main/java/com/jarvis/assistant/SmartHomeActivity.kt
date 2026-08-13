@@ -22,9 +22,6 @@ class SmartHomeActivity : AppCompatActivity() {
         findViewById<LinearLayout>(R.id.btnOpenNetwork).setOnClickListener {
             startActivity(Intent(this, NetworkActivity::class.java))
         }
-        findViewById<LinearLayout>(R.id.btnOpenFreebox).setOnClickListener {
-            startActivity(Intent(this, FreeboxActivity::class.java))
-        }
         findViewById<LinearLayout>(R.id.btnOpenGeneration).setOnClickListener {
             startActivity(Intent(this, GenerationActivity::class.java))
         }
