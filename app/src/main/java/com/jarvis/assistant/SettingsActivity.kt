@@ -77,6 +77,31 @@ class SettingsActivity : AppCompatActivity() {
         if (uri != null) importSdModelFile(uri)
     }
 
+    // Cause réelle trouvée du bug "l'écoute permanente ne fonctionne pas" : le bouton
+    // ACTIVER se contentait de vérifier la permission micro et abandonnait avec un Toast
+    // si elle manquait, sans jamais afficher la popup de demande d'autorisation Android —
+    // seul le bouton micro du chat/mode vocal la déclenchait. Un utilisateur qui active
+    // l'écoute permanente en premier, avant d'avoir jamais utilisé le mode vocal manuel,
+    // ne pouvait donc JAMAIS l'activer tant qu'il n'allait pas cocher la permission dans
+    // les réglages système Android lui-même.
+    private val wakeWordMicPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startWakeWordServiceNow()
+        else {
+            Prefs.saveWakeWordEnabled(this, false)
+            Toast.makeText(this, "❌ Permission micro refusée — l'écoute permanente reste désactivée", Toast.LENGTH_LONG).show()
+        }
+        updateWakeWordButtonLabel(findViewById(R.id.toggleWakeWordButton))
+    }
+
+    private fun startWakeWordServiceNow() {
+        val serviceIntent = Intent(this, WakeWordService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+        else startService(serviceIntent)
+        Toast.makeText(this, "✅ Écoute permanente activée", Toast.LENGTH_SHORT).show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
@@ -311,22 +336,23 @@ class SettingsActivity : AppCompatActivity() {
             val nowEnabled = !Prefs.isWakeWordEnabled(this)
             Prefs.saveWakeWordEnabled(this, nowEnabled)
 
-            val serviceIntent = Intent(this, WakeWordService::class.java)
             if (nowEnabled) {
                 val hasMicPermission = androidx.core.content.ContextCompat.checkSelfPermission(
                     this, android.Manifest.permission.RECORD_AUDIO
                 ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
-                if (!hasMicPermission) {
-                    Prefs.saveWakeWordEnabled(this, false)
-                    Toast.makeText(this, "❌ Permission micro requise pour l'écoute permanente", Toast.LENGTH_LONG).show()
+                if (hasMicPermission) {
+                    startWakeWordServiceNow()
                 } else {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
-                    else startService(serviceIntent)
-                    Toast.makeText(this, "✅ Écoute permanente activée", Toast.LENGTH_SHORT).show()
+                    // Avant : abandon silencieux avec juste un Toast, jamais de vraie demande
+                    // de permission tant que l'utilisateur n'était pas passé par le mode vocal
+                    // manuel — c'était la cause réelle du bug. On demande maintenant la
+                    // permission directement ici ; le service démarre dans le callback
+                    // ci-dessus si elle est accordée.
+                    wakeWordMicPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
             } else {
-                stopService(serviceIntent)
+                stopService(Intent(this, WakeWordService::class.java))
                 Toast.makeText(this, "Écoute permanente désactivée", Toast.LENGTH_SHORT).show()
             }
             updateWakeWordButtonLabel(toggleWakeWordButton)

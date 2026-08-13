@@ -156,6 +156,7 @@ object JarvisCommandParser {
 
             "today_events" -> CalendarController.getTodayEvents(context, json.optString("calendar", "").ifBlank { null })
             "upcoming_events" -> CalendarController.getUpcomingEvents(context, json.optInt("days", 7), json.optString("calendar", "").ifBlank { null })
+            "week_events" -> CalendarController.getEventsForWeek(context, json.optInt("offset", 0), json.optString("calendar", "").ifBlank { null })
             "create_event" -> {
                 val title = json.optString("title", "Événement")
                 val start = json.optLong("startTime", System.currentTimeMillis() + 3600000)
@@ -401,9 +402,35 @@ object JarvisCommandParser {
             "search_contact_profile" -> {
                 val query = json.optString("query", "")
                 if (query.isBlank()) "❌ Aucun terme de recherche fourni."
-                else PeopleController.searchContacts(context, query)
+                else {
+                    val result = PeopleController.searchContacts(context, query)
+                    // Réaffiche automatiquement la dernière photo attachée à la fiche
+                    // trouvée, comme pour une image générée — sinon une pièce jointe
+                    // resterait invisible tant qu'on n'irait pas fouiller le vault.
+                    PeopleController.getLatestImageAttachment(context, query)?.let { (b64, mime) ->
+                        pendingImageBase64 = b64
+                        pendingImageMime = mime
+                    }
+                    result
+                }
             }
             "list_contacts_by_category" -> PeopleController.listByCategory(context, json.optString("category", ""))
+            "attach_contact_file" -> {
+                val name = json.optString("name", "")
+                if (name.isBlank()) "❌ Nom du contact manquant."
+                else {
+                    val recentAttachment = ConversationStore.messages.lastOrNull { it.isUser && !it.attachmentPath.isNullOrBlank() }
+                    if (recentAttachment == null) {
+                        "❌ Aucune photo ou document récemment envoyé dans le chat à attacher. Envoie d'abord le fichier, puis redemande."
+                    } else {
+                        PeopleController.addAttachment(
+                            context, name,
+                            recentAttachment.attachmentPath!!,
+                            recentAttachment.attachmentName ?: File(recentAttachment.attachmentPath).name
+                        )
+                    }
+                }
+            }
             "delete_contact_profile" -> {
                 val name = json.optString("name", "")
                 if (name.isBlank()) "❌ Nom du contact manquant."
@@ -640,6 +667,35 @@ object JarvisCommandParser {
 
             "test_api_keys" -> ApiKeyTestController.testAllConfiguredKeys(context)
 
+            "set_chat_theme" -> {
+                val target = json.optString("target", "").lowercase().trim()
+                val colorRaw = json.optString("color", "")
+                val color = parseColorFlexible(colorRaw)
+                if (color == null) {
+                    "❌ Couleur « $colorRaw » non reconnue. Donne un nom courant (bleu, rouge, vert, violet, orange, jaune, rose, noir, blanc, gris, cyan...) ou un code hexadécimal (#RRGGBB)."
+                } else {
+                    when (target) {
+                        "fond", "fond_chat", "background", "fond_ecran" -> {
+                            Prefs.saveChatBackgroundColor(context, color)
+                            "🎨 Fond du chat mis à jour. Le changement sera visible immédiatement (ou au retour sur l'écran Chat)."
+                        }
+                        "bulle_utilisateur", "bulle_moi", "user_bubble", "mes_bulles" -> {
+                            Prefs.saveChatBubbleUserColor(context, color)
+                            "🎨 Couleur de tes bulles de message mise à jour."
+                        }
+                        "bulle_jarvis", "bulle_ia", "ai_bubble" -> {
+                            Prefs.saveChatBubbleAiColor(context, color)
+                            "🎨 Couleur des bulles de JARVIS mise à jour."
+                        }
+                        else -> "❌ Cible « $target » non reconnue. Précise fond, bulle_utilisateur ou bulle_jarvis."
+                    }
+                }
+            }
+            "reset_chat_theme" -> {
+                Prefs.resetChatTheme(context)
+                "✅ Thème du chat réinitialisé aux couleurs par défaut."
+            }
+
             "open_file" -> {
                 // Si aucun chemin exact n'est fourni, on retrouve le dernier fichier généré
                 // avec succès correspondant au type demandé (ex: "le PDF que tu as créé") —
@@ -755,6 +811,33 @@ object JarvisCommandParser {
     private val BLANK_PLACEHOLDER_VALUES = setOf(
         "null", "n/a", "na", "none", "aucun", "aucune", "non renseigné", "non renseigne", "inconnu", "-", "?"
     )
+
+    // Noms de couleurs français courants → hex, pour set_chat_theme — Color.parseColor()
+    // ne connaît que les noms anglais (CSS), inutilisables tels quels pour une commande
+    // vocale/chat en français.
+    private val FRENCH_COLOR_NAMES = mapOf(
+        "bleu" to "#2979FF", "bleu clair" to "#00E5FF", "bleu marine" to "#0D47A1",
+        "rouge" to "#FF3B30", "vert" to "#00E676", "vert foncé" to "#1B5E20",
+        "violet" to "#B388FF", "mauve" to "#B388FF", "orange" to "#FF9100",
+        "jaune" to "#FFC400", "rose" to "#FF4FA0", "noir" to "#0A0A0A",
+        "blanc" to "#F5F5F5", "gris" to "#616161", "gris foncé" to "#2C2C2C",
+        "cyan" to "#00E5FF", "turquoise" to "#1DE9B6", "marron" to "#6D4C41",
+        "beige" to "#D7CCC8", "or" to "#E8B84B", "doré" to "#E8B84B", "dore" to "#E8B84B"
+    )
+
+    /** Résout une couleur donnée par l'utilisateur (nom français, nom CSS anglais, ou hex
+     *  #RRGGBB/#AARRGGBB) en Int ARGB, ou null si non reconnue. */
+    private fun parseColorFlexible(raw: String): Int? {
+        val trimmed = raw.trim().lowercase()
+        if (trimmed.isBlank()) return null
+        FRENCH_COLOR_NAMES[trimmed]?.let {
+            return try { android.graphics.Color.parseColor(it) } catch (_: Exception) { null }
+        }
+        val hexCandidate = if (trimmed.startsWith("#")) trimmed else "#$trimmed"
+        return try { android.graphics.Color.parseColor(hexCandidate) } catch (_: Exception) {
+            try { android.graphics.Color.parseColor(trimmed) } catch (_: Exception) { null }
+        }
+    }
 
     /** Traite un champ texte optionnel venant de l'IA : absence réelle si vide OU si l'IA
      *  a écrit un texte de substitution du type "null"/"N/A" au lieu d'omettre le champ. */

@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var statusText: TextView
     private lateinit var pendingImageBar: View
     private lateinit var pendingImageThumbnail: ImageView
+    private var removePendingImageButtonRef: TextView? = null
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var conversationListContainer: LinearLayout
 
@@ -46,6 +47,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var pendingImageBase64: String? = null
     private var pendingImageMime: String? = null
+    // Chemin disque + nom d'un fichier joint (photo OU document) en attente d'envoi — distinct
+    // de pendingImageBase64 (qui ne sert qu'à la "vision" IA). Permet à attach_contact_file de
+    // retrouver le fichier original plus tard, même une fois le message envoyé.
+    private var pendingAttachmentPath: String? = null
+    private var pendingAttachmentName: String? = null
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -85,10 +91,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val hubButton = findViewById<TextView>(R.id.hubButton)
         val photoButton = findViewById<TextView>(R.id.photoButton)
         val removePendingImageButton = findViewById<TextView>(R.id.removePendingImageButton)
+        removePendingImageButtonRef = removePendingImageButton
 
         adapter = ChatAdapter(ConversationStore.messages)
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
+        // Fond du chat personnalisable via set_chat_theme{target:"fond",...} — 0 = pas de
+        // surcharge, on garde le fond par défaut défini dans le layout/thème.
+        Prefs.getChatBackgroundColor(this).let { bg -> if (bg != 0) recyclerView.setBackgroundColor(bg) }
 
         tts = TextToSpeech(this, this)
 
@@ -107,15 +117,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         sendButton.setOnClickListener {
             val text = messageInput.text.toString().trim()
-            if (text.isNotEmpty() || pendingImageBase64 != null) {
-                sendMessage(text.ifBlank { "Décris cette image." })
+            if (text.isNotEmpty() || pendingImageBase64 != null || pendingAttachmentPath != null) {
+                val defaultText = if (pendingImageBase64 != null) "Décris cette image." else "Voici un fichier joint."
+                sendMessage(text.ifBlank { defaultText })
                 messageInput.text.clear()
             }
         }
 
         micButton.setOnClickListener { checkPermissionAndOpenVoiceMode() }
 
-        photoButton.setOnClickListener { pickImageLauncher.launch("image/*") }
+        photoButton.setOnClickListener { pickImageLauncher.launch("*/*") }
 
         removePendingImageButton.setOnClickListener { clearPendingImage() }
 
@@ -219,6 +230,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
+        Prefs.getChatBackgroundColor(this).let { bg ->
+            recyclerView.setBackgroundColor(if (bg != 0) bg else android.graphics.Color.TRANSPARENT)
+        }
         adapter.notifyDataSetChanged()
         if (ConversationStore.messages.isNotEmpty()) {
             recyclerView.scrollToPosition(ConversationStore.messages.size - 1)
@@ -238,20 +252,70 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun attachImage(uri: Uri) {
+        val mimeType = contentResolver.getType(uri) ?: ""
+        val isImage = mimeType.startsWith("image/")
+
         CoroutineScope(Dispatchers.IO).launch {
-            val result = encodeImage(uri)
+            // Toute pièce jointe (photo OU document) est copiée sur le disque, pas seulement
+            // encodée en mémoire — c'est ce qui permet à attach_contact_file de la retrouver
+            // plus tard (JARVIS n'a aucun autre moyen d'accéder au fichier original une fois
+            // le sélecteur fermé, l'URI content:// n'étant pas garanti réutilisable ensuite).
+            val persisted = persistAttachmentCopy(uri, mimeType)
+            val visionResult = if (isImage) encodeImage(uri) else null
+
             withContext(Dispatchers.Main) {
-                if (result != null) {
-                    pendingImageBase64 = result.first
-                    pendingImageMime = result.second
-                    val bytes = Base64.decode(result.first, Base64.NO_WRAP)
+                if (persisted == null && visionResult == null) {
+                    Toast.makeText(this@MainActivity, "Impossible de lire ce fichier", Toast.LENGTH_SHORT).show()
+                    return@withContext
+                }
+                pendingAttachmentPath = persisted?.first
+                pendingAttachmentName = persisted?.second
+
+                if (isImage && visionResult != null) {
+                    pendingImageBase64 = visionResult.first
+                    pendingImageMime = visionResult.second
+                    val bytes = Base64.decode(visionResult.first, Base64.NO_WRAP)
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     pendingImageThumbnail.setImageBitmap(bmp)
-                    pendingImageBar.visibility = View.VISIBLE
+                    pendingImageThumbnail.visibility = View.VISIBLE
+                    removePendingImageButtonRef?.text = "✕ retirer la photo"
                 } else {
-                    Toast.makeText(this@MainActivity, "Impossible de lire cette image", Toast.LENGTH_SHORT).show()
+                    pendingImageBase64 = null
+                    pendingImageMime = null
+                    pendingImageThumbnail.visibility = View.GONE
+                    removePendingImageButtonRef?.text = "📎 ${pendingAttachmentName ?: "fichier"} — ✕ retirer"
                 }
+                pendingImageBar.visibility = View.VISIBLE
             }
+        }
+    }
+
+    /** Copie le fichier pointé par [uri] dans Documents/JARVIS-Fichiers/Pieces-jointes-chat/, retourne (chemin, nom). */
+    private fun persistAttachmentCopy(uri: Uri, mimeType: String): Pair<String, String>? {
+        return try {
+            val input = contentResolver.openInputStream(uri) ?: return null
+            val originalName = queryDisplayName(uri) ?: "piece_jointe_${System.currentTimeMillis()}"
+            val safeName = originalName.replace(Regex("[/\\\\:*?\"<>|]"), "-").trim()
+            val dir = java.io.File(
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
+                "JARVIS-Fichiers/Pieces-jointes-chat"
+            ).also { it.mkdirs() }
+            val destFile = java.io.File(dir, "${System.currentTimeMillis()}_$safeName")
+            input.use { inStream -> destFile.outputStream().use { outStream -> inStream.copyTo(outStream) } }
+            destFile.absolutePath to originalName
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -284,11 +348,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun clearPendingImage() {
         pendingImageBase64 = null
         pendingImageMime = null
+        pendingAttachmentPath = null
+        pendingAttachmentName = null
+        pendingImageThumbnail.visibility = View.VISIBLE
         pendingImageBar.visibility = View.GONE
     }
 
     private fun sendMessage(text: String) {
-        addMessage(text, isUser = true, speak = false, imageBase64 = pendingImageBase64, imageMime = pendingImageMime)
+        addMessage(
+            text, isUser = true, speak = false,
+            imageBase64 = pendingImageBase64, imageMime = pendingImageMime,
+            attachmentPath = pendingAttachmentPath, attachmentName = pendingAttachmentName
+        )
         clearPendingImage()
         statusText.text = "● JARVIS réfléchit…"
 
@@ -315,10 +386,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         isUser: Boolean,
         speak: Boolean,
         imageBase64: String? = null,
-        imageMime: String? = null
+        imageMime: String? = null,
+        attachmentPath: String? = null,
+        attachmentName: String? = null
     ) {
         if (isUser) {
-            ConversationStore.addUser(text, imageBase64, imageMime)
+            ConversationStore.addUser(text, imageBase64, imageMime, attachmentPath, attachmentName)
         } else {
             ConversationStore.addAssistant(text)
         }

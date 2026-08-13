@@ -27,8 +27,14 @@ object ConversationStore {
     var currentConversationId: Long? = null
         private set
 
-    fun addUser(text: String, imageBase64: String? = null, imageMime: String? = null) {
-        messages.add(Message(text, true, imageBase64, imageMime))
+    fun addUser(
+        text: String,
+        imageBase64: String? = null,
+        imageMime: String? = null,
+        attachmentPath: String? = null,
+        attachmentName: String? = null
+    ) {
+        messages.add(Message(text, true, imageBase64, imageMime, attachmentPath, attachmentName))
         history.add(HistoryEntry("user", text, imageBase64, imageMime))
     }
 

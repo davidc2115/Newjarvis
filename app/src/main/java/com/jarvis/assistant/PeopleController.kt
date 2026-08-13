@@ -1,6 +1,7 @@
 package com.jarvis.assistant
 
 import android.content.Context
+import android.util.Base64
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -67,6 +68,7 @@ object PeopleController {
     // ─────────────────────────────────────────────────────────────────────────
 
     private const val VISITS_MARKER = "## Historique des rendez-vous"
+    private const val ATTACHMENTS_MARKER = "## 📎 Pièces jointes"
 
     private data class ContactNote(
         val name: String,
@@ -81,8 +83,31 @@ object PeopleController {
         val installDate: String?,
         val notes: String,
         val visits: List<String>,
+        val attachments: List<String>,
         val file: File
     )
+
+    /**
+     * Extrait les lignes "- ..." de la section commençant par [marker] dans [text] (jusqu'au
+     * prochain "## ..." ou la fin), et renvoie séparément le texte SANS aucune des sections
+     * connues (notes pures). Générique pour ne pas dupliquer cette logique entre visites et
+     * pièces jointes, et pour rester correct quel que soit l'ordre d'écriture des sections.
+     */
+    private fun extractMarkerSection(text: String, marker: String): List<String> {
+        val idx = text.indexOf(marker)
+        if (idx < 0) return emptyList()
+        val after = text.substring(idx + marker.length)
+        val nextMarkerIdx = after.indexOf("\n## ")
+        val sectionText = if (nextMarkerIdx >= 0) after.substring(0, nextMarkerIdx) else after
+        return sectionText.lines().map { it.trim() }.filter { it.startsWith("-") }.map { it.removePrefix("-").trim() }
+    }
+
+    private fun notesWithoutKnownSections(text: String): String {
+        val cut = listOf(VISITS_MARKER, ATTACHMENTS_MARKER)
+            .mapNotNull { m -> text.indexOf(m).takeIf { it >= 0 } }
+            .minOrNull() ?: text.length
+        return text.substring(0, cut).trim()
+    }
 
     /** Version publique légère (pour l'export KML notamment), sans les détails internes de parsing. */
     data class ContactSummary(
@@ -117,20 +142,9 @@ object PeopleController {
 
         val bodyWithoutTitle = body.lines().dropWhile { it.startsWith("#") || it.isBlank() }.joinToString("\n").trim()
 
-        val markerIdx = bodyWithoutTitle.indexOf(VISITS_MARKER)
-        val notesOnly: String
-        val visits: List<String>
-        if (markerIdx >= 0) {
-            notesOnly = bodyWithoutTitle.substring(0, markerIdx).trim()
-            visits = bodyWithoutTitle.substring(markerIdx + VISITS_MARKER.length)
-                .lines()
-                .map { it.trim() }
-                .filter { it.startsWith("-") }
-                .map { it.removePrefix("-").trim() }
-        } else {
-            notesOnly = bodyWithoutTitle
-            visits = emptyList()
-        }
+        val notesOnly = notesWithoutKnownSections(bodyWithoutTitle)
+        val visits = extractMarkerSection(bodyWithoutTitle, VISITS_MARKER)
+        val attachments = extractMarkerSection(bodyWithoutTitle, ATTACHMENTS_MARKER)
 
         return ContactNote(
             name = file.nameWithoutExtension,
@@ -145,6 +159,7 @@ object PeopleController {
             installDate = field("install_date"),
             notes = notesOnly,
             visits = visits,
+            attachments = attachments,
             file = file
         )
     }
@@ -191,6 +206,7 @@ object PeopleController {
             val finalInstallDate = installDate ?: existing?.installDate
             val finalNotes = notes ?: existing?.notes ?: ""
             val finalVisits = existing?.visits ?: emptyList()
+            val finalAttachments = existing?.attachments ?: emptyList()
 
             val frontmatterLines = mutableListOf("category: $cat")
             finalPhone?.let { frontmatterLines.add("phone: \"$it\"") }
@@ -213,6 +229,10 @@ object PeopleController {
                 if (finalVisits.isNotEmpty()) {
                     append("\n\n$VISITS_MARKER\n")
                     finalVisits.forEach { append("- $it\n") }
+                }
+                if (finalAttachments.isNotEmpty()) {
+                    append("\n\n$ATTACHMENTS_MARKER\n")
+                    finalAttachments.forEach { append("- $it\n") }
                 }
             }
 
@@ -258,11 +278,94 @@ object PeopleController {
                 append(notesText)
                 append("\n\n$VISITS_MARKER\n")
                 updatedVisits.forEach { append("- $it\n") }
+                val existingAttachments = contact?.attachments ?: emptyList()
+                if (existingAttachments.isNotEmpty()) {
+                    append("\n\n$ATTACHMENTS_MARKER\n")
+                    existingAttachments.forEach { append("- $it\n") }
+                }
             }
             file.writeText(content)
             "✅ Rendez-vous ajouté à l'historique de **$targetName**."
         } catch (e: Exception) {
             "❌ Erreur lors de l'ajout du rendez-vous : ${e.message}"
+        }
+    }
+
+    /**
+     * Attache un fichier déjà présent sur le disque (photo OU document, ex: le dernier
+     * fichier envoyé dans le chat) à la fiche d'un contact — le copie dans
+     * Contacts/Pieces-jointes/<Nom>/ du vault, puis enregistre sa référence dans la fiche
+     * pour qu'il réapparaisse à chaque consultation (voir formatFullDetails).
+     */
+    fun addAttachment(context: Context, name: String, sourcePath: String, originalFileName: String): String {
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
+        val sourceFile = File(sourcePath)
+        if (!sourceFile.exists()) return "❌ Fichier introuvable : $sourcePath"
+
+        val contact = findContact(context, name)
+        val targetName = contact?.name ?: name
+        val category = contact?.category ?: "autre"
+
+        return try {
+            val attachDir = File(contactsFolder(context), "Pieces-jointes/${safeFileName(targetName)}").also { it.mkdirs() }
+            val safeOriginalName = originalFileName.replace(Regex("[/\\\\:*?\"<>|]"), "-").trim()
+            val destFile = File(attachDir, "${System.currentTimeMillis()}_$safeOriginalName")
+            sourceFile.copyTo(destFile, overwrite = true)
+
+            val file = File(contactsFolder(context), "${safeFileName(targetName)}.md")
+            val updatedAttachments = (contact?.attachments ?: emptyList()) + destFile.absolutePath
+
+            val frontmatterLines = mutableListOf("category: $category")
+            contact?.phone?.let { frontmatterLines.add("phone: \"$it\"") }
+            contact?.phonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
+            contact?.email?.let { frontmatterLines.add("email: \"$it\"") }
+            contact?.address?.let { frontmatterLines.add("address: \"$it\"") }
+            contact?.addressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
+            contact?.latitude?.let { frontmatterLines.add("latitude: $it") }
+            contact?.longitude?.let { frontmatterLines.add("longitude: $it") }
+            contact?.installDate?.let { frontmatterLines.add("install_date: \"$it\"") }
+            frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
+            frontmatterLines.add("tags: [jarvis, contact]")
+
+            val content = buildString {
+                append("---\n")
+                append(frontmatterLines.joinToString("\n"))
+                append("\n---\n\n")
+                append("# $targetName\n\n")
+                val notesText = contact?.notes?.takeIf { it.isNotBlank() } ?: "_Aucune note._"
+                append(notesText)
+                val visits = contact?.visits ?: emptyList()
+                if (visits.isNotEmpty()) {
+                    append("\n\n$VISITS_MARKER\n")
+                    visits.forEach { append("- $it\n") }
+                }
+                append("\n\n$ATTACHMENTS_MARKER\n")
+                updatedAttachments.forEach { append("- $it\n") }
+            }
+            file.writeText(content)
+            "📎 « $safeOriginalName » attaché à la fiche de **$targetName**."
+        } catch (e: Exception) {
+            "❌ Erreur lors de l'ajout de la pièce jointe : ${e.message}"
+        }
+    }
+
+    /**
+     * Renvoie (base64, mime) de la dernière pièce jointe IMAGE d'un contact, pour la
+     * réafficher directement dans le chat quand sa fiche est consultée — sans ça, une photo
+     * attachée resterait invisible tant qu'on n'irait pas fouiller le vault manuellement.
+     */
+    fun getLatestImageAttachment(context: Context, name: String): Pair<String, String>? {
+        val contact = findContact(context, name) ?: return null
+        val imagePath = contact.attachments.lastOrNull { path ->
+            FileGenController.mimeTypeFor(path).startsWith("image/")
+        } ?: return null
+        val file = File(imagePath)
+        if (!file.exists()) return null
+        return try {
+            val bytes = file.readBytes()
+            Base64.encodeToString(bytes, Base64.NO_WRAP) to FileGenController.mimeTypeFor(imagePath)
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -441,6 +544,10 @@ object PeopleController {
             if (c.visits.isNotEmpty()) {
                 append("\n🗓️ Historique des rendez-vous (${c.visits.size}) :\n")
                 c.visits.takeLast(10).forEach { append("   • $it\n") }
+            }
+            if (c.attachments.isNotEmpty()) {
+                append("\n📎 Pièces jointes (${c.attachments.size}) :\n")
+                c.attachments.forEach { append("   • ${File(it).name}\n") }
             }
             val hasAnyDetail = !c.phone.isNullOrBlank() || !c.phonePro.isNullOrBlank() || !c.email.isNullOrBlank() ||
                 !c.address.isNullOrBlank() || !c.addressPro.isNullOrBlank() || !c.installDate.isNullOrBlank()

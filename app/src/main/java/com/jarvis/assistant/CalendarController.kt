@@ -45,6 +45,48 @@ object CalendarController {
         return getEventsTimeRange(context, start, end, title, calendarRef)
     }
 
+    /**
+     * Événements d'une semaine entière (lundi 00:00 à dimanche 23:59), calculée à partir de
+     * l'horloge réelle de l'appareil — PAS à partir d'une date que le LLM devrait deviner
+     * (le SYSTEM_PROMPT ne lui communique pas la date du jour, donc tout calcul de plage
+     * fait côté LLM ne serait pas fiable). C'est la cause réelle du bug "semaine dernière /
+     * semaine prochaine renvoie toujours cette semaine" : seul upcoming_events{days} existait,
+     * qui ne regarde QUE vers l'avant depuis maintenant — aucune action ne permettait de
+     * reculer dans le temps ou de cibler une semaine calendaire précise.
+     *
+     * @param weekOffset 0 = semaine en cours, -1 = semaine dernière, 1 = semaine prochaine, etc.
+     */
+    fun getEventsForWeek(context: Context, weekOffset: Int = 0, calendarRef: String? = null): String {
+        val cal = Calendar.getInstance().apply {
+            firstDayOfWeek = Calendar.MONDAY
+            add(Calendar.WEEK_OF_YEAR, weekOffset)
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val start = cal.timeInMillis
+        val end = cal.apply {
+            add(Calendar.DAY_OF_YEAR, 6)
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }.timeInMillis
+
+        val sdf = SimpleDateFormat("dd/MM", Locale.FRENCH)
+        val label = when {
+            weekOffset == 0 -> "cette semaine"
+            weekOffset == -1 -> "la semaine dernière"
+            weekOffset == 1 -> "la semaine prochaine"
+            weekOffset < 0 -> "il y a ${-weekOffset} semaines"
+            else -> "dans $weekOffset semaines"
+        }
+        val title = "📅 **Événements de $label (${sdf.format(Date(start))} – ${sdf.format(Date(end))})**" + calendarLabelSuffix(context, calendarRef)
+        return getEventsTimeRange(context, start, end, title, calendarRef)
+    }
+
     private fun calendarLabelSuffix(context: Context, calendarRef: String?): String {
         if (calendarRef.isNullOrBlank()) return ""
         val id = findCalendarId(context, calendarRef) ?: return ""

@@ -120,15 +120,20 @@ object LocationController {
         return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
     }
 
+    /**
+     * Ouvre l'itinéraire/la recherche pour [query] dans l'appli GPS PAR DÉFAUT du
+     * téléphone — volontairement SANS forcer Google Maps (setPackage retiré) : Android
+     * propose alors l'appli par défaut de l'utilisateur si plusieurs sont installées
+     * (Waze, Maps.me, Google Maps...), ou l'ouvre directement s'il n'y en a qu'une.
+     */
     fun openMaps(context: Context, query: String): String {
         return try {
             val gmmIntentUri = Uri.parse("geo:0,0?q=" + Uri.encode(query))
             val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri).apply {
-                setPackage("com.google.android.apps.maps")
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(mapIntent)
-            "🗺️ Ouverture de Google Maps pour « $query »..."
+            "🗺️ Ouverture de l'itinéraire pour « $query »..."
         } catch (e: Exception) {
             "❌ Échec de l'ouverture des cartes : ${e.message}"
         }

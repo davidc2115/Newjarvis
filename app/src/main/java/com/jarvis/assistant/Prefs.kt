@@ -336,6 +336,35 @@ object Prefs {
         prefs(context).edit().putInt(KEY_ACCENT_COLOR, color).apply()
     }
 
+    // ─── Thème du chat (fond + bulles), personnalisable depuis le chat/vocal ──
+    // 0 = pas de surcharge, on garde les couleurs par défaut du thème Apex Studio.
+    private const val KEY_CHAT_BG_COLOR = "chat_bg_color"
+    private const val KEY_CHAT_BUBBLE_USER_COLOR = "chat_bubble_user_color"
+    private const val KEY_CHAT_BUBBLE_AI_COLOR = "chat_bubble_ai_color"
+
+    fun getChatBackgroundColor(context: Context): Int = prefs(context).getInt(KEY_CHAT_BG_COLOR, 0)
+    fun saveChatBackgroundColor(context: Context, color: Int) {
+        prefs(context).edit().putInt(KEY_CHAT_BG_COLOR, color).apply()
+    }
+
+    fun getChatBubbleUserColor(context: Context): Int = prefs(context).getInt(KEY_CHAT_BUBBLE_USER_COLOR, 0)
+    fun saveChatBubbleUserColor(context: Context, color: Int) {
+        prefs(context).edit().putInt(KEY_CHAT_BUBBLE_USER_COLOR, color).apply()
+    }
+
+    fun getChatBubbleAiColor(context: Context): Int = prefs(context).getInt(KEY_CHAT_BUBBLE_AI_COLOR, 0)
+    fun saveChatBubbleAiColor(context: Context, color: Int) {
+        prefs(context).edit().putInt(KEY_CHAT_BUBBLE_AI_COLOR, color).apply()
+    }
+
+    fun resetChatTheme(context: Context) {
+        prefs(context).edit()
+            .remove(KEY_CHAT_BG_COLOR)
+            .remove(KEY_CHAT_BUBBLE_USER_COLOR)
+            .remove(KEY_CHAT_BUBBLE_AI_COLOR)
+            .apply()
+    }
+
     fun getHfToken(context: Context): String =
         prefs(context).getString(KEY_HF_TOKEN, "") ?: ""
 

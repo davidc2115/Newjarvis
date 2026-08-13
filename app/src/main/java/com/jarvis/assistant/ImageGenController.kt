@@ -21,9 +21,13 @@ import java.util.concurrent.TimeUnit
  * maximiser la fiabilité (si l'un échoue, essaie automatiquement le suivant) :
  *
  * 1. Google Gemini (Nano Banana) — si une clé Gemini est configurée.
- * 2. OpenAI DALL-E 3 — si une clé OpenAI est configurée.
- * 3. Stable Diffusion (via Hugging Face Inference API) — si un jeton
- *    Hugging Face est configuré (celui déjà utilisé pour les modèles locaux).
+ * 2. OpenAI gpt-image-1 — si une clé OpenAI est configurée. (DALL-E 2/3 ont été
+ *    RETIRÉS de l'API OpenAI le 12 mai 2026 — tout appel avec l'ancien modèle
+ *    échouait systématiquement ; c'était une cause réelle des échecs signalés.)
+ * 3. Stable Diffusion (via la passerelle Hugging Face "Inference Providers",
+ *    router.huggingface.co — l'ancien endpoint api-inference.huggingface.co
+ *    n'est plus supporté par Hugging Face) — si un jeton Hugging Face est
+ *    configuré (celui déjà utilisé pour les modèles locaux).
  * 4. Stable Diffusion EMBARQUÉ sur le téléphone (stable-diffusion.cpp compilé
  *    nativement, aucun réseau) — si un modèle a été importé dans les
  *    paramètres. ⚠️ Sans GPU dédié, compte plusieurs MINUTES par image sur
@@ -38,9 +42,6 @@ import java.util.concurrent.TimeUnit
  *
  * L'image est sauvegardée dans Pictures/JARVIS-Generated et affichée
  * directement dans le chat.
- *
- * Vidéo et musique : toujours PAS implémenté — aucune API publique simple et
- * largement accessible pour ça actuellement.
  */
 object ImageGenController {
 
@@ -247,7 +248,14 @@ object ImageGenController {
         return null
     }
 
-    // ─── 2. OpenAI DALL-E 3 ─────────────────────────────────────────────────────
+    // ─── 2. OpenAI (gpt-image-1) ────────────────────────────────────────────────
+    // DALL-E 2 et DALL-E 3 ont été retirés de l'API OpenAI le 12 mai 2026 — tout appel
+    // avec model="dall-e-3" échoue désormais systématiquement (404/erreur de modèle
+    // inconnu). C'était une cause RÉELLE et vérifiée des échecs de génération d'image
+    // signalés à répétition, pas un problème côté app. Migré vers "gpt-image-1", le
+    // modèle actuel recommandé par OpenAI (gpt-image-2 existe aussi mais gpt-image-1
+    // reste supporté jusqu'à fin 2026 ; le paramètre response_format n'existe plus sur
+    // ces modèles — ils renvoient TOUJOURS du base64 dans data[0].b64_json).
 
     private fun tryOpenAI(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val keys = Prefs.getApiKeysFor(context, Provider.OPENAI)
@@ -256,11 +264,10 @@ object ImageGenController {
         for (apiKey in keys) {
             try {
                 val body = JSONObject()
-                    .put("model", "dall-e-3")
+                    .put("model", "gpt-image-1")
                     .put("prompt", prompt)
                     .put("n", 1)
                     .put("size", "1024x1024")
-                    .put("response_format", "b64_json")
                     .toString()
                     .toRequestBody(JSON)
 
@@ -292,7 +299,7 @@ object ImageGenController {
                     val bytes = Base64.decode(b64, Base64.DEFAULT)
                     val savedPath = saveToGallery(context, bytes, prompt)
                     return Result(
-                        "🎨 Image générée pour « $prompt » (OpenAI DALL-E 3).\n📁 Enregistrée dans : $savedPath",
+                        "🎨 Image générée pour « $prompt » (OpenAI gpt-image-1).\n📁 Enregistrée dans : $savedPath",
                         b64,
                         "image/png",
                         savedPath
@@ -305,7 +312,11 @@ object ImageGenController {
         return null
     }
 
-    // ─── 3. Stable Diffusion via Hugging Face Inference API ───────────────────
+    // ─── 3. Stable Diffusion via Hugging Face Inference Providers ─────────────
+    // L'ancien endpoint "api-inference.huggingface.co" n'est PLUS supporté par
+    // Hugging Face (confirmé : renvoie une erreur invitant à migrer) — remplacé par
+    // leur passerelle "Inference Providers" sur router.huggingface.co. C'était la
+    // deuxième cause réelle et vérifiée des échecs de génération d'image en cascade.
 
     private fun tryHuggingFace(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val token = Prefs.getHfToken(context)
@@ -314,7 +325,7 @@ object ImageGenController {
         return try {
             val body = JSONObject().put("inputs", prompt).toString().toRequestBody(JSON)
             val request = Request.Builder()
-                .url("https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0")
+                .url("https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0")
                 .addHeader("Authorization", "Bearer $token")
                 .addHeader("Content-Type", "application/json")
                 .post(body)
