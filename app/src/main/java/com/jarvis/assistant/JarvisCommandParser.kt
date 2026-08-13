@@ -422,8 +422,10 @@ object JarvisCommandParser {
                 val prompt = json.optString("prompt", "")
                 if (prompt.isBlank()) "❌ Aucune description de vidéo fournie."
                 else {
-                    GenerationService.enqueue(context, "video", prompt)
-                    "🎬 Génération de la vidéo lancée en arrière-plan (1 à 3 minutes). " +
+                    val requestedDuration = if (json.has("duration")) json.optInt("duration", VideoGenController.DEFAULT_DURATION_S) else VideoGenController.DEFAULT_DURATION_S
+                    val duration = requestedDuration.coerceIn(VideoGenController.MIN_DURATION_S, VideoGenController.MAX_DURATION_S)
+                    GenerationService.enqueue(context, "video", prompt, durationSeconds = duration)
+                    "🎬 Génération de la vidéo de ${duration}s lancée en arrière-plan (peut prendre plusieurs minutes). " +
                         "Tu peux continuer à utiliser JARVIS ou fermer l'app — une notification " +
                         "t'avertira dès que c'est prêt (ou en cas d'échec)."
                 }
@@ -575,6 +577,13 @@ object JarvisCommandParser {
                 else NetworkController.sendWakeOnLan(context, resolvedMac)
             }
 
+            "test_api_keys" -> ApiKeyTestController.testAllConfiguredKeys(context)
+
+            "open_file" -> {
+                val path = json.optString("path", "")
+                if (path.isBlank()) "❌ Chemin de fichier manquant."
+                else FileGenController.openFile(context, path)
+            }
             "create_zip" -> {
                 val paths = mutableListOf<String>()
                 json.optJSONArray("paths")?.let { arr -> for (i in 0 until arr.length()) paths.add(arr.optString(i)) }

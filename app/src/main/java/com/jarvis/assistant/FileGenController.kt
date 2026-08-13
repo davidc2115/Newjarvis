@@ -306,9 +306,46 @@ object FileGenController {
     /** Type MIME approprié pour ouvrir un fichier généré selon son extension. */
     fun mimeTypeFor(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
         "pdf" -> "application/pdf"
+        "doc" -> "application/msword"
         "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "xls" -> "application/vnd.ms-excel"
         "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "csv" -> "text/csv"
         "zip" -> "application/zip"
+        "txt" -> "text/plain"
+        "html", "htm" -> "text/html"
+        "json" -> "application/json"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "mp4" -> "video/mp4"
+        "mp3" -> "audio/mpeg"
         else -> "*/*"
+    }
+
+    /**
+     * Ouvre un fichier déjà présent sur le téléphone avec l'application associée à son
+     * type (lecteur PDF, Word, Excel, gestionnaire d'archives...), via FileProvider —
+     * répond à la demande directe "ouvre ce fichier" en chat/vocal, sans passer par
+     * l'écran 🎨 Génération. Fonctionne pour n'importe quel fichier existant, pas
+     * seulement ceux créés par JARVIS (ex: un fichier trouvé via list_files).
+     */
+    fun openFile(context: Context, path: String): String {
+        val file = File(path)
+        if (!file.exists()) return "❌ Fichier introuvable : $path"
+        return try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val mime = mimeTypeFor(path)
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            "📂 Ouverture de « ${file.name} »."
+        } catch (e: android.content.ActivityNotFoundException) {
+            "❌ Aucune application installée sur ce téléphone ne sait ouvrir ce type de fichier (${mimeTypeFor(path)}). Installe une app compatible (ex: un lecteur PDF, Word, ou une appli de fichiers/archives)."
+        } catch (e: Exception) {
+            "❌ Impossible d'ouvrir le fichier : ${e.message}"
+        }
     }
 }

@@ -26,9 +26,13 @@ import java.util.concurrent.TimeUnit
  * replicate.com/account/api-tokens (carte bancaire requise par Replicate
  * pour activer la facturation, mais aucun abonnement).
  *
- * Le modèle utilisé est configurable (⚙ → Génération) car le catalogue
- * Replicate évolue vite ; par défaut "minimax/video-01" (texte → vidéo,
- * qualité correcte, ~1 min de génération).
+ * Modèle : "wan-video/wan-2.7-t2v" (Alibaba Wan 2.7, texte → vidéo avec audio
+ * synchronisé, jusqu'à 1080p) — choisi spécifiquement parce qu'il accepte un
+ * VRAI paramètre "duration" en secondes côté API (contrairement à l'ancien
+ * modèle minimax/video-01, qui produisait toujours ~6s fixes quoi qu'on
+ * demande — c'était un plafond du modèle, pas un bug de l'appli). Durée
+ * demandée bornée à [MIN_DURATION_S, MAX_DURATION_S] secondes, la vidéo
+ * réelle peut prendre plusieurs minutes à générer selon la durée choisie.
  */
 object VideoGenController {
 
@@ -42,11 +46,14 @@ object VideoGenController {
     private val JSON = "application/json; charset=utf-8".toMediaType()
     private val fileDateFormat = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.getDefault())
 
-    private const val DEFAULT_MODEL = "minimax/video-01"
-    private const val MAX_POLL_ATTEMPTS = 40      // 40 x 5s = ~3min20 max
+    private const val DEFAULT_MODEL = "wan-video/wan-2.7-t2v"
+    private const val MAX_POLL_ATTEMPTS = 60      // 60 x 5s = 5min max (vidéos plus longues = génération plus longue)
     private const val POLL_INTERVAL_MS = 5000L
+    const val MIN_DURATION_S = 2
+    const val MAX_DURATION_S = 15
+    const val DEFAULT_DURATION_S = 5
 
-    suspend fun generateVideo(context: Context, prompt: String): Result {
+    suspend fun generateVideo(context: Context, prompt: String, durationSeconds: Int = DEFAULT_DURATION_S): Result {
         if (prompt.isBlank()) return Result(false, "❌ Aucune description de vidéo fournie.")
 
         val token = Prefs.getReplicateToken(context)
@@ -55,14 +62,16 @@ object VideoGenController {
                 false,
                 "❌ La génération vidéo nécessite un jeton API Replicate. " +
                     "Crée un compte gratuit sur replicate.com, génère un jeton dans " +
-                    "Account → API tokens, puis colle-le dans ⚙ → Génération → Vidéo."
+                    "Account → API tokens, puis colle-le dans 🎨 Génération (champ jeton Replicate, section vidéo)."
             )
         }
+
+        val duration = durationSeconds.coerceIn(MIN_DURATION_S, MAX_DURATION_S)
 
         return try {
             val model = DEFAULT_MODEL
             val body = JSONObject()
-                .put("input", JSONObject().put("prompt", prompt))
+                .put("input", JSONObject().put("prompt", prompt).put("duration", duration))
                 .toString()
                 .toRequestBody(JSON)
 
@@ -94,7 +103,7 @@ object VideoGenController {
                 }
             }
 
-            if (predictionUrl.isBlank()) return Result(false, "❌ Réponse Replicate invalide (pas d'URL de suivi). Vérifie que le modèle « $model » existe toujours sur Replicate (⚙ → Génération → Vidéo pour en changer).")
+            if (predictionUrl.isBlank()) return Result(false, "❌ Réponse Replicate invalide (pas d'URL de suivi). Vérifie que le modèle « $model » existe toujours sur Replicate, ou que le jeton a bien les droits nécessaires.")
 
             // Poll jusqu'à ce que la prédiction soit terminée si elle ne l'était pas déjà.
             // Utilise delay() (suspension coroutine) plutôt que Thread.sleep() pour ne pas
@@ -124,7 +133,7 @@ object VideoGenController {
 
             if (status != "succeeded") {
                 val reason = lastErrorDetail?.let { " Détail : $it" } ?: ""
-                return Result(false, "❌ Génération vidéo échouée ou trop longue (statut : $status).$reason Réessaie avec une description plus simple, ou change de modèle dans ⚙ → Génération → Vidéo.")
+                return Result(false, "❌ Génération vidéo échouée ou trop longue (statut : $status).$reason Réessaie avec une description plus simple ou une durée plus courte.")
             }
 
             val videoUrl = when (outputVal) {
@@ -140,7 +149,7 @@ object VideoGenController {
             } ?: return Result(false, "❌ Vidéo vide reçue depuis Replicate.")
 
             val savedPath = saveVideo(context, videoBytes, prompt)
-            Result(true, "🎬 Vidéo générée pour « $prompt ».\n📁 Enregistrée dans : $savedPath", savedPath)
+            Result(true, "🎬 Vidéo de ${duration}s générée pour « $prompt ».\n📁 Enregistrée dans : $savedPath", savedPath)
         } catch (e: Exception) {
             Result(false, "❌ Erreur lors de la génération vidéo : ${e.message}")
         }
