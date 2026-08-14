@@ -73,8 +73,9 @@ jobs:
           max_attempts=3
           until [ $attempt -gt $max_attempts ]; do
             echo "=== Tentative de build $attempt/$max_attempts ==="
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
             code=$?
+            cat build.log
             if [ $code -eq 0 ]; then
               exit 0
             fi
@@ -82,8 +83,25 @@ jobs:
             attempt=$((attempt + 1))
             sleep 20
           done
+          {
+            echo "=== kotlinc errors (e:) ==="
+            grep -n "^e: " build.log | head -80
+            echo "=== what went wrong ==="
+            awk '/FAILURE: Build failed/,0' build.log | head -120
+          } > summary.log
+          echo "----- summary.log -----"
+          cat summary.log
+          ERR=$(cat summary.log | head -c 3800 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+          echo "::error::$ERR"
           echo "❌ Échec après $max_attempts tentatives."
           exit $code
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gradle-build-log
+          path: build.log
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
