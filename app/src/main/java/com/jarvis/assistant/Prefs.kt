@@ -839,12 +839,59 @@ object Prefs {
         val list = getGenerationHistory(context).toMutableList()
         list.add(0, record)
         writeGenerationHistory(context, list.take(MAX_GENERATION_HISTORY))
+        if (record.status == "success") logGenerationToVault(context, record)
     }
 
     /** Met à jour l'enregistrement identifié par [id] (ex: passage pending → success/failed). */
     fun updateGenerationRecord(context: Context, id: String, transform: (GenerationRecord) -> GenerationRecord) {
-        val list = getGenerationHistory(context).map { if (it.id == id) transform(it) else it }
+        var updated: GenerationRecord? = null
+        val list = getGenerationHistory(context).map {
+            if (it.id == id) {
+                val was = it.status
+                val t = transform(it)
+                if (was != "success" && t.status == "success") updated = t
+                t
+            } else it
+        }
         writeGenerationHistory(context, list)
+        updated?.let { logGenerationToVault(context, it) }
+    }
+
+    /**
+     * Obsidian en premier plan : toute génération réussie (image, vidéo, site web, graphique,
+     * PDF/Word/Excel/ZIP) est aussi tracée sous forme de note dans le vault (dossier « Générations »),
+     * en plus de rester listée par list_generations — ainsi obsidian_search/obsidian_list retrouvent
+     * aussi ces actions, et l'historique survit même si le cache generation_history est un jour purgé.
+     * Best-effort : une erreur d'écriture vault (permission stockage manquante, etc.) ne doit jamais
+     * faire échouer la génération elle-même, d'où le try/catch silencieux (déjà loggé côté ObsidianController).
+     */
+    private fun logGenerationToVault(context: Context, record: GenerationRecord) {
+        try {
+            val typeLabel = when (record.type) {
+                "image" -> "🎨 Image générée"
+                "video" -> "🎬 Vidéo générée"
+                "website", "website_edit" -> "🌐 Site web généré"
+                "chart" -> "📊 Graphique généré"
+                "file_pdf" -> "📄 PDF créé"
+                "file_docx" -> "📝 Document Word créé"
+                "file_xlsx" -> "📊 Tableur Excel créé"
+                "file_zip" -> "🗜️ Archive ZIP créée"
+                else -> "✨ Génération (${record.type})"
+            }
+            val safePrompt = record.prompt.ifBlank { "(sans description)" }
+            val title = "$typeLabel — ${safePrompt.take(60)}"
+            val content = buildString {
+                append("Type : ${record.type}
+")
+                append("Description : $safePrompt
+")
+                if (!record.resultPath.isNullOrBlank()) append("Fichier : ${record.resultPath}
+")
+            }
+            ObsidianController.createNote(context, title, content, folder = "Générations", tags = listOf("jarvis", "generation", record.type))
+        } catch (_: Exception) {
+            // best-effort, ne jamais faire échouer la génération pour ça
+        }
     }
 
     fun removeGenerationRecord(context: Context, id: String) {

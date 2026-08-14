@@ -73,11 +73,15 @@ object PeopleController {
     private data class ContactNote(
         val name: String,
         val category: String,
+        val nickname: String?,
         val phone: String?,
         val phonePro: String?,
         val email: String?,
         val address: String?,
         val addressPro: String?,
+        val birthday: String?,
+        val company: String?,
+        val position: String?,
         val latitude: Double?,
         val longitude: Double?,
         val installDate: String?,
@@ -149,11 +153,15 @@ object PeopleController {
         return ContactNote(
             name = file.nameWithoutExtension,
             category = field("category") ?: "autre",
+            nickname = field("nickname"),
             phone = field("phone"),
             phonePro = field("phone_pro"),
             email = field("email"),
             address = field("address"),
             addressPro = field("address_pro"),
+            birthday = field("birthday"),
+            company = field("company"),
+            position = field("position"),
             latitude = field("latitude")?.toDoubleOrNull(),
             longitude = field("longitude")?.toDoubleOrNull(),
             installDate = field("install_date"),
@@ -168,11 +176,15 @@ object PeopleController {
         context: Context,
         name: String,
         category: String = "autre",
+        nickname: String? = null,
         phone: String? = null,
         phonePro: String? = null,
         email: String? = null,
         address: String? = null,
         addressPro: String? = null,
+        birthday: String? = null,
+        company: String? = null,
+        position: String? = null,
         latitude: Double? = null,
         longitude: Double? = null,
         installDate: String? = null,
@@ -196,11 +208,15 @@ object PeopleController {
             // dont le nom a été prononcé/écrit cette fois-ci.
             val canonicalName = existing?.name ?: name
 
+            val finalNickname = nickname ?: existing?.nickname
             val finalPhone = phone ?: existing?.phone
             val finalPhonePro = phonePro ?: existing?.phonePro
             val finalEmail = email ?: existing?.email
             val finalAddress = address ?: existing?.address
             val finalAddressPro = addressPro ?: existing?.addressPro
+            val finalBirthday = birthday ?: existing?.birthday
+            val finalCompany = company ?: existing?.company
+            val finalPosition = position ?: existing?.position
             val finalLat = latitude ?: existing?.latitude
             val finalLng = longitude ?: existing?.longitude
             val finalInstallDate = installDate ?: existing?.installDate
@@ -209,11 +225,15 @@ object PeopleController {
             val finalAttachments = existing?.attachments ?: emptyList()
 
             val frontmatterLines = mutableListOf("category: $cat")
+            finalNickname?.let { frontmatterLines.add("nickname: \"$it\"") }
             finalPhone?.let { frontmatterLines.add("phone: \"$it\"") }
             finalPhonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
             finalEmail?.let { frontmatterLines.add("email: \"$it\"") }
             finalAddress?.let { frontmatterLines.add("address: \"$it\"") }
             finalAddressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
+            finalBirthday?.let { frontmatterLines.add("birthday: \"$it\"") }
+            finalCompany?.let { frontmatterLines.add("company: \"$it\"") }
+            finalPosition?.let { frontmatterLines.add("position: \"$it\"") }
             finalLat?.let { frontmatterLines.add("latitude: $it") }
             finalLng?.let { frontmatterLines.add("longitude: $it") }
             finalInstallDate?.let { frontmatterLines.add("install_date: \"$it\"") }
@@ -258,11 +278,15 @@ object PeopleController {
             val file = File(folder, "${safeFileName(targetName)}.md")
 
             val frontmatterLines = mutableListOf("category: $category")
+            contact?.nickname?.let { frontmatterLines.add("nickname: \"$it\"") }
             contact?.phone?.let { frontmatterLines.add("phone: \"$it\"") }
             contact?.phonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
             contact?.email?.let { frontmatterLines.add("email: \"$it\"") }
             contact?.address?.let { frontmatterLines.add("address: \"$it\"") }
             contact?.addressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
+            contact?.birthday?.let { frontmatterLines.add("birthday: \"$it\"") }
+            contact?.company?.let { frontmatterLines.add("company: \"$it\"") }
+            contact?.position?.let { frontmatterLines.add("position: \"$it\"") }
             contact?.latitude?.let { frontmatterLines.add("latitude: $it") }
             contact?.longitude?.let { frontmatterLines.add("longitude: $it") }
             contact?.installDate?.let { frontmatterLines.add("install_date: \"$it\"") }
@@ -316,11 +340,15 @@ object PeopleController {
             val updatedAttachments = (contact?.attachments ?: emptyList()) + destFile.absolutePath
 
             val frontmatterLines = mutableListOf("category: $category")
+            contact?.nickname?.let { frontmatterLines.add("nickname: \"$it\"") }
             contact?.phone?.let { frontmatterLines.add("phone: \"$it\"") }
             contact?.phonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
             contact?.email?.let { frontmatterLines.add("email: \"$it\"") }
             contact?.address?.let { frontmatterLines.add("address: \"$it\"") }
             contact?.addressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
+            contact?.birthday?.let { frontmatterLines.add("birthday: \"$it\"") }
+            contact?.company?.let { frontmatterLines.add("company: \"$it\"") }
+            contact?.position?.let { frontmatterLines.add("position: \"$it\"") }
             contact?.latitude?.let { frontmatterLines.add("latitude: $it") }
             contact?.longitude?.let { frontmatterLines.add("longitude: $it") }
             contact?.installDate?.let { frontmatterLines.add("install_date: \"$it\"") }
@@ -532,12 +560,35 @@ object PeopleController {
      */
     private fun formatFullDetails(c: ContactNote): String {
         return buildString {
-            append("📇 ${c.name} (${categoryLabel(c.category)})\n\n")
-            if (!c.phone.isNullOrBlank()) append("📞 Téléphone perso : ${c.phone}\n")
-            if (!c.phonePro.isNullOrBlank()) append("📱 Téléphone pro : ${c.phonePro}\n")
-            if (!c.email.isNullOrBlank()) append("✉️ Email : ${c.email}\n")
-            if (!c.address.isNullOrBlank()) append("🏠 Adresse perso : ${c.address}\n")
-            if (!c.addressPro.isNullOrBlank()) append("🏗️ Adresse pro / chantier : ${c.addressPro}\n")
+            // Titre : "{surnom} {nom} ({categorie})" si un surnom affectueux est enregistré
+            // (ex: "Ma Cherie"), sinon juste "{nom} ({categorie})" - format de base demande :
+            // les infos sont regroupees en deux blocs "Personnel"/"Professionnel", chaque
+            // champ n'apparaissant QUE s'il est reellement renseigne.
+            val titleName = if (!c.nickname.isNullOrBlank()) "${c.nickname} ${c.name}" else c.name
+            append("📇 $titleName (${categoryLabel(c.category)})\n\n")
+
+            val hasPersonal = !c.birthday.isNullOrBlank() || !c.phone.isNullOrBlank() ||
+                !c.email.isNullOrBlank() || !c.address.isNullOrBlank()
+            if (hasPersonal) {
+                append("**Personnel**\n")
+                if (!c.birthday.isNullOrBlank()) append("🎂 ${c.birthday}\n")
+                if (!c.phone.isNullOrBlank()) append("📞 ${c.phone}\n")
+                if (!c.email.isNullOrBlank()) append("✉️ ${c.email}\n")
+                if (!c.address.isNullOrBlank()) append("🏠 ${c.address}\n")
+                append("\n")
+            }
+
+            val hasPro = !c.phonePro.isNullOrBlank() || !c.company.isNullOrBlank() ||
+                !c.addressPro.isNullOrBlank() || !c.position.isNullOrBlank()
+            if (hasPro) {
+                append("**Professionnel**\n")
+                if (!c.phonePro.isNullOrBlank()) append("📱 ${c.phonePro}\n")
+                if (!c.company.isNullOrBlank()) append("🏢 ${c.company}\n")
+                if (!c.addressPro.isNullOrBlank()) append("📍 ${c.addressPro}\n")
+                if (!c.position.isNullOrBlank()) append("💼 Poste : ${c.position}\n")
+                append("\n")
+            }
+
             if (c.latitude != null && c.longitude != null) append("🌐 GPS : ${c.latitude}, ${c.longitude}\n")
             if (!c.installDate.isNullOrBlank()) append("📆 Date d'installation : ${c.installDate}\n")
             if (c.notes.isNotBlank()) append("\n📝 Notes : ${c.notes}\n")
@@ -549,9 +600,9 @@ object PeopleController {
                 append("\n📎 Pièces jointes (${c.attachments.size}) :\n")
                 c.attachments.forEach { append("   • ${File(it).name}\n") }
             }
-            val hasAnyDetail = !c.phone.isNullOrBlank() || !c.phonePro.isNullOrBlank() || !c.email.isNullOrBlank() ||
-                !c.address.isNullOrBlank() || !c.addressPro.isNullOrBlank() || !c.installDate.isNullOrBlank()
-            if (!hasAnyDetail) append("\nℹ️ Aucune coordonnée enregistrée pour l'instant (juste le nom et la catégorie).\n")
+            if (!hasPersonal && !hasPro && c.installDate.isNullOrBlank()) {
+                append("\nℹ️ Aucune coordonnée enregistrée pour l'instant (juste le nom et la catégorie).\n")
+            }
         }.trim()
     }
 

@@ -235,6 +235,17 @@ object CalendarController {
         if (filterCalendarId != null) {
             selection += " AND ${CalendarContract.Instances.CALENDAR_ID} = ?"
             selectionArgsList.add(filterCalendarId.toString())
+        } else {
+            // Aucun calendrier precise explicitement : on se limite par defaut aux calendriers
+            // Google (voir getGoogleCalendarIds) pour ne JAMAIS faire remonter un calendrier
+            // LOCAL du fabricant (Xiaomi/MIUI...) parmi "aujourd'hui"/"cette semaine" - demande
+            // explicite : JARVIS ne doit utiliser QUE Google Agenda. Si aucun calendrier Google
+            // n'est configure sur l'appareil, on retombe sur tous les calendriers pour ne pas
+            // rendre la fonction totalement inutilisable.
+            val googleIds = getGoogleCalendarIds(context)
+            if (googleIds.isNotEmpty()) {
+                selection += " AND ${CalendarContract.Instances.CALENDAR_ID} IN (${googleIds.joinToString(",")})"
+            }
         }
 
         return try {
@@ -331,14 +342,51 @@ object CalendarController {
         }
 
         return try {
+            val existedBefore = getEventDetails(context, eventId) != null
             val rows = context.contentResolver.delete(
                 CalendarContract.Events.CONTENT_URI,
                 "${CalendarContract.Events._ID} = ?",
                 arrayOf(eventId.toString())
             )
-            if (rows > 0) "🗑️ Événement supprimé." else "❌ Événement introuvable."
+            when {
+                rows > 0 -> "🗑️ Événement supprimé."
+                !existedBefore -> "❌ Événement introuvable (ID $eventId) — relance search_event/today_events pour récupérer un ID à jour."
+                else -> diagnoseWriteFailure(context, eventId, "suppression")
+            }
         } catch (e: Exception) {
             "❌ Erreur lors de la suppression : ${e.message}"
+        }
+    }
+
+    /**
+     * L'événement existe bien (vérifié juste avant) mais l'update()/delete() a affecté
+     * 0 ligne : sur certains Android personnalisés (MIUI/Xiaomi notamment), la modification
+     * d'un événement par une appli tierce peut être silencieusement bloquée par une
+     * restriction système supplémentaire (distincte de la permission WRITE_CALENDAR standard,
+     * déjà accordée ici) plutôt que de lever une exception — d'où "0 ligne modifiée" sans
+     * erreur exploitable. On identifie le calendrier concerné pour donner une piste concrète.
+     */
+    private fun diagnoseWriteFailure(context: Context, eventId: Long, action: String): String {
+        val calendarId = try {
+            context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                arrayOf(CalendarContract.Events.CALENDAR_ID),
+                "${CalendarContract.Events._ID} = ?",
+                arrayOf(eventId.toString()),
+                null
+            )?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+        } catch (_: Exception) { null }
+        val isGoogle = calendarId != null && getGoogleCalendarIds(context).contains(calendarId)
+        val calendarName = calendarId?.let { buildCalendarNameMap(context)[it] } ?: "inconnu"
+        return if (isGoogle) {
+            "⚠️ La $action a été refusée par le système alors que l'événement existe (calendrier : $calendarName). " +
+                "Sur certains téléphones (Xiaomi/MIUI notamment), il faut activer manuellement : Paramètres > " +
+                "Applications > JARVIS > Autorisations supplémentaires > activer « Modifier l'agenda » / « Autostart », " +
+                "en plus de la permission agenda standard déjà accordée."
+        } else {
+            "⚠️ La $action a échoué : cet événement vit sur le calendrier local « $calendarName » (pas un compte Google), " +
+                "que MIUI/le fabricant protège souvent contre l'écriture par des applis tierces. Recrée-le plutôt sur un " +
+                "calendrier Google (list_calendars pour voir les calendriers disponibles)."
         }
     }
 
@@ -371,13 +419,18 @@ object CalendarController {
 
             if (values.size() == 0) return "❌ Aucune modification à appliquer."
 
+            val existedBefore = getEventDetails(context, eventId) != null
             val rows = context.contentResolver.update(
                 CalendarContract.Events.CONTENT_URI,
                 values,
                 "${CalendarContract.Events._ID} = ?",
                 arrayOf(eventId.toString())
             )
-            if (rows > 0) "✏️ Événement mis à jour avec succès." else "❌ Événement introuvable."
+            when {
+                rows > 0 -> "✏️ Événement mis à jour avec succès."
+                !existedBefore -> "❌ Événement introuvable (ID $eventId) — relance search_event/today_events pour récupérer un ID à jour."
+                else -> diagnoseWriteFailure(context, eventId, "modification")
+            }
         } catch (e: Exception) {
             "❌ Erreur lors de la modification : ${e.message}"
         }
@@ -409,6 +462,13 @@ object CalendarController {
             if (filterCalendarId != null) {
                 selection += " AND ${CalendarContract.Events.CALENDAR_ID} = ?"
                 argsList.add(filterCalendarId.toString())
+            } else {
+                // Meme regle par defaut que today_events/upcoming_events : uniquement Google
+                // Agenda tant que l'utilisateur ne demande pas explicitement un autre calendrier.
+                val googleIds = getGoogleCalendarIds(context)
+                if (googleIds.isNotEmpty()) {
+                    selection += " AND ${CalendarContract.Events.CALENDAR_ID} IN (${googleIds.joinToString(",")})"
+                }
             }
             val cursor = context.contentResolver.query(
                 CalendarContract.Events.CONTENT_URI,
@@ -688,6 +748,31 @@ object CalendarController {
      *     garantit que la création d'événement continue de fonctionner même sans aucun
      *     compte cloud configuré).
      */
+    /**
+     * Renvoie les IDs de tous les calendriers rattaches a un compte Google (account_type ==
+     * "com.google"), synchronises ou non - utilise pour restreindre par defaut la LECTURE
+     * (today_events/upcoming_events/search_event) et exclure tout calendrier LOCAL du
+     * fabricant (Xiaomi/MIUI...) tant que l'utilisateur ne cible pas explicitement un autre
+     * calendrier via le parametre "calendar". Voir aussi getDefaultCalendarId (choix du
+     * calendrier de destination pour la CREATION d'evenement), qui applique une preference
+     * similaire.
+     */
+    private fun getGoogleCalendarIds(context: Context): List<Long> {
+        val ids = mutableListOf<Long>()
+        try {
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.ACCOUNT_TYPE),
+                null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    if (c.getString(1) == "com.google") ids.add(c.getLong(0))
+                }
+            }
+        } catch (_: Exception) { /* liste vide en cas d'erreur, pas bloquant */ }
+        return ids
+    }
+
     private fun getDefaultCalendarId(context: Context): Long? {
         data class Candidate(val id: Long, val accountType: String, val isOwn: Boolean, val syncEvents: Boolean)
         val candidates = mutableListOf<Candidate>()

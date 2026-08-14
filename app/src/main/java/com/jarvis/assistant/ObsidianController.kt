@@ -65,7 +65,7 @@ object ObsidianController {
         if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root = getVaultRoot(context)
-            val folders = listOf("Daily Notes", "Notes Rapides", "Contacts", "Tâches", "Emails", "Réflexions", ".obsidian")
+            val folders = listOf("Daily Notes", "Notes Rapides", "Contacts", "Tâches", "Emails", "Réflexions", "Générations", ".obsidian")
             folders.forEach { File(root, it).mkdirs() }
 
             // README
@@ -83,6 +83,7 @@ Ce vault est géré par **JARVIS Assistant**.
 - ✅ **Tâches** — Listes de tâches
 - 📧 **Emails** — Résumés d'emails importants
 - 💭 **Réflexions** — Pensées et idées
+- ✨ **Générations** — Historique des images, vidéos, sites, PDF/Word/Excel/ZIP créés
 
 ---
 *Vault créé par JARVIS le ${displayFormat.format(Date())}*
