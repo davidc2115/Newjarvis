@@ -881,12 +881,9 @@ object Prefs {
             val safePrompt = record.prompt.ifBlank { "(sans description)" }
             val title = "$typeLabel — ${safePrompt.take(60)}"
             val content = buildString {
-                append("Type : ${record.type}
-")
-                append("Description : $safePrompt
-")
-                if (!record.resultPath.isNullOrBlank()) append("Fichier : ${record.resultPath}
-")
+                append("Type : ${record.type}\n")
+                append("Description : $safePrompt\n")
+                if (!record.resultPath.isNullOrBlank()) append("Fichier : ${record.resultPath}\n")
             }
             ObsidianController.createNote(context, title, content, folder = "Générations", tags = listOf("jarvis", "generation", record.type))
         } catch (_: Exception) {
