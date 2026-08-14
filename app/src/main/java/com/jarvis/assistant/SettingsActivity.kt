@@ -300,6 +300,25 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
 
+        // ── Freebox OS (voir FreeboxController) — accès complet lecture/écriture,
+        // distinct du partage SMB ci-dessus qui ne donne accès qu'aux fichiers.
+        val freeboxHostInput     = findViewById<EditText>(R.id.freeboxHostInput)
+        val freeboxAppIdInput    = findViewById<EditText>(R.id.freeboxAppIdInput)
+        val freeboxAppTokenInput = findViewById<EditText>(R.id.freeboxAppTokenInput)
+        val saveFreeboxButton    = findViewById<TextView>(R.id.saveFreeboxButton)
+
+        freeboxHostInput.setText(Prefs.getFreeboxHost(this))
+        freeboxAppIdInput.setText(Prefs.getFreeboxAppId(this))
+        freeboxAppTokenInput.setText(Prefs.getFreeboxAppToken(this))
+
+        saveFreeboxButton.setOnClickListener {
+            val host = freeboxHostInput.text.toString().trim()
+            Prefs.saveFreeboxHost(this, if (host.isBlank()) "http://mafreebox.freebox.fr" else host)
+            Prefs.saveFreeboxAppId(this, freeboxAppIdInput.text.toString().trim())
+            Prefs.saveFreeboxAppToken(this, freeboxAppTokenInput.text.toString().trim())
+            Toast.makeText(this, "✅ Freebox enregistrée.", Toast.LENGTH_LONG).show()
+        }
+
         // ── Cartes dynamiques de modèles ──────────────────────────────────────
         modelCardsContainer.removeAllViews()
         ModelDownloader.MODEL_CATALOG.forEachIndexed { index, entry ->

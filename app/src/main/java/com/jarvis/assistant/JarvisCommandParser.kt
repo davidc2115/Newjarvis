@@ -922,6 +922,23 @@ object JarvisCommandParser {
                 result.message
             }
 
+            // Freebox OS — accès complet lecture/écriture (réseau, Wi-Fi, domotique
+            // Freebox Home). Voir FreeboxController pour le détail de l'authentification.
+            "freebox_status" -> FreeboxController.status(context)
+            "freebox_devices" -> FreeboxController.listDevices(context, json.optString("filter", ""))
+            "freebox_wifi_status" -> FreeboxController.wifiStatus(context)
+            "freebox_wifi_set" -> FreeboxController.wifiSet(context, json.optBoolean("enable", true))
+            "freebox_home_devices" -> FreeboxController.homeDevices(context, json.optString("filter", ""))
+            "freebox_home_set" -> {
+                val device = json.optString("device", "")
+                val hasNum = json.has("value") && !json.isNull("value")
+                if (hasNum) {
+                    FreeboxController.homeSet(context, device, numValue = json.optDouble("value"))
+                } else {
+                    FreeboxController.homeSet(context, device, boolValue = json.optBoolean("on", true))
+                }
+            }
+
             "test_api_keys" -> ApiKeyTestController.testAllConfiguredKeys(context)
 
             "set_chat_theme" -> {

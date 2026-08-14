@@ -793,6 +793,37 @@ object Prefs {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // FREEBOX OS API (contrôle complet : LAN, Wi-Fi, domotique Freebox Home)
+    // Ré-ajoutée à la demande explicite de l'utilisateur (accès total lecture/écriture
+    // depuis JARVIS). app_token = jeton obtenu lors de l'appairage de l'app avec la
+    // Freebox (Freebox OS -> Paramètres -> Gestion des accès -> Applications), JAMAIS
+    // codé en dur dans le code source (dépôt public) : uniquement saisi ici via ⚙.
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getFreeboxHost(context: Context): String {
+        val raw = prefs(context).getString("freebox_host", "") ?: ""
+        return raw.ifBlank { "http://mafreebox.freebox.fr" }
+    }
+
+    fun saveFreeboxHost(context: Context, host: String) {
+        prefs(context).edit().putString("freebox_host", host.trim()).apply()
+    }
+
+    fun getFreeboxAppId(context: Context): String =
+        prefs(context).getString("freebox_app_id", "") ?: ""
+
+    fun saveFreeboxAppId(context: Context, appId: String) {
+        prefs(context).edit().putString("freebox_app_id", appId.trim()).apply()
+    }
+
+    fun getFreeboxAppToken(context: Context): String =
+        prefs(context).getString("freebox_app_token", "") ?: ""
+
+    fun saveFreeboxAppToken(context: Context, token: String) {
+        prefs(context).edit().putString("freebox_app_token", token.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // HISTORIQUE DES GÉNÉRATIONS (image / vidéo / site web)
     // ═════════════════════════════════════════════════════════════════════════
 
