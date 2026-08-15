@@ -74,6 +74,7 @@ object ContactsController {
 
         val cleanQuery = query.trim()
         val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
             ContactsContract.CommonDataKinds.Phone.NUMBER
         )
@@ -94,13 +95,16 @@ object ContactsController {
                 val seenNumbers = mutableSetOf<String>()
 
                 while (c.moveToNext() && count < 10) {
-                    val displayName = c.getString(0) ?: "Inconnu"
-                    val rawPhone = c.getString(1) ?: "Pas de numéro"
+                    val contactId = c.getString(0) ?: ""
+                    val displayName = c.getString(1) ?: "Inconnu"
+                    val rawPhone = c.getString(2) ?: "Pas de numéro"
                     val cleanPhone = rawPhone.replace(" ", "")
 
                     if (!seenNumbers.contains(cleanPhone)) {
                         seenNumbers.add(cleanPhone)
-                        sb.append("${count + 1}. **$displayName** : $rawPhone\n")
+                        val labels = if (contactId.isNotBlank()) getContactLabels(context, contactId) else emptyList()
+                        val labelsSuffix = if (labels.isNotEmpty()) " 🏷️ ${labels.joinToString(", ")}" else ""
+                        sb.append("${count + 1}. **$displayName** : $rawPhone$labelsSuffix\n")
                         count++
                     }
                 }
@@ -167,6 +171,7 @@ object ContactsController {
         }
 
         val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
             ContactsContract.CommonDataKinds.Phone.NUMBER
         )
@@ -188,13 +193,16 @@ object ContactsController {
                 val seenNumbers = mutableSetOf<String>()
 
                 while (c.moveToNext() && idx < count) {
-                    val displayName = c.getString(0) ?: "Inconnu"
-                    val phone = c.getString(1) ?: ""
+                    val contactId = c.getString(0) ?: ""
+                    val displayName = c.getString(1) ?: "Inconnu"
+                    val phone = c.getString(2) ?: ""
                     val cleanPhone = phone.replace(" ", "")
 
                     if (!seenNumbers.contains(cleanPhone)) {
                         seenNumbers.add(cleanPhone)
-                        sb.append("${idx + 1}. **$displayName** — $phone\n")
+                        val labels = if (contactId.isNotBlank()) getContactLabels(context, contactId) else emptyList()
+                        val labelsSuffix = if (labels.isNotEmpty()) " 🏷️ ${labels.joinToString(", ")}" else ""
+                        sb.append("${idx + 1}. **$displayName** — $phone$labelsSuffix\n")
                         idx++
                     }
                 }
@@ -202,6 +210,128 @@ object ContactsController {
             } ?: "❌ Échec de la lecture de la liste des contacts."
         } catch (e: Exception) {
             "❌ Erreur lors de la lecture des contacts : ${e.message}"
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Libellés / groupes natifs (feature "Libellés" de l'app Contacts/Google
+    // Contacts) — jusqu'ici jamais interrogés par JARVIS, qui ne connaissait donc
+    // jamais les libellés créés manuellement par l'utilisateur alors qu'ils sont
+    // bien présents dans le carnet d'adresses natif du téléphone (bug signalé).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Libellés/groupes auxquels appartient le contact [contactId] (peut être vide). */
+    private fun getContactLabels(context: Context, contactId: String): List<String> {
+        val labels = mutableListOf<String>()
+        try {
+            context.contentResolver.query(
+                ContactsContract.Data.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.GroupMembership.GROUP_ROW_ID),
+                "${ContactsContract.Data.CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(contactId, ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE),
+                null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val groupId = cursor.getLong(0)
+                    context.contentResolver.query(
+                        ContactsContract.Groups.CONTENT_URI,
+                        arrayOf(ContactsContract.Groups.TITLE),
+                        "${ContactsContract.Groups._ID} = ?",
+                        arrayOf(groupId.toString()),
+                        null
+                    )?.use { groupCursor ->
+                        if (groupCursor.moveToFirst()) {
+                            val title = groupCursor.getString(0)
+                            if (!title.isNullOrBlank()) labels.add(title)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return labels.distinct()
+    }
+
+    /** Liste tous les libellés/groupes de contacts existants dans le carnet d'adresses natif. */
+    fun listAllLabels(context: Context): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission d'accès aux contacts non accordée."
+        }
+        return try {
+            val labels = mutableListOf<String>()
+            context.contentResolver.query(
+                ContactsContract.Groups.CONTENT_URI,
+                arrayOf(ContactsContract.Groups.TITLE, ContactsContract.Groups.DELETED),
+                null,
+                null,
+                null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val deleted = c.getInt(1)
+                    val title = c.getString(0)
+                    if (deleted == 0 && !title.isNullOrBlank()) labels.add(title)
+                }
+            }
+            val distinct = labels.distinct().sorted()
+            if (distinct.isEmpty()) "🏷️ Aucun libellé/groupe de contact trouvé dans le carnet d'adresses du téléphone."
+            else "🏷️ **Libellés de contacts trouvés (${distinct.size})** :\n\n" + distinct.joinToString("\n") { "• $it" }
+        } catch (e: Exception) {
+            "❌ Erreur lors de la lecture des libellés : ${e.message}"
+        }
+    }
+
+    /** Liste les contacts portant un libellé/groupe précis (recherche partielle, insensible à la casse). */
+    fun listContactsByLabel(context: Context, label: String): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission d'accès aux contacts non accordée."
+        }
+        if (label.isBlank()) return "❌ Précise le libellé à rechercher."
+        return try {
+            val groupIds = mutableListOf<String>()
+            context.contentResolver.query(
+                ContactsContract.Groups.CONTENT_URI,
+                arrayOf(ContactsContract.Groups._ID, ContactsContract.Groups.TITLE),
+                "${ContactsContract.Groups.TITLE} LIKE ?",
+                arrayOf("%$label%"),
+                null
+            )?.use { c -> while (c.moveToNext()) groupIds.add(c.getString(0)) }
+
+            if (groupIds.isEmpty()) {
+                return "🔍 Aucun libellé de contact ne correspond à « $label » (vérifie l'orthographe exacte dans ton appli Contacts, ou demande list_contact_labels pour voir la liste complète)."
+            }
+
+            val contactIds = mutableSetOf<String>()
+            for (gid in groupIds) {
+                context.contentResolver.query(
+                    ContactsContract.Data.CONTENT_URI,
+                    arrayOf(ContactsContract.Data.CONTACT_ID),
+                    "${ContactsContract.Data.MIMETYPE} = ? AND ${ContactsContract.CommonDataKinds.GroupMembership.GROUP_ROW_ID} = ?",
+                    arrayOf(ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE, gid),
+                    null
+                )?.use { c -> while (c.moveToNext()) contactIds.add(c.getString(0)) }
+            }
+            if (contactIds.isEmpty()) return "📋 Aucun contact n'a le libellé « $label »."
+
+            val sb = StringBuilder("🏷️ **Contacts avec le libellé « $label »** :\n\n")
+            var idx = 0
+            for (cid in contactIds) {
+                context.contentResolver.query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+                    "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                    arrayOf(cid),
+                    null
+                )?.use { c ->
+                    if (c.moveToFirst()) {
+                        idx++
+                        val name = c.getString(0) ?: "Inconnu"
+                        val phone = c.getString(1) ?: ""
+                        sb.append("$idx. **$name**${if (phone.isNotBlank()) " : $phone" else ""}\n")
+                    }
+                }
+            }
+            if (idx == 0) "📋 Aucun contact avec numéro de téléphone n'a le libellé « $label »." else sb.toString()
+        } catch (e: Exception) {
+            "❌ Erreur lors de la recherche par libellé : ${e.message}"
         }
     }
 }

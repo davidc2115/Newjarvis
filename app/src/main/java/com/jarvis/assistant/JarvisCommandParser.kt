@@ -43,7 +43,7 @@ object JarvisCommandParser {
         "read_sms", "read_unread_sms", "search_sms", "recent_calls",
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
-        "web_search", "get_location", "search_contact",
+        "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations"
     )
 
@@ -191,6 +191,12 @@ object JarvisCommandParser {
                 val name = json.optString("name", "").ifBlank { json.optString("query", "") }
                 if (name.isBlank()) ContactsController.getContactList(context, json.optInt("count", 100))
                 else ContactsController.searchContacts(context, name)
+            }
+            "list_contact_labels" -> ContactsController.listAllLabels(context)
+            "list_contacts_by_label" -> {
+                val label = json.optString("label", "")
+                if (label.isBlank()) "❌ Précise le libellé à rechercher."
+                else ContactsController.listContactsByLabel(context, label)
             }
             "add_contact" -> {
                 val name = json.optString("name", "")
