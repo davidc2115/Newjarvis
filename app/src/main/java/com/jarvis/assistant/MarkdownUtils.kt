@@ -111,7 +111,7 @@ object MarkdownUtils {
                 claimed.add(range)
                 val address = group.value.trim()
                 builder.setSpan(object : ClickableSpan() {
-                    override fun onClick(widget: View) = LocationController.openMaps(widget.context, address)
+                    override fun onClick(widget: View) { LocationController.openMaps(widget.context, address) }
                     override fun updateDrawState(ds: TextPaint) {
                         super.updateDrawState(ds)
                         ds.isUnderlineText = true
