@@ -392,17 +392,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    /** Copie le fichier pointé par [uri] dans Documents/JARVIS-Fichiers/Pieces-jointes-chat/, retourne (chemin, nom). */
+    /**
+     * Copie le fichier pointé par [uri] dans le cache PRIVÉ de l'appli (jamais dans les
+     * Documents publics) : une pièce jointe envoyée dans le chat sert à l'ANALYSER, ce n'est
+     * pas une demande explicite de sauvegarde — avant ce correctif, chaque photo/document
+     * envoyé pour une simple question ("qu'y a-t-il sur cette photo ?") finissait quand même
+     * dupliqué en permanence dans Documents/JARVIS-Fichiers, visible dans le gestionnaire de
+     * fichiers, ce que l'utilisateur n'avait jamais demandé. Le cache reste lisible tout le
+     * temps de la conversation en cours (l'analyse IA, l'aperçu, et attach_contact_file en ont
+     * besoin), mais n'est ni visible dans les Documents ni sauvegardé, et Android peut le vider
+     * automatiquement — cohérent avec la limite déjà documentée d'attach_contact_file ("ne
+     * fonctionne que dans la même conversation, pas après un redémarrage de l'appli"). Si
+     * l'utilisateur veut vraiment garder le fichier, attach_contact_file en fait une copie
+     * PERMANENTE et délibérée dans la fiche du contact (PeopleController.addAttachment) —
+     * c'est le seul cas où une pièce jointe de chat doit survivre durablement.
+     */
     private fun persistAttachmentCopy(uri: Uri, mimeType: String): Pair<String, String>? {
         resolveExistingJarvisPath(uri)?.let { return it }
         return try {
             val input = contentResolver.openInputStream(uri) ?: return null
             val originalName = queryDisplayName(uri) ?: "piece_jointe_${System.currentTimeMillis()}"
             val safeName = originalName.replace(Regex("[/\\\\:*?\"<>|]"), "-").trim()
-            val dir = java.io.File(
-                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
-                "JARVIS-Fichiers/Pieces-jointes-chat"
-            ).also { it.mkdirs() }
+            val dir = java.io.File(cacheDir, "Pieces-jointes-chat").also { it.mkdirs() }
             val destFile = java.io.File(dir, "${System.currentTimeMillis()}_$safeName")
             input.use { inStream -> destFile.outputStream().use { outStream -> inStream.copyTo(outStream) } }
             destFile.absolutePath to originalName

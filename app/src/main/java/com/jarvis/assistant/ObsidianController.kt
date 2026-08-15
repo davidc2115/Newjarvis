@@ -147,6 +147,30 @@ Ce vault est géré par **JARVIS Assistant**.
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Create folder
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Crée un dossier (sous-dossier) dans le vault — auparavant totalement absent des actions
+     * exposées à l'IA (seul createNote existait), ce qui obligeait l'IA à répondre qu'elle ne
+     * pouvait pas créer de dossier même quand l'utilisateur le demandait explicitement.
+     */
+    fun createFolder(context: Context, path: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        if (path.isBlank()) return "❌ Précise le nom du dossier à créer."
+        return try {
+            val root = getVaultRoot(context)
+            val safePath = path.split("/", "\\").joinToString("/") { it.replace(Regex("[:*?\"<>|]"), "-").trim() }
+            val dir = File(root, safePath)
+            if (dir.exists()) return "📁 Le dossier « $safePath » existe déjà."
+            if (dir.mkdirs()) "✅ Dossier créé : $safePath\n📄 Chemin : ${dir.absolutePath}"
+            else "❌ Impossible de créer « $safePath » (chemin invalide ou droits insuffisants)."
+        } catch (e: Exception) {
+            "❌ Erreur création dossier : ${e.message}"
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Create note
     // ─────────────────────────────────────────────────────────────────────────
 

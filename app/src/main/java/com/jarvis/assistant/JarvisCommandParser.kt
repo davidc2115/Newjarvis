@@ -673,6 +673,31 @@ object JarvisCommandParser {
             "obsidian_list" -> ObsidianController.listNotes(context, json.optString("folder", ""))
             "obsidian_reset_path" -> ObsidianController.resetVaultPath(context)
             "obsidian_wipe" -> ObsidianController.wipeVault(context)
+            "obsidian_create_folder" -> ObsidianController.createFolder(context, json.optString("path", ""))
+            "obsidian_create_note" -> {
+                val title = json.optString("title", "")
+                val content = json.optString("content", "")
+                val folder = json.optString("folder", "").ifBlank { "Notes Rapides" }
+                if (title.isBlank()) "❌ Précise un titre pour la note."
+                else ObsidianController.createNote(context, title, content, folder)
+            }
+            "obsidian_daily_note" -> ObsidianController.createDailyNote(context, json.optString("content", ""))
+            "obsidian_append" -> {
+                val query = json.optString("query", "")
+                val text = json.optString("text", "")
+                if (query.isBlank() || text.isBlank()) "❌ Précise la note ciblée ET le texte à ajouter."
+                else ObsidianController.appendToNote(context, query, text)
+            }
+            "obsidian_read" -> {
+                val query = json.optString("query", "")
+                if (query.isBlank()) "❌ Précise quelle note lire."
+                else ObsidianController.readNote(context, query)
+            }
+            "obsidian_delete_note" -> {
+                val query = json.optString("query", "")
+                if (query.isBlank()) "❌ Précise quelle note supprimer."
+                else ObsidianController.deleteNote(context, query)
+            }
 
             "generate_image" -> {
                 val prompt = json.optString("prompt", "")
