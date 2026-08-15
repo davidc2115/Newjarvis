@@ -428,12 +428,17 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (e: Exception) { null }
     }
 
-    /** Liste les sites déjà générés (dossiers, les plus récents en premier). */
+    /**
+     * Liste les pages d'accueil (index.html) des sites déjà générés, les plus récents en
+     * premier — un fichier ouvrable directement (pas le dossier), pour rester compatible avec
+     * l'ouverture via FileProvider/ACTION_VIEW côté UI.
+     */
     fun listGeneratedSites(context: Context): List<File> {
         val dir = sitesRootDir()
         if (!dir.exists()) return emptyList()
         return dir.listFiles { f -> f.isDirectory && File(f, "index.html").exists() }
             ?.sortedByDescending { it.lastModified() }
+            ?.map { File(it, "index.html") }
             ?: emptyList()
     }
 
