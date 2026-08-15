@@ -266,6 +266,91 @@ object WebsiteGenController {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Publication en ligne — GitHub Pages (gratuit, reutilise le jeton GitHub deja configure
+    // par l'utilisateur dans les Parametres, aucune cle API supplementaire)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Publie un site déjà généré ([siteDir], le dossier contenant index.html) sur GitHub
+     * Pages : crée un dépôt (ou réutilise s'il existe déjà), envoie tous les fichiers du site
+     * (HTML/CSS/JS en texte, images en binaire), puis active GitHub Pages sur la branche main.
+     * Gratuit et sans clé API additionnelle — utilise le compte GitHub déjà configuré par
+     * l'utilisateur (⚙ Paramètres → Clés API → Codage GitHub).
+     */
+    suspend fun publishToGitHub(
+        context: Context,
+        siteDir: File,
+        repoName: String = "",
+        accountLabel: String = "",
+        makePrivate: Boolean = false
+    ): Result {
+        if (!siteDir.exists() || !siteDir.isDirectory) {
+            return Result(false, "❌ Dossier du site introuvable : ${siteDir.absolutePath}")
+        }
+        if (!File(siteDir, "index.html").exists()) {
+            return Result(false, "❌ Ce dossier ne contient pas de site généré (index.html manquant).")
+        }
+
+        val manifest = readSiteManifest(siteDir)
+        val safeRepoName = repoName.ifBlank { manifest?.siteName ?: siteDir.name }
+            .lowercase()
+            .replace(Regex("[^a-z0-9-]"), "-")
+            .trim('-')
+            .ifBlank { "jarvis-site" }
+            .take(90)
+
+        val login = GitHubController.getLogin(context, accountLabel)
+            ?: return Result(false, "❌ Impossible de récupérer le compte GitHub (jeton absent ou invalide). " +
+                "Configure un jeton dans ⚙ Paramètres → Clés API → Codage GitHub, ou précise le bon compte.")
+
+        // Crée le dépôt — si le nom existe déjà sur ce compte (422), on réutilise simplement
+        // le dépôt existant plutôt que d'échouer (permet de republier un site déjà publié).
+        val createMsg = GitHubController.createRepo(context, safeRepoName, "Site web généré par JARVIS", makePrivate, accountLabel)
+        if (createMsg.startsWith("❌") && !createMsg.contains("already exists", ignoreCase = true) && !createMsg.contains("422")) {
+            return Result(false, "❌ Impossible de créer le dépôt « $safeRepoName » : $createMsg")
+        }
+
+        val textExtensions = setOf("html", "css", "js", "json", "txt", "md")
+        var uploaded = 0
+        var failed = 0
+        siteDir.walkTopDown().filter { it.isFile }.forEach { file ->
+            val relPath = file.relativeTo(siteDir).path.replace(File.separator, "/")
+            val commitMsg = "Site JARVIS : $relPath"
+            val result = if (file.extension.lowercase() in textExtensions) {
+                GitHubController.createOrUpdateFile(context, login, safeRepoName, relPath, file.readText(), commitMsg, "main", accountLabel)
+            } else {
+                GitHubController.createOrUpdateBinaryFile(context, login, safeRepoName, relPath, file.readBytes(), commitMsg, "main", accountLabel)
+            }
+            if (result.startsWith("✅")) uploaded++ else failed++
+        }
+
+        if (uploaded == 0) {
+            return Result(false, "❌ Aucun fichier n'a pu être envoyé sur GitHub (dépôt « $safeRepoName »). " +
+                "Vérifie les droits d'écriture du jeton avec github_test_access.")
+        }
+
+        val pagesMsg = GitHubController.enablePages(context, login, safeRepoName, "main", "/", accountLabel)
+        val pageUrl = Regex("https://\\S+").find(pagesMsg)?.value?.trimEnd('.', ')', '»', ':')
+
+        val failNote = if (failed > 0) " (⚠️ $failed fichier(s) sur ${uploaded + failed} n'ont pas pu être envoyés)" else ""
+        return if (pageUrl != null) {
+            Result(
+                true,
+                "🌐 Site publié en ligne via GitHub Pages$failNote !\n🔗 $pageUrl\n\n" +
+                    "📦 Dépôt : https://github.com/$login/$safeRepoName\n\n" +
+                    "⏳ GitHub Pages peut prendre 1 à 2 minutes avant d'être accessible la toute première fois.",
+                pageUrl
+            )
+        } else {
+            Result(
+                false,
+                "⚠️ Fichiers envoyés sur GitHub$failNote, mais l'activation de GitHub Pages a échoué : $pagesMsg\n" +
+                    "📦 Dépôt : https://github.com/$login/$safeRepoName"
+            )
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Gabarit HTML commun (nav/head/footer identiques sur toutes les pages)
     // ─────────────────────────────────────────────────────────────────────────
 

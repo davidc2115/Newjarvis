@@ -473,6 +473,116 @@ object GitHubController {
         }
     }
 
+    /** Nom d'utilisateur GitHub associé au jeton [accountLabel] (compte par défaut si vide), ou null si le jeton est invalide/absent. */
+    fun getLogin(context: Context, accountLabel: String = ""): String? {
+        val builder = authBuilder(context, "https://api.github.com/user", accountLabel) ?: return null
+        return try {
+            client.newCall(builder.get().build()).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                JSONObject(resp.body?.string() ?: "{}").optString("login", "").ifBlank { null }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Comme createOrUpdateFile mais pour du contenu BINAIRE (images) — même logique de
+     * récupération du sha existant pour une mise à jour, seule la source du contenu change
+     * (ByteArray encodé en base64 au lieu d'une String UTF-8).
+     */
+    fun createOrUpdateBinaryFile(
+        context: Context,
+        owner: String,
+        repo: String,
+        path: String,
+        bytes: ByteArray,
+        commitMessage: String,
+        branch: String,
+        accountLabel: String = ""
+    ): String {
+        if (resolveToken(context, accountLabel) == null) {
+            return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
+        }
+        var existingSha: String? = null
+        try {
+            val getBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$branch", accountLabel)
+            if (getBuilder != null) {
+                client.newCall(getBuilder.get().build()).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        existingSha = JSONObject(resp.body?.string() ?: "").optString("sha").ifBlank { null }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        val putBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/contents/$path", accountLabel) ?: return NO_TOKEN
+        return try {
+            val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            val bodyJson = JSONObject()
+                .put("message", commitMessage)
+                .put("content", encoded)
+                .put("branch", branch)
+            existingSha?.let { bodyJson.put("sha", it) }
+            val body = bodyJson.toString().toRequestBody(JSON)
+            client.newCall(putBuilder.put(body).build()).execute().use { resp ->
+                val respBody = resp.body?.string() ?: ""
+                if (!resp.isSuccessful) return "❌ Échec de l'écriture du fichier (${resp.code}) : $respBody"
+                "✅ $path envoyé."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur réseau : ${e.message}"
+        }
+    }
+
+    /**
+     * Active (ou met à jour) GitHub Pages pour [owner]/[repo], servi depuis [branch]/[path]
+     * (path = "/" pour la racine du dépôt). Gratuit, aucune clé API supplémentaire — juste le
+     * jeton GitHub déjà configuré par l'utilisateur. Renvoie l'URL publique du site en cas de
+     * succès (ex: https://login.github.io/repo/), ou un message d'erreur explicite sinon.
+     */
+    fun enablePages(context: Context, owner: String, repo: String, branch: String = "main", path: String = "/", accountLabel: String = ""): String {
+        val postBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/pages", accountLabel) ?: return NO_TOKEN
+        val bodyJson = JSONObject().put("source", JSONObject().put("branch", branch).put("path", path))
+        val body = bodyJson.toString().toRequestBody(JSON)
+        try {
+            client.newCall(postBuilder.post(body).build()).execute().use { resp ->
+                if (resp.code == 201) {
+                    val json = JSONObject(resp.body?.string() ?: "{}")
+                    return "✅ GitHub Pages activé : ${json.optString("html_url").ifBlank { "https://$owner.github.io/$repo/" }}"
+                }
+                if (resp.code != 409) {
+                    // 409 = déjà activé, on bascule sur une mise à jour (PUT) ci-dessous — tout
+                    // autre code est une vraie erreur qu'on remonte directement.
+                    val respBody = resp.body?.string() ?: ""
+                    return "❌ Échec de l'activation de GitHub Pages (${resp.code}) : $respBody"
+                }
+            }
+        } catch (e: Exception) {
+            return "❌ Erreur réseau lors de l'activation de GitHub Pages : ${e.message}"
+        }
+
+        // Déjà activé (409 ci-dessus) : on met à jour la source (branche/chemin) au cas où elle
+        // aurait changé, puis on relit l'URL publique existante.
+        val putBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/pages", accountLabel) ?: return NO_TOKEN
+        return try {
+            client.newCall(putBuilder.put(body).build()).execute().use { resp ->
+                if (!resp.isSuccessful && resp.code != 204) {
+                    val respBody = resp.body?.string() ?: ""
+                    return "❌ Échec de la mise à jour de GitHub Pages (${resp.code}) : $respBody"
+                }
+            }
+            val getBuilder = authBuilder(context, "https://api.github.com/repos/$owner/$repo/pages", accountLabel) ?: return NO_TOKEN
+            client.newCall(getBuilder.get().build()).execute().use { resp ->
+                if (!resp.isSuccessful) return "✅ GitHub Pages déjà actif sur https://$owner.github.io/$repo/ (URL exacte non confirmée : ${resp.code})."
+                val json = JSONObject(resp.body?.string() ?: "{}")
+                "✅ GitHub Pages actif : ${json.optString("html_url").ifBlank { "https://$owner.github.io/$repo/" }}"
+            }
+        } catch (e: Exception) {
+            "❌ Erreur réseau lors de la vérification de GitHub Pages : ${e.message}"
+        }
+    }
+
     /**
      * Diagnostic de permissions réel (lecture seule, n'écrit jamais rien) : vérifie que le
      * jeton est valide, puis, si owner/repo fournis, si le dépôt est visible et si le jeton

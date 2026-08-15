@@ -818,6 +818,25 @@ object JarvisCommandParser {
                     }
                 }
             }
+            "publish_website_github" -> {
+                // Si aucun chemin n'est fourni, publie le dernier site généré avec succès.
+                val path = json.optString("path", "").ifBlank {
+                    Prefs.getGenerationHistory(context)
+                        .firstOrNull { it.type in setOf("website", "website_edit") && it.status == "success" && !it.resultPath.isNullOrBlank() }
+                        ?.resultPath
+                }
+                val siteDir = path?.let { java.io.File(it).parentFile }
+                if (siteDir == null || !siteDir.exists()) {
+                    "❌ Aucun site généré à publier pour l'instant. Génère-en un d'abord avec generate_website."
+                } else {
+                    WebsiteGenController.publishToGitHub(
+                        context, siteDir,
+                        json.optString("repo", ""),
+                        json.optString("account", ""),
+                        json.optBoolean("private", false)
+                    ).message
+                }
+            }
 
             "ha_status" -> {
                 val domain = json.optString("domain", "")
