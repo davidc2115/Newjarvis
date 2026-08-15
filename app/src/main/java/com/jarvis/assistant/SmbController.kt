@@ -37,6 +37,42 @@ object SmbController {
 
     data class Result(val success: Boolean, val message: String, val localPath: String? = null)
 
+    /**
+     * Corrige le bug remonte par l'utilisateur : "impossible d'acceder au disque dur USB de
+     * la Freebox... alors que tout est bien active". Avant ce correctif, TOUTE exception (nom
+     * d'hote introuvable, mauvais identifiants, timeout reseau, acces refuse...) tombait dans
+     * le meme message generique "${e.message}" — qui vaut souvent "null" pour les exceptions
+     * jcifs-ng (SmbAuthException notamment), donc litteralement aucune info exploitable pour
+     * l'utilisateur ni pour diagnostiquer a distance. Distingue maintenant les causes les plus
+     * frequentes avec un conseil PRECIS pour chacune, au lieu d'un unique "verifie X/Y/Z" flou
+     * qui ne dit pas LEQUEL des trois est en cause.
+     */
+    private fun diagnoseSmbError(e: Exception, host: String, share: String): String {
+        val causeMsg = e.message ?: e.cause?.message
+        return when {
+            e is java.net.UnknownHostException -> "❌ Impossible de joindre « $host » : nom introuvable sur le réseau. " +
+                "Un nom comme \"Freebox_Server\" nécessite la résolution NetBIOS, pas toujours disponible sur Android — " +
+                "utilise plutôt l'ADRESSE IP LOCALE de la Freebox (ex: 192.168.1.254, visible dans Freebox OS → Réseau, " +
+                "ou via network_scan) avec smb_configure{host}."
+            e is java.net.ConnectException || e is java.net.SocketTimeoutException || e is java.net.NoRouteToHostException ->
+                "❌ Impossible de joindre « $host » sur le réseau (connexion refusée ou expirée). Vérifie que le téléphone " +
+                "est bien sur le MÊME réseau Wi-Fi que la Freebox (pas en 4G/5G, pas sur un Wi-Fi invité isolé), et que " +
+                "l'adresse « $host » est correcte."
+            e.javaClass.simpleName == "SmbAuthException" || (causeMsg?.contains("Logon failure", ignoreCase = true) == true) ||
+                (causeMsg?.contains("Access is denied", ignoreCase = true) == true) ->
+                "❌ Identifiants refusés pour « $share » sur $host. Le compte SMB doit être créé dans Freebox OS → " +
+                "Paramètres → Utilisateurs (PAS l'identifiant Freebox Connect), avec la case « Autoriser l'accès au " +
+                "stockage » cochée pour ce compte, puis reconfigure avec smb_configure{host,username,password}."
+            causeMsg?.contains("STATUS_BAD_NETWORK_NAME", ignoreCase = true) == true ||
+                causeMsg?.contains("does not specify a valid share", ignoreCase = true) == true ->
+                "❌ Le partage « $share » n'existe pas sur $host tel quel. Vérifie le nom EXACT du partage dans Freebox OS " +
+                "→ Mode disque dur (souvent le nom du disque, pas \"disque dur\" littéralement)."
+            else -> "❌ Impossible d'accéder à « $share » sur $host : ${causeMsg ?: e.javaClass.simpleName}. Vérifie que le " +
+                "partage réseau est activé (Freebox OS → Paramètres → Mode disque dur), que les identifiants sont corrects " +
+                "(smb_configure), et que le téléphone est sur le même réseau local que la Freebox."
+        }
+    }
+
     private fun authContext(context: Context): CIFSContext {
         val username = Prefs.getSmbUsername(context)
         val password = Prefs.getSmbPassword(context)
@@ -92,7 +128,7 @@ object SmbController {
             files.sortedBy { it.first }.forEach { (n, size) -> sb.append("📄 $n (${size} octets)\n") }
             sb.toString().trim()
         } catch (e: Exception) {
-            "❌ Impossible d'accéder à « $share » sur $host : ${e.message}. Vérifie que le partage réseau est activé (Freebox OS → Mode disque dur), que les identifiants sont corrects (smb_configure), et que le téléphone est sur le même réseau local que la Freebox."
+            diagnoseSmbError(e, host, share)
         }
     }
 
@@ -112,7 +148,7 @@ object SmbController {
             remote.inputStream.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
             Result(true, "✅ « $fileName » téléchargé depuis $host/$share.\n📁 Enregistré dans : ${destFile.absolutePath}", destFile.absolutePath)
         } catch (e: Exception) {
-            Result(false, "❌ Échec du téléchargement de « $share/${path.trim('/')} » : ${e.message}")
+            Result(false, diagnoseSmbError(e, host, share))
         }
     }
 }
