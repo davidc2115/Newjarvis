@@ -47,11 +47,11 @@ object PeopleController {
     // alors que les fiches existaient bel et bien. En centralisant la normalisation ici et en
     // l'appliquant À LA FOIS à l'écriture et à la lecture, save et recherche restent toujours
     // cohérents entre eux, quel que soit le mot exact employé par l'utilisateur/l'IA.
-    private fun normalizeCategory(raw: String): String {
+    private fun normalizeCategoryToken(raw: String): String? {
         val c = raw.lowercase().trim()
+        if (c.isBlank()) return null
         if (c in VALID_CATEGORIES) return c
         return when {
-            c.isBlank() -> "autre"
             c.contains("trav") || c.contains("pro") || c.contains("boulot") || c.contains("bureau") ||
                 c.contains("collèg") || c.contains("colleg") || c.contains("business") -> "travail"
             c.contains("perso") || c.contains("ami") -> "personnel"
@@ -60,6 +60,20 @@ object PeopleController {
             else -> "autre"
         }
     }
+
+    // Un contact peut appartenir à PLUSIEURS catégories à la fois (ex: "famille, travail") —
+    // demandé explicitement pour ne pas devoir choisir une seule étiquette par personne.
+    // Sépare sur virgule / slash / " et ", normalise chaque terme individuellement (sans
+    // jamais insérer "autre" pour un simple espace superflu entre séparateurs), déduplique
+    // en conservant l'ordre. Toujours au moins une catégorie en sortie ("autre" par défaut).
+    private fun normalizeCategories(raw: String): List<String> {
+        val tokens = raw.split(Regex("[,/]|\\bet\\b", RegexOption.IGNORE_CASE))
+            .mapNotNull { normalizeCategoryToken(it) }
+            .distinct()
+        return tokens.ifEmpty { listOf("autre") }
+    }
+
+    private fun normalizeCategory(raw: String): String = normalizeCategoryToken(raw) ?: "autre"
 
     private fun contactsFolder(context: Context): File =
         File(ObsidianController.getVaultRoot(context), "Contacts").also { it.mkdirs() }
@@ -200,7 +214,7 @@ object PeopleController {
     fun saveContact(
         context: Context,
         name: String,
-        category: String = "autre",
+        category: String? = null,
         nickname: String? = null,
         phone: String? = null,
         phonePro: String? = null,
@@ -217,7 +231,6 @@ object PeopleController {
     ): String {
         if (name.isBlank()) return "❌ Nom du contact manquant."
         if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
-        val cat = normalizeCategory(category)
 
         return try {
             val folder = contactsFolder(context)
@@ -228,6 +241,18 @@ object PeopleController {
             val file = findExactNameMatch(context, name) ?: File(folder, "${safeFileName(name)}.md")
             val existing = parseContactFile(file)
             val isUpdate = existing != null
+
+            // BUG RÉEL CORRIGÉ : quand save_contact_profile est rappelé pour compléter UNE
+            // seule info (ex: juste le téléphone) sans repréciser "category", le paramètre
+            // recevait par défaut la valeur "autre" côté appelant — qui était alors écrite
+            // TELLE QUELLE, effaçant silencieusement une catégorie correcte déjà enregistrée
+            // (ex: "famille" -> "autre" au prochain appel qui ne reparle pas de catégorie).
+            // C'était une cause directe de "catégorie introuvable ensuite". Comme les autres
+            // champs (nickname, phone, ...), la catégorie n'est désormais réécrite QUE si elle
+            // est explicitement fournie ; sinon celle déjà enregistrée est conservée. Accepte
+            // aussi plusieurs catégories à la fois (ex: "famille, travail").
+            val cat = if (category.isNullOrBlank()) (existing?.category ?: "autre")
+                else normalizeCategories(category).joinToString(", ")
             // Garde l'orthographe/casse d'origine si la fiche existait déjà, pour que le
             // titre de la note ne change pas d'un enregistrement à l'autre selon la façon
             // dont le nom a été prononcé/écrit cette fois-ci.
@@ -455,7 +480,7 @@ object PeopleController {
         val cat = normalizeCategory(raw)
 
         return files.mapNotNull { parseContactFile(it) }
-            .filter { all || it.category == cat }
+            .filter { all || it.category.split(",").map { c -> c.trim() }.contains(cat) }
             .map { ContactSummary(it.name, it.category, it.address, it.latitude, it.longitude) }
             .sortedBy { it.name }
     }
@@ -514,7 +539,7 @@ object PeopleController {
         val cat = normalizeCategory(raw)
 
         val contacts = files.mapNotNull { parseContactFile(it) }
-            .filter { all || it.category == cat }
+            .filter { all || it.category.split(",").map { c -> c.trim() }.contains(cat) }
             .sortedBy { it.name }
 
         if (contacts.isEmpty()) return "Aucun contact${if (!all) " dans la catégorie « $cat »" else ""}."
@@ -633,13 +658,17 @@ object PeopleController {
         }.trim()
     }
 
-    private fun categoryLabel(cat: String): String = when (cat) {
+    private fun singleCategoryLabel(cat: String): String = when (cat) {
         "travail" -> "travail"
         "personnel" -> "personnel"
         "famille" -> "famille"
         "client" -> "client"
         else -> "autre"
     }
+
+    /** [cat] peut contenir plusieurs catégories séparées par des virgules (ex: "famille, travail"). */
+    private fun categoryLabel(cat: String): String =
+        cat.split(",").map { it.trim() }.filter { it.isNotBlank() }.joinToString(" / ") { singleCategoryLabel(it) }
 
     private fun appendSummary(sb: StringBuilder, c: ContactNote) {
         sb.append("• ${c.name} (${categoryLabel(c.category)})")

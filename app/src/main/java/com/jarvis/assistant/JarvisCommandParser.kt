@@ -595,7 +595,7 @@ object JarvisCommandParser {
                 else PeopleController.saveContact(
                     context = context,
                     name = name,
-                    category = json.optString("category", "autre"),
+                    category = if (json.has("category")) cleanOptionalField(json.optString("category", "")) else null,
                     nickname = cleanOptionalField(json.optString("nickname", "")),
                     phone = cleanOptionalField(json.optString("phone", "")),
                     phonePro = cleanOptionalField(json.optString("phonePro", "")),
