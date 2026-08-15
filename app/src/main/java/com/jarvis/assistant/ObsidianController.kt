@@ -488,6 +488,54 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Move / rename note (deplacer un fichier vers un autre dossier du vault)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Déplace une note existante ([query], recherche floue par titre) vers [destinationFolder]
+     * (chemin relatif à la racine du vault, créé automatiquement s'il n'existe pas encore —
+     * même logique de nettoyage de chemin que createFolder). Gère les collisions de nom en
+     * ajoutant un suffixe numérique plutôt que d'écraser silencieusement une note existante.
+     */
+    fun moveNote(context: Context, query: String, destinationFolder: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        if (destinationFolder.isBlank()) return "❌ Précise le dossier de destination."
+        val file = findNote(context, query)
+            ?: return "❌ Note \"$query\" introuvable."
+        return try {
+            val root = getVaultRoot(context)
+            val safeFolder = destinationFolder.split("/", "\\").joinToString("/") { it.replace(Regex("[:*?\"<>|]"), "-").trim() }
+            val destDir = File(root, safeFolder)
+            if (!destDir.exists() && !destDir.mkdirs()) {
+                return "❌ Impossible de créer le dossier de destination « $safeFolder »."
+            }
+            if (destDir.parentFile?.exists() != true && destDir.absolutePath != root.absolutePath) {
+                // cas limite très improbable après mkdirs() ci-dessus, gardé par sécurité
+            }
+            var destFile = File(destDir, file.name)
+            var suffix = 1
+            while (destFile.exists() && destFile.absolutePath != file.absolutePath) {
+                destFile = File(destDir, "${file.nameWithoutExtension} (${++suffix}).md")
+            }
+            if (destFile.absolutePath == file.absolutePath) {
+                return "📁 **${file.nameWithoutExtension}** est déjà dans « $safeFolder »."
+            }
+            val moved = file.renameTo(destFile)
+            if (moved) {
+                "✅ Note **${file.nameWithoutExtension}** déplacée vers « $safeFolder »."
+            } else {
+                // renameTo peut échouer entre systèmes de fichiers différents (ex: stockage interne
+                // vers carte SD) — repli sur copie + suppression de l'original.
+                file.copyTo(destFile, overwrite = false)
+                file.delete()
+                "✅ Note **${file.nameWithoutExtension}** déplacée vers « $safeFolder »."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur lors du déplacement : ${e.message}"
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Open in Obsidian app
     // ─────────────────────────────────────────────────────────────────────────
 

@@ -717,6 +717,12 @@ object JarvisCommandParser {
                 if (query.isBlank()) "❌ Précise quelle note supprimer."
                 else ObsidianController.deleteNote(context, query)
             }
+            "obsidian_move_file" -> {
+                val query = json.optString("query", "").ifBlank { json.optString("file", "") }
+                val folder = json.optString("folder", "").ifBlank { json.optString("destination", "") }
+                if (query.isBlank() || folder.isBlank()) "❌ Précise quelle note déplacer ET le dossier de destination."
+                else ObsidianController.moveNote(context, query, folder)
+            }
 
             "generate_image" -> {
                 val prompt = json.optString("prompt", "")
