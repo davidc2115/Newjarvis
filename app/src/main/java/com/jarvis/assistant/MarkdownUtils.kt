@@ -86,16 +86,44 @@ object MarkdownUtils {
             lastEnd = match.range.last + 1
         }
         builder.append(text.substring(lastEnd))
+        // Adresses toujours actives (marqueur 🏠/🏗️ explicite posé par JARVIS lui-même =
+        // zéro faux positif possible, donc pas besoin de l'activation manuelle contrairement
+        // au numéro/email qui eux peuvent matcher du texte non voulu). Corrige le cas où
+        // l'utilisateur demande "rends les adresses cliquables" et que ça ne marchait pas car
+        // la fonctionnalité entière était encore désactivée par défaut.
+        val claimed = mutableListOf<IntRange>()
+        applyAddressLinks(builder, claimed)
         if (context != null && Prefs.isContactLinksEnabled(context)) {
-            applyContactLinks(builder)
+            applyContactLinks(builder, claimed)
         }
         return builder
     }
 
-    /** Rend cliquables les numéros de téléphone, emails et adresses détectés dans [builder]. */
-    private fun applyContactLinks(builder: SpannableStringBuilder) {
+    /** Rend cliquable toute adresse marquée 🏠/🏗️ par JARVIS (vers le GPS par défaut du téléphone). */
+    private fun applyAddressLinks(builder: SpannableStringBuilder, claimed: MutableList<IntRange>) {
         val text = builder.toString()
-        val claimed = mutableListOf<IntRange>()
+        fun isClaimed(range: IntRange) = claimed.any { it.first <= range.last && range.first <= it.last }
+        for (regex in listOf(addressColonRegex, addressInlineRegex)) {
+            for (match in regex.findAll(text)) {
+                val group = match.groups[1] ?: continue
+                val range = group.range
+                if (range.isEmpty() || isClaimed(range)) continue
+                claimed.add(range)
+                val address = group.value.trim()
+                builder.setSpan(object : ClickableSpan() {
+                    override fun onClick(widget: View) = LocationController.openMaps(widget.context, address)
+                    override fun updateDrawState(ds: TextPaint) {
+                        super.updateDrawState(ds)
+                        ds.isUnderlineText = true
+                    }
+                }, range.first, range.last + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+    }
+
+    /** Rend cliquables les numéros de téléphone et emails détectés dans [builder] — opt-in (Prefs.isContactLinksEnabled). */
+    private fun applyContactLinks(builder: SpannableStringBuilder, claimed: MutableList<IntRange>) {
+        val text = builder.toString()
         fun isClaimed(range: IntRange) = claimed.any { it.first <= range.last && range.first <= it.last }
 
         fun addClickSpan(range: IntRange, onClick: (View) -> Unit) {
@@ -107,17 +135,6 @@ object MarkdownUtils {
                     ds.isUnderlineText = true
                 }
             }, range.first, range.last + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-
-        // Adresses en premier (peuvent contenir des chiffres qu'on ne veut pas re-matcher comme téléphone).
-        for (regex in listOf(addressColonRegex, addressInlineRegex)) {
-            for (match in regex.findAll(text)) {
-                val group = match.groups[1] ?: continue
-                val range = group.range
-                if (range.isEmpty() || isClaimed(range)) continue
-                val address = group.value.trim()
-                addClickSpan(range) { view -> LocationController.openMaps(view.context, address) }
-            }
         }
 
         for (match in emailRegex.findAll(text)) {
