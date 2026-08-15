@@ -20,7 +20,7 @@ import java.util.Locale
  * Remplace l'ancienne version (un seul fichier HTML autonome) suite à la demande explicite de
  * l'utilisateur : "plusieurs pages séparées, animation, image". Le site est maintenant un
  * DOSSIER dans Documents/JARVIS-Sites/<nom>/ contenant :
- *   index.html, <autres-pages>.html, styles.css, script.js, images/*, site.json (métadonnées
+ *   index.html, <autres-pages>.html, styles.css, script.js, dossier images (une par photo), site.json (métadonnées
  *   utilisées par editWebsite pour savoir quelles pages/images existent déjà).
  *
  * Pipeline en plusieurs appels IA plutôt qu'un seul gros prompt monolithique :
