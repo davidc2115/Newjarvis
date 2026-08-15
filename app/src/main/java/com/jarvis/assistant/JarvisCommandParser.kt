@@ -358,6 +358,19 @@ object JarvisCommandParser {
             "enable_wifi" -> WifiController.enableWifi(context)
             "disable_wifi" -> WifiController.disableWifi(context)
 
+            "flashlight_on" -> DeviceControlController.setFlashlight(context, true)
+            "flashlight_off" -> DeviceControlController.setFlashlight(context, false)
+            "set_alarm" -> {
+                val hour = json.optInt("hour", -1)
+                val minute = json.optInt("minute", 0)
+                val message = json.optString("message", "")
+                val daysOfWeek = mutableListOf<Int>()
+                json.optJSONArray("daysOfWeek")?.let { arr -> for (i in 0 until arr.length()) daysOfWeek.add(arr.optInt(i)) }
+                if (hour < 0) "❌ Précise l'heure du réveil (hour, 0-23)."
+                else DeviceControlController.setAlarm(context, hour, minute, message, daysOfWeek)
+            }
+            "show_alarms" -> DeviceControlController.showAlarms(context)
+
             "web_search" -> {
                 val query = json.optString("query", "")
                 WebSearchController.search(context, query)
