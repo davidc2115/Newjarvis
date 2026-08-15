@@ -783,7 +783,14 @@ object JarvisCommandParser {
                 val description = json.optString("description", "").ifBlank { json.optString("prompt", "") }
                 if (description.isBlank()) "❌ Aucune description de site fournie."
                 else {
-                    GenerationService.enqueue(context, "website", description)
+                    // images : chemins de photos déjà envoyées par l'utilisateur dans le chat
+                    // (ou trouvées via list_files/search_files) à intégrer réellement dans le site.
+                    val images = mutableListOf<String>()
+                    json.optJSONArray("images")?.let { arr -> for (i in 0 until arr.length()) {
+                        val p = arr.optString(i, "")
+                        if (p.isNotBlank()) images.add(p)
+                    } }
+                    GenerationService.enqueue(context, "website", description, imagePaths = images.takeIf { it.isNotEmpty() })
                     "🌐 Génération du site lancée en arrière-plan. Une notification t'avertira " +
                         "dès que c'est prêt (ou en cas d'échec)."
                 }

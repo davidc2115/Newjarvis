@@ -41,6 +41,7 @@ class GenerationService : Service() {
         const val EXTRA_EXISTING_PATH = "existingPath"
         const val EXTRA_DURATION = "durationSeconds"
         const val EXTRA_BATCH_IDS = "batchIds"
+        const val EXTRA_IMAGE_PATHS = "imagePaths"
 
         private const val CHANNEL_ID = "jarvis_generation"
         private const val PROGRESS_NOTIF_ID = 501
@@ -53,7 +54,7 @@ class GenerationService : Service() {
          * visible immédiatement dans la carte de progression (⏳ Image 1/5, ⏳ Image 2/5...),
          * puis mises à jour une par une au fil de la génération.
          */
-        fun enqueue(context: Context, type: String, prompt: String, existingPath: String? = null, durationSeconds: Int? = null, count: Int = 1): String {
+        fun enqueue(context: Context, type: String, prompt: String, existingPath: String? = null, durationSeconds: Int? = null, count: Int = 1, imagePaths: List<String>? = null): String {
             if (type == "image" && count > 1) {
                 return enqueueImageBatch(context, prompt, count)
             }
@@ -68,6 +69,7 @@ class GenerationService : Service() {
                 putExtra(EXTRA_ID, id)
                 existingPath?.let { putExtra(EXTRA_EXISTING_PATH, it) }
                 durationSeconds?.let { putExtra(EXTRA_DURATION, it) }
+                imagePaths?.takeIf { it.isNotEmpty() }?.let { putExtra(EXTRA_IMAGE_PATHS, it.toTypedArray()) }
             }
             ContextCompat.startForegroundService(context, intent)
             return id
@@ -119,6 +121,7 @@ class GenerationService : Service() {
         val existingPath = intent?.getStringExtra(EXTRA_EXISTING_PATH)
         val durationSeconds = if (intent?.hasExtra(EXTRA_DURATION) == true) intent.getIntExtra(EXTRA_DURATION, VideoGenController.DEFAULT_DURATION_S) else null
         val batchIds = intent?.getStringArrayExtra(EXTRA_BATCH_IDS)
+        val imagePaths = intent?.getStringArrayExtra(EXTRA_IMAGE_PATHS)?.toList()
 
         if (type == null || prompt == null || id == null) {
             stopIfIdle()
@@ -132,7 +135,7 @@ class GenerationService : Service() {
             if (type == "image_batch" && batchIds != null) {
                 runImageBatchJob(prompt, batchIds.toList())
             } else {
-                runJob(id, type, prompt, existingPath, durationSeconds)
+                runJob(id, type, prompt, existingPath, durationSeconds, imagePaths)
             }
             if (activeJobs.decrementAndGet() <= 0) {
                 stopIfIdle()
@@ -193,7 +196,7 @@ class GenerationService : Service() {
         }
     }
 
-    private suspend fun runJob(id: String, type: String, prompt: String, existingPath: String?, durationSeconds: Int? = null) {
+    private suspend fun runJob(id: String, type: String, prompt: String, existingPath: String?, durationSeconds: Int? = null, imagePaths: List<String>? = null) {
         var success = false
         var message = "❌ Type de génération inconnu."
         var resultPath: String? = null
@@ -213,7 +216,7 @@ class GenerationService : Service() {
                     resultPath = r.localPath
                 }
                 "website" -> {
-                    val r = WebsiteGenController.generateWebsite(applicationContext, prompt)
+                    val r = WebsiteGenController.generateWebsite(applicationContext, prompt, imagePaths ?: emptyList())
                     success = r.success
                     message = r.message
                     resultPath = r.filePath
