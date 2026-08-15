@@ -39,6 +39,22 @@ class ObsidianActivity : AppCompatActivity() {
                 return@registerForActivityResult
             }
             val target = File(path)
+            // Refuse la racine ENTIÈRE du stockage interne comme "dossier vault" : un
+            // utilisateur qui confirme le sélecteur sans naviguer dans un sous-dossier
+            // précis pointe par erreur vers TOUT le stockage du téléphone — JARVIS créerait
+            // alors ses dossiers (Notes Rapides, Modèles...) directement à la racine visible,
+            // mélangés avec le reste des fichiers de l'utilisateur (bug déjà signalé).
+            val storageRootPath = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+            if (path.trimEnd('/').equals(storageRootPath, ignoreCase = true)) {
+                Toast.makeText(
+                    this,
+                    "❌ Ce dossier est la racine ENTIÈRE du stockage du téléphone, pas un vault précis. " +
+                        "Choisis (ou crée) un sous-dossier dédié, par exemple ton vault Obsidian existant " +
+                        "ou un nouveau dossier « JARVIS-Vault ». Vault inchangé.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@registerForActivityResult
+            }
             // Vérification concrète avant d'adopter ce chemin : on doit pouvoir au
             // moins créer/lister le dossier. Sans ce contrôle, un chemin mal calculé
             // (ex: carte SD) serait accepté silencieusement et JARVIS écrirait dans

@@ -48,13 +48,32 @@ object ObsidianController {
     // Vault root
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Corrige un bug signalé : après avoir choisi un dossier de vault via le sélecteur
+     * (⚙ → Obsidian), si le dossier confirmé était la racine ENTIÈRE du stockage interne
+     * (au lieu d'un sous-dossier précis du genre "JARVIS-Vault"), toutes les notes/dossiers
+     * créés (Notes Rapides, Modèles, Daily Notes...) atterrissaient directement à la racine
+     * visible du téléphone, mélangés avec le reste des fichiers de l'utilisateur — au lieu
+     * d'être proprement isolés dans un vault dédié. Garde-fou : si le chemin enregistré
+     * correspond exactement à la racine du stockage interne, on l'ignore et on revient
+     * automatiquement au vault par défaut (Documents/JARVIS-Vault), en corrigeant aussi la
+     * préférence enregistrée pour que ce ne soit pas juste un correctif silencieux ponctuel.
+     */
     fun getVaultRoot(context: Context): File {
-        val saved = Prefs.getObsidianVaultPath(context)
-        return if (saved.isNotBlank()) File(saved)
-        else File(
+        val defaultVault = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
             "JARVIS-Vault"
         )
+        val saved = Prefs.getObsidianVaultPath(context)
+        if (saved.isBlank()) return defaultVault
+        val storageRoot = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+        val normalizedSaved = saved.trimEnd('/')
+        if (normalizedSaved.equals(storageRoot, ignoreCase = true) || normalizedSaved.isEmpty() || normalizedSaved == "/") {
+            Log.w(TAG, "Vault path pointait vers la racine du stockage ($saved) — correction automatique vers le vault par défaut.")
+            Prefs.saveObsidianVaultPath(context, "")
+            return defaultVault
+        }
+        return File(saved)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
