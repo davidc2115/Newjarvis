@@ -44,7 +44,7 @@ object JarvisCommandParser {
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact",
-        "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "list_generations"
+        "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -429,6 +429,9 @@ object JarvisCommandParser {
             "github_list_repos" -> GitHubController.listRepos(context, json.optString("account", ""))
 
             "github_list_accounts" -> GitHubController.listAccounts(context)
+            "github_test_access" -> GitHubController.testAccess(
+                context, json.optString("owner", ""), json.optString("repo", ""), json.optString("account", "")
+            )
 
             "github_add_account" -> {
                 val label = json.optString("label", "")

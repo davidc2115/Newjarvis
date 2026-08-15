@@ -472,4 +472,90 @@ object GitHubController {
             "❌ Erreur réseau : ${e.message}"
         }
     }
+
+    /**
+     * Diagnostic de permissions réel (lecture seule, n'écrit jamais rien) : vérifie que le
+     * jeton est valide, puis, si owner/repo fournis, si le dépôt est visible et si le jeton
+     * a le droit d'écrire dessus. Répond à la plainte la plus fréquente ("aucune permission
+     * ?") avec la VRAIE cause plutôt qu'un échec silencieux :
+     *  - jeton absent/invalide/expiré (401 sur /user)
+     *  - dépôt introuvable (404) : soit le nom est faux, soit (cas le plus fréquent avec un
+     *    jeton fine-grained) le dépôt n'a jamais été ajouté à la liste des dépôts autorisés
+     *    pour ce jeton (GitHub renvoie volontairement 404 et jamais 403 dans ce cas précis,
+     *    pour ne pas révéler l'existence d'un dépôt privé à un jeton non autorisé)
+     *  - dépôt visible mais permissions.push = false : accès lecture seule (jeton classique
+     *    sans le scope repo complet, ou jeton fine-grained avec seulement Contents: Read-only)
+     */
+    fun testAccess(context: Context, owner: String, repo: String, accountLabel: String = ""): String {
+        val token = resolveToken(context, accountLabel)
+            ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
+
+        val sb = StringBuilder("🔍 Diagnostic GitHub :\n\n")
+
+        // 1) Le jeton lui-même est-il valide ?
+        val userReq = Request.Builder()
+            .url("https://api.github.com/user")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("Accept", "application/vnd.github+json")
+            .addHeader("X-GitHub-Api-Version", "2022-11-28")
+            .get().build()
+        var login = ""
+        try {
+            client.newCall(userReq).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return sb.append("❌ Jeton invalide ou expiré (code ${resp.code}). Régénère-le sur github.com puis remplace-le dans ⚙ -> Clés API -> Codage GitHub.").toString()
+                }
+                val json = JSONObject(resp.body?.string() ?: "{}")
+                login = json.optString("login", "?")
+                val scopes = resp.header("X-OAuth-Scopes")
+                sb.append("✅ Jeton valide, connecté en tant que $login")
+                if (!scopes.isNullOrBlank()) sb.append(" (scopes classiques : $scopes)")
+                sb.append(".\n")
+            }
+        } catch (e: Exception) {
+            return sb.append("❌ Erreur réseau en vérifiant le jeton : ${e.message}").toString()
+        }
+
+        if (owner.isBlank() || repo.isBlank()) {
+            sb.append("\nPrécise owner et repo pour vérifier l'accès à un dépôt précis.")
+            return sb.toString()
+        }
+
+        // 2) Ce dépôt précis est-il visible ET pilotable en écriture par ce jeton ?
+        val repoReq = Request.Builder()
+            .url("https://api.github.com/repos/$owner/$repo")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("Accept", "application/vnd.github+json")
+            .addHeader("X-GitHub-Api-Version", "2022-11-28")
+            .get().build()
+        try {
+            client.newCall(repoReq).execute().use { resp ->
+                when {
+                    resp.code == 404 -> sb.append(
+                        "\n❌ « $owner/$repo » : introuvable avec ce jeton (404). Soit le nom du dépôt est incorrect, " +
+                            "soit, si c'est un jeton fine-grained, ce dépôt précis n'a jamais été coché dans sa " +
+                            "liste de dépôts autorisés (github.com -> Settings -> Developer settings -> Fine-grained tokens " +
+                            "-> ton jeton -> Repository access). GitHub renvoie volontairement 404, jamais 403, dans ce cas."
+                    )
+                    !resp.isSuccessful -> sb.append("\n❌ « $owner/$repo » : erreur ${resp.code} en le consultant : ${resp.body?.string()}")
+                    else -> {
+                        val json = JSONObject(resp.body?.string() ?: "{}")
+                        val perms = json.optJSONObject("permissions")
+                        val canPush = perms?.optBoolean("push", false) ?: false
+                        val canPull = perms?.optBoolean("pull", true) ?: true
+                        val isPrivate = json.optBoolean("private", false)
+                        sb.append("\n✅ « $owner/$repo » visible (${if (isPrivate) "privé" else "public"}). ")
+                        sb.append(
+                            if (canPush) "✅ Écriture confirmée (create_file/delete_file/branches/PR vont fonctionner)."
+                            else if (canPull) "⚠️ Lecture seule : ce jeton peut lire ce dépôt mais pas y écrire. Jeton classique : il lui manque le scope repo complet (pas juste public_repo). Jeton fine-grained : régénère-le avec la permission Contents en Read and write pour ce dépôt."
+                            else "❌ Ni lecture ni écriture claire sur ce dépôt avec ce jeton."
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            sb.append("\n❌ Erreur réseau en testant l'accès au dépôt : ${e.message}")
+        }
+        return sb.toString()
+    }
 }
