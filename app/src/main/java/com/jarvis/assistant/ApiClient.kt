@@ -306,10 +306,22 @@ object ApiClient {
                 "Erreur : ${e.message}"
             }
 
+            // BUG RÉEL CORRIGÉ : sendClaudeWithRotation/sendGeminiWithRotation renvoient leurs
+            // propres messages d'échec final ("Toutes les clés API X ont échoué...", "Aucune
+            // clé API X configurée.") qui NE COMMENÇAIENT PAR AUCUN des préfixes reconnus
+            // ci-dessous — le mode Automatique les traitait donc comme une VRAIE réponse de
+            // l'IA et s'arrêtait là, sans jamais essayer les fournisseurs suivants (OpenAI,
+            // Mistral... jusqu'à Pollinations en dernier recours). Cas réel observé : toutes
+            // les clés Gemini en quota dépassé (429) → l'utilisateur voyait littéralement
+            // "Toutes les clés API Gemini ont échoué" affiché comme réponse de JARVIS, alors
+            // que d'autres fournisseurs configurés (voire le filet de secours gratuit) auraient
+            // pu répondre à sa place.
             if (!result.startsWith("Erreur") &&
                 !result.startsWith("Connexion impossible") &&
                 !result.startsWith("Format de réponse inattendu") &&
-                !result.startsWith("Clé API")
+                !result.startsWith("Clé API") &&
+                !result.startsWith("Toutes les clés") &&
+                !result.startsWith("Aucune clé API")
             ) {
                 return result
             }
@@ -584,12 +596,19 @@ object ApiClient {
         val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
         if (keys.isEmpty()) return "Aucune clé API Gemini configurée."
 
+        // Garde le détail RÉEL de la dernière erreur (ex: "429" quota dépassé) au lieu d'un
+        // message générique "toutes les clés ont échoué" qui masquait la vraie cause — corrigé
+        // suite à un cas réel où TOUTES les clés Gemini d'un utilisateur renvoyaient 429 à cause
+        // d'un modèle Preview au quota gratuit trop restrictif, sans qu'aucun message ne le
+        // dise explicitement.
+        var lastDetail = ""
         for (apiKey in keys) {
             val res = sendGemini(Provider.GEMINI.defaultBaseUrl, apiKey, history, systemPrompt)
             if (!res.startsWith("Erreur API Gemini (429)") && !res.startsWith("Erreur API Gemini (401)")) return res
+            lastDetail = res
             Prefs.markKeyFailed(context, Provider.GEMINI, apiKey)
         }
-        return "Toutes les clés API Gemini ont échoué."
+        return "Toutes les clés API Gemini ont échoué (${keys.size} clé(s) testée(s)) — dernière erreur : $lastDetail"
     }
 
     private fun sendGemini(baseUrl: String, apiKey: String, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
