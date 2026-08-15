@@ -48,7 +48,7 @@ object ChartController {
      * [type] accepte : "bar"/"barres", "line"/"courbe"/"ligne", "pie"/"camembert"/"secteurs".
      * [dataCsv] : une ligne par point "étiquette;valeur".
      */
-    fun generateChart(type: String, title: String, dataCsv: String): Result {
+    fun generateChart(context: Context, type: String, title: String, dataCsv: String): Result {
         val points = dataCsv.split("\n")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
@@ -97,6 +97,9 @@ object ChartController {
             val safeTitle = title.take(40).replace(Regex("[/\\\\:*?\"<>|]"), "-").trim().ifBlank { "graphique" }
             val file = File(dir, "${fileDateFormat.format(Date())}_$safeTitle.png")
             file.writeBytes(bytes)
+            try {
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
+            } catch (e: Exception) { /* non bloquant */ }
             file.absolutePath
         } catch (e: Exception) {
             null

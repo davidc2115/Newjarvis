@@ -514,6 +514,14 @@ object ImageGenController {
             val fileName = "${fileDateFormat.format(Date())}_$safePrompt.png"
             val file = File(dir, fileName)
             file.writeBytes(bytes)
+            // BUG REEL CORRIGE : ecrire via File/writeBytes n'informe pas MediaStore -- l'image
+            // existe bien sur le disque mais restait invisible dans Galerie/Photos tant qu'un
+            // scan media spontane n'avait pas lieu (meme correctif applique dans
+            // JarvisCommandParser.logFileRecord pour les fichiers bureautiques). On declenche
+            // l'indexation tout de suite, sans attendre.
+            try {
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
+            } catch (e: Exception) { /* non bloquant */ }
             file.absolutePath
         } catch (e: Exception) {
             "(échec de la sauvegarde locale : ${e.message})"

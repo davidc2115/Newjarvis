@@ -1,6 +1,7 @@
 package com.jarvis.assistant
 
 import android.content.Context
+import android.media.MediaScannerConnection
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.File
@@ -1189,7 +1190,7 @@ object JarvisCommandParser {
                     context,
                     Prefs.GenerationRecord(id = recordId, type = "chart", prompt = title.ifBlank { "Graphique" }, status = "pending", timestamp = System.currentTimeMillis())
                 )
-                val result = ChartController.generateChart(type, title, data)
+                val result = ChartController.generateChart(context, type, title, data)
                 Prefs.updateGenerationRecord(context, recordId) { record ->
                     record.copy(
                         status = if (result.success) "success" else "failed",
@@ -1302,6 +1303,31 @@ object JarvisCommandParser {
                 timestamp = System.currentTimeMillis(), resultPath = path, errorMessage = if (!success) message else null
             )
         )
+        // BUG RÉEL CORRIGÉ : create_pdf/create_docx/create_xlsx/create_zip écrivaient le fichier
+        // avec l'API File/FileOutputStream classique, qui écrit bien sur le disque mais
+        // N'INFORME PAS MediaStore (l'index utilisé par l'appli Fichiers, un sélecteur de
+        // fichier, etc.) — résultat : le fichier existe réellement sur le téléphone, JARVIS
+        // répond correctement "fichier créé", mais il reste invisible dans l'appli Fichiers/
+        // Documents tant qu'un scan média n'a pas eu lieu (peut prendre très longtemps, ou ne
+        // jamais arriver spontanément pour un dossier peu consulté). MediaScannerConnection.
+        // scanFile déclenche cette indexation immédiatement après l'écriture, sans attendre.
+        if (success && !path.isNullOrBlank()) {
+            notifyMediaScanner(context, path)
+        }
+    }
+
+    /**
+     * Déclenche immédiatement l'indexation MediaStore d'un fichier tout juste écrit sur le
+     * stockage partagé (Documents/Pictures/...), pour qu'il apparaisse sans délai dans
+     * l'appli Fichiers, un sélecteur de fichier, ou toute appli tierce qui liste via
+     * MediaStore plutôt qu'en lisant le système de fichiers brut.
+     */
+    fun notifyMediaScanner(context: Context, path: String) {
+        try {
+            MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
+        } catch (e: Exception) {
+            // Non bloquant : le fichier existe déjà sur le disque même si l'indexation échoue.
+        }
     }
 
     fun cleanResponse(llmResponse: String): String {
