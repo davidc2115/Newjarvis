@@ -598,12 +598,48 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // Internal helper — find note by partial name
     // ─────────────────────────────────────────────────────────────────────────
 
+    // BUG RÉEL CORRIGÉ : findNote() ne comparait "query" QU'au titre du fichier, en exigeant
+    // que la requête entière soit un sous-texte CONTIGU du nom de fichier. Deux conséquences
+    // très fréquentes en usage réel : (1) les notes rapides sont créées avec un titre généré
+    // automatiquement ("Note rapide 14:32") qui ne contient jamais le sujet réel de la note —
+    // toute relecture/suppression/déplacement ultérieure par sujet ("ma note sur les
+    // fournisseurs") échouait donc systématiquement alors que la note existait bien ; (2) la
+    // formulation de la requête ne correspond presque jamais mot pour mot au titre exact
+    // choisi lors de la création (ordre des mots différent, accents, un mot en plus/en moins).
+    // Résultat : JARVIS annonçait "introuvable" pour des notes bel et bien présentes dans le
+    // vault. Correction en 3 passes, de la plus précise à la plus tolérante, qui reproduit
+    // exactement la logique déjà utilisée par searchNotes (titre PUIS contenu), avec un
+    // dernier repli par mots-clés pour survivre aux reformulations :
+    //   1. sous-texte contigu dans le TITRE (comportement d'origine, le plus précis)
+    //   2. sous-texte contigu dans le CONTENU (couvre les notes au titre générique/daté)
+    //   3. TOUS les mots significatifs de la requête retrouvés (titre + contenu confondus),
+    //      pour tolérer un ordre des mots ou une formulation différente de celle d'origine
+    // À égalité de correspondance, la note modifiée le plus récemment est privilégiée.
     private fun findNote(context: Context, query: String): File? {
         val root  = getVaultRoot(context)
-        val lower = query.lowercase()
-        return root.walkTopDown()
+        val lower = query.lowercase().trim()
+        if (lower.isBlank()) return null
+        val candidates = root.walkTopDown()
             .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
-            .firstOrNull { it.nameWithoutExtension.lowercase().contains(lower) }
+            .toList()
+
+        candidates.firstOrNull { it.nameWithoutExtension.lowercase().contains(lower) }
+            ?.let { return it }
+
+        candidates
+            .filter { runCatching { it.readText() }.getOrDefault("").lowercase().contains(lower) }
+            .maxByOrNull { it.lastModified() }
+            ?.let { return it }
+
+        val words = lower.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 3 }
+        if (words.isEmpty()) return null
+        return candidates
+            .filter { file ->
+                val haystack = (file.nameWithoutExtension + " " + runCatching { file.readText() }.getOrDefault(""))
+                    .lowercase()
+                words.all { haystack.contains(it) }
+            }
+            .maxByOrNull { it.lastModified() }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

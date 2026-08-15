@@ -36,6 +36,31 @@ object PeopleController {
     private val VALID_CATEGORIES = setOf("travail", "personnel", "famille", "client", "autre")
     private val updatedFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
 
+    // BUG RÉEL CORRIGÉ : la catégorie était forcée à "autre" dès qu'elle ne correspondait pas
+    // MOT POUR MOT à une des 5 valeurs de VALID_CATEGORIES (ex: "professionnel", "boulot",
+    // "collègue", "ami" étaient tous silencieusement rangés dans "autre" à l'enregistrement).
+    // Pire : la LECTURE (getContactsByCategory / listByCategory) comparait le paramètre
+    // "category" reçu de l'IA à cette même liste stricte SANS repasser par cette normalisation
+    // — donc même quand l'IA redemandait avec un mot légèrement différent de celui utilisé à
+    // l'enregistrement (ex: sauvegardé sous "travail" mais recherché comme "professionnel"),
+    // le filtre ne trouvait rien et JARVIS répondait "aucun contact dans cette catégorie",
+    // alors que les fiches existaient bel et bien. En centralisant la normalisation ici et en
+    // l'appliquant À LA FOIS à l'écriture et à la lecture, save et recherche restent toujours
+    // cohérents entre eux, quel que soit le mot exact employé par l'utilisateur/l'IA.
+    private fun normalizeCategory(raw: String): String {
+        val c = raw.lowercase().trim()
+        if (c in VALID_CATEGORIES) return c
+        return when {
+            c.isBlank() -> "autre"
+            c.contains("trav") || c.contains("pro") || c.contains("boulot") || c.contains("bureau") ||
+                c.contains("collèg") || c.contains("colleg") || c.contains("business") -> "travail"
+            c.contains("perso") || c.contains("ami") -> "personnel"
+            c.contains("famil") -> "famille"
+            c.contains("client") -> "client"
+            else -> "autre"
+        }
+    }
+
     private fun contactsFolder(context: Context): File =
         File(ObsidianController.getVaultRoot(context), "Contacts").also { it.mkdirs() }
 
@@ -192,7 +217,7 @@ object PeopleController {
     ): String {
         if (name.isBlank()) return "❌ Nom du contact manquant."
         if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
-        val cat = category.lowercase().trim().let { if (it in VALID_CATEGORIES) it else "autre" }
+        val cat = normalizeCategory(category)
 
         return try {
             val folder = contactsFolder(context)
@@ -425,8 +450,9 @@ object PeopleController {
         if (!PermissionsManager.hasManageStoragePermission()) return emptyList()
         val folder = contactsFolder(context)
         val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
-        val cat = category.lowercase().trim()
-        val all = cat.isBlank() || cat == "tous" || cat == "tout"
+        val raw = category.lowercase().trim()
+        val all = raw.isBlank() || raw == "tous" || raw == "tout"
+        val cat = normalizeCategory(raw)
 
         return files.mapNotNull { parseContactFile(it) }
             .filter { all || it.category == cat }
@@ -483,8 +509,9 @@ object PeopleController {
         if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val folder = contactsFolder(context)
         val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
-        val cat = category.lowercase().trim()
-        val all = cat.isBlank() || cat == "tous" || cat == "tout"
+        val raw = category.lowercase().trim()
+        val all = raw.isBlank() || raw == "tous" || raw == "tout"
+        val cat = normalizeCategory(raw)
 
         val contacts = files.mapNotNull { parseContactFile(it) }
             .filter { all || it.category == cat }
