@@ -40,8 +40,8 @@ enum class Provider(
     ),
     GEMINI(
         "Google Gemini",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent",
-        "gemini-2.0-flash-lite"
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
+        "gemini-3.1-pro-preview"
     ),
     MISTRAL(
         "Mistral AI",
@@ -73,6 +73,18 @@ enum class Provider(
         "https://serpapi.com/search",
         "",
         needsApiKey = true
+    ),
+    // Pollinations.ai (text.pollinations.ai/openai, endpoint compatible OpenAI) : IA de secours
+    // GRATUITE et SANS AUCUNE CLÉ (accès anonyme officiel, cf. https://github.com/pollinations/pollinations/blob/master/APIDOCS.md),
+    // placée en tout dernier recours dans AUTO_FALLBACK_ORDER ci-dessous — même logique que AI Horde
+    // pour les images (voir ImageGenController) : ça garantit que le mode Automatique répond TOUJOURS,
+    // même si l'utilisateur n'a configuré aucune clé API. Contrepartie honnête : service communautaire
+    // tiers, limité à 1 requête/15s en anonyme et moins fiable qu'un fournisseur avec clé dédiée.
+    POLLINATIONS(
+        "Pollinations (gratuit, sans clé, dernier recours)",
+        "https://text.pollinations.ai/openai",
+        "openai",
+        needsApiKey = false
     ),
 
     // ── IA sur réseau local (PC) ──────────────────────────────────────────────
@@ -115,7 +127,7 @@ enum class Provider(
     /** Fournisseurs cloud éligibles au mode Automatique, par ordre de préférence. */
     companion object {
         val AUTO_FALLBACK_ORDER = listOf(
-            GROQ, CLAUDE, OPENAI, GEMINI, MISTRAL, DEEPSEEK, PERPLEXITY, TOGETHER, OPENROUTER
+            GROQ, GEMINI, CLAUDE, OPENAI, MISTRAL, DEEPSEEK, PERPLEXITY, TOGETHER, OPENROUTER, POLLINATIONS
         )
 
         /** Tous les providers cloud qui acceptent une clé API individuelle. */

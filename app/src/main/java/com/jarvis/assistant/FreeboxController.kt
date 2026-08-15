@@ -396,8 +396,8 @@ object FreeboxController {
         val (ok, json) = authedRequest(context, "POST", "fw/redir/", body) ?: return "❌ Freebox injoignable."
         if (!ok) return "❌ Erreur lors de la création de la redirection de port : ${json.optString("msg", json.optString("error_code", "inconnue"))}"
 
-        val (okStatus, statusJson) = authedRequest(context, "GET", "connection/")
-        val publicIp = if (okStatus) statusJson.optJSONObject("result")?.optString("ipv4", "") ?: "" else ""
+        val statusPair = authedRequest(context, "GET", "connection/")
+        val publicIp = if (statusPair != null && statusPair.first) statusPair.second.optJSONObject("result")?.optString("ipv4", "") ?: "" else ""
 
         val sb = StringBuilder("✅ Redirection de port créée sur la Freebox : le port public $wanPort pointe maintenant vers ce téléphone ($lanIp:$lanPort).\n")
         if (publicIp.isNotBlank()) sb.append("🌍 Accessible depuis internet : http://$publicIp:$wanPort/\n")

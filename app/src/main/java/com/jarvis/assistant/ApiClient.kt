@@ -273,8 +273,15 @@ object ApiClient {
     // ─── Mode Automatique avec multi-clés + sélection intelligente ────────────
 
     private fun sendAuto(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
+        // Un fournisseur est candidat s'il a au moins une clé configurée, OU s'il ne nécessite
+        // aucune clé (ex: POLLINATIONS, filet de secours gratuit/anonyme placé en dernier dans
+        // AUTO_FALLBACK_ORDER) — avant ce correctif, needsApiKey=false n'était vérifié nulle part
+        // ici, donc un fournisseur sans clé n'apparaissait JAMAIS dans les candidats malgré sa
+        // présence dans l'ordre de repli, et le mode Automatique échouait immédiatement si
+        // l'utilisateur n'avait configuré aucune clé — alors qu'un vrai filet de secours gratuit
+        // existe désormais et devrait toujours être tenté en dernier recours.
         val candidates = Provider.AUTO_FALLBACK_ORDER.filter {
-            Prefs.getApiKeysFor(context, it).isNotEmpty()
+            !it.needsApiKey || Prefs.getApiKeysFor(context, it).isNotEmpty()
         }
 
         if (candidates.isEmpty()) {
