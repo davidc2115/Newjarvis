@@ -319,6 +319,21 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "✅ Freebox enregistrée.", Toast.LENGTH_LONG).show()
         }
 
+        // ── DuckDNS (voir DuckDnsController) — nom de domaine gratuit pour héberger
+        // un site JARVIS directement depuis ce téléphone.
+        val duckdnsDomainInput = findViewById<EditText>(R.id.duckdnsDomainInput)
+        val duckdnsTokenInput  = findViewById<EditText>(R.id.duckdnsTokenInput)
+        val saveDuckDnsButton  = findViewById<TextView>(R.id.saveDuckDnsButton)
+
+        duckdnsDomainInput.setText(Prefs.getDuckDnsDomain(this))
+        duckdnsTokenInput.setText(Prefs.getDuckDnsToken(this))
+
+        saveDuckDnsButton.setOnClickListener {
+            Prefs.saveDuckDnsDomain(this, duckdnsDomainInput.text.toString().trim())
+            Prefs.saveDuckDnsToken(this, duckdnsTokenInput.text.toString().trim())
+            Toast.makeText(this, "✅ DuckDNS enregistré.", Toast.LENGTH_LONG).show()
+        }
+
         // ── Cartes dynamiques de modèles ──────────────────────────────────────
         modelCardsContainer.removeAllViews()
         ModelDownloader.MODEL_CATALOG.forEachIndexed { index, entry ->

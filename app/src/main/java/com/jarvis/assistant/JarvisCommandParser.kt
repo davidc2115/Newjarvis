@@ -1018,6 +1018,32 @@ object JarvisCommandParser {
                 }
             }
 
+            "duckdns_status" -> DuckDnsController.status(context)
+            "duckdns_update" -> DuckDnsController.updateIp(context)
+
+            "start_local_web_server" -> {
+                val path = json.optString("path", "").ifBlank {
+                    Prefs.getGenerationHistory(context)
+                        .firstOrNull { it.type in setOf("website", "website_edit") && it.status == "success" && !it.resultPath.isNullOrBlank() }
+                        ?.resultPath
+                }
+                val siteDir = path?.let { java.io.File(it).parentFile }
+                if (siteDir == null || !siteDir.exists()) {
+                    "❌ Aucun site généré à héberger pour l'instant. Génère-en un d'abord avec generate_website."
+                } else {
+                    LocalWebServerController.start(context, siteDir, json.optInt("port", 8080))
+                }
+            }
+            "stop_local_web_server" -> LocalWebServerController.stop(context)
+            "local_web_server_status" -> LocalWebServerController.status(context)
+
+            "port_forward_freebox" -> {
+                val wanPort = json.optInt("wanPort", json.optInt("port", 8080))
+                val lanPort = json.optInt("lanPort", wanPort)
+                FreeboxController.configurePortForward(context, wanPort, lanPort, json.optString("comment", "Site JARVIS"))
+            }
+            "remove_port_forward_freebox" -> FreeboxController.removePortForward(context, json.optInt("wanPort", json.optInt("port", 8080)))
+
             "test_api_keys" -> ApiKeyTestController.testAllConfiguredKeys(context)
 
             "set_chat_theme" -> {

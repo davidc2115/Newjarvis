@@ -824,6 +824,27 @@ object Prefs {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // DUCKDNS (nom de domaine gratuit + mise a jour d'IP, pour heberger un site
+    // genere par JARVIS directement depuis le telephone). Le jeton DuckDNS n'est
+    // JAMAIS code en dur dans le code source (depot public) : uniquement saisi
+    // ici via l'ecran Parametres, comme pour les autres cles/jetons de l'app.
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getDuckDnsDomain(context: Context): String =
+        prefs(context).getString("duckdns_domain", "") ?: ""
+
+    fun saveDuckDnsDomain(context: Context, domain: String) {
+        prefs(context).edit().putString("duckdns_domain", domain.trim().lowercase().removeSuffix(".duckdns.org")).apply()
+    }
+
+    fun getDuckDnsToken(context: Context): String =
+        prefs(context).getString("duckdns_token", "") ?: ""
+
+    fun saveDuckDnsToken(context: Context, token: String) {
+        prefs(context).edit().putString("duckdns_token", token.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // HISTORIQUE DES GÉNÉRATIONS (image / vidéo / site web)
     // ═════════════════════════════════════════════════════════════════════════
 

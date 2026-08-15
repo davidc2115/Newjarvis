@@ -649,6 +649,94 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- DuckDNS — nom de domaine gratuit pour heberger un site JARVIS directement
+                 depuis le telephone (voir DuckDnsController + LocalWebServerController). -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🦆 DuckDNS (nom de domaine gratuit)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Pour héberger un site généré par JARVIS directement depuis ce téléphone, avec une adresse stable même si ton IP change. Crée un compte gratuit sur duckdns.org (connexion via GitHub/Google/Twitter), crée un sous-domaine, puis colle-le ici avec ton jeton (token). Gratuit, sans carte bancaire. Ce jeton reste stocké uniquement sur ce téléphone."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sous-domaine"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/duckdnsDomainInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="ex : monjarvis (sans .duckdns.org)"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Token"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/duckdnsTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="jeton affiché en haut de ta page duckdns.org"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/saveDuckDnsButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="ENREGISTRER DUCKDNS"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Une fois enregistré, demande à JARVIS : « publie mon site en local avec DuckDNS », « mets à jour mon adresse DuckDNS », « où en est mon hébergement local »."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp" />
         </LinearLayout>
 
 

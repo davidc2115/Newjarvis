@@ -151,6 +151,7 @@ object FreeboxController {
             when (method) {
                 "PUT" -> builder.put((jsonBody ?: JSONObject()).toString().toRequestBody(JSON))
                 "POST" -> builder.post((jsonBody ?: JSONObject()).toString().toRequestBody(JSON))
+                "DELETE" -> builder.delete()
                 else -> builder.get()
             }
             return builder.build()
@@ -332,5 +333,96 @@ object FreeboxController {
         val (okSet, setJson) = authedRequest(context, "PUT", "home/endpoints/$nodeId/$epId/", body) ?: return "❌ Freebox injoignable."
         if (!okSet) return "❌ Erreur lors du contrôle de « $device » : ${setJson.optString("msg", "inconnue")}"
         return "✅ « $device » : commande envoyée (${if (boolValue != null) (if (boolValue) "activé" else "désactivé") else "valeur $numValue"}, type $valueType)."
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Redirection de port (fw/redir/) — expose un service tournant sur ce téléphone
+    // (voir LocalWebServerController) au reste d'internet via la Freebox, gratuit,
+    // sans aucun tiers. Combiné à DuckDnsController pour une adresse stable.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Adresse IPv4 locale du téléphone sur le réseau actuel, ou null si indisponible. */
+    private fun localIpAddress(): String? {
+        return try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                if (!iface.isUp || iface.isLoopback) continue
+                val addresses = iface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) return addr.hostAddress
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Crée (ou remplace) une redirection de port sur la Freebox : le trafic entrant sur
+     * [wanPort] (port public, vu depuis internet) est redirigé vers [lanPort] sur ce
+     * téléphone. Nécessaire pour qu'un serveur local (LocalWebServerController) soit
+     * accessible depuis l'extérieur du réseau, pas seulement en Wi-Fi local.
+     */
+    suspend fun configurePortForward(context: Context, wanPort: Int, lanPort: Int, comment: String = "Site JARVIS"): String {
+        if (!isConfigured(context)) return notConfiguredMessage()
+        val lanIp = localIpAddress()
+            ?: return "❌ Impossible de déterminer l'adresse IP locale du téléphone (es-tu bien connecté au Wi-Fi de cette Freebox ?)."
+
+        // Liste les redirections existantes pour éviter les doublons sur le même port WAN.
+        val (okList, listJson) = authedRequest(context, "GET", "fw/redir/") ?: return "❌ Freebox injoignable."
+        if (okList) {
+            val existing = listJson.optJSONArray("result") ?: JSONArray()
+            for (i in 0 until existing.length()) {
+                val redir = existing.optJSONObject(i) ?: continue
+                if (redir.optInt("wan_port_start") == wanPort) {
+                    val id = redir.optInt("id", -1)
+                    if (id >= 0) authedRequest(context, "DELETE", "fw/redir/$id/")
+                }
+            }
+        }
+
+        val body = JSONObject().apply {
+            put("enabled", true)
+            put("ip_proto", "tcp")
+            put("wan_port_start", wanPort)
+            put("wan_port_end", wanPort)
+            put("lan_port", lanPort)
+            put("lan_ip", lanIp)
+            put("comment", comment)
+        }
+        val (ok, json) = authedRequest(context, "POST", "fw/redir/", body) ?: return "❌ Freebox injoignable."
+        if (!ok) return "❌ Erreur lors de la création de la redirection de port : ${json.optString("msg", json.optString("error_code", "inconnue"))}"
+
+        val (okStatus, statusJson) = authedRequest(context, "GET", "connection/")
+        val publicIp = if (okStatus) statusJson.optJSONObject("result")?.optString("ipv4", "") ?: "" else ""
+
+        val sb = StringBuilder("✅ Redirection de port créée sur la Freebox : le port public $wanPort pointe maintenant vers ce téléphone ($lanIp:$lanPort).\n")
+        if (publicIp.isNotBlank()) sb.append("🌍 Accessible depuis internet : http://$publicIp:$wanPort/\n")
+        if (DuckDnsController.isConfigured(context)) {
+            sb.append("🦆 Ou via ton adresse DuckDNS (une fois à jour avec duckdns_update) : http://${DuckDnsController.fullDomain(context)}:$wanPort/")
+        }
+        return sb.toString().trim()
+    }
+
+    /** Supprime la redirection de port créée pour [wanPort], si elle existe. */
+    suspend fun removePortForward(context: Context, wanPort: Int): String {
+        if (!isConfigured(context)) return notConfiguredMessage()
+        val (okList, listJson) = authedRequest(context, "GET", "fw/redir/") ?: return "❌ Freebox injoignable."
+        if (!okList) return "❌ Erreur Freebox : ${listJson.optString("msg", "inconnue")}"
+        val existing = listJson.optJSONArray("result") ?: JSONArray()
+        for (i in 0 until existing.length()) {
+            val redir = existing.optJSONObject(i) ?: continue
+            if (redir.optInt("wan_port_start") == wanPort) {
+                val id = redir.optInt("id", -1)
+                if (id >= 0) {
+                    val (ok, delJson) = authedRequest(context, "DELETE", "fw/redir/$id/") ?: return "❌ Freebox injoignable."
+                    return if (ok) "🗑 Redirection du port $wanPort supprimée." else "❌ Erreur : ${delJson.optString("msg", "inconnue")}"
+                }
+            }
+        }
+        return "ℹ️ Aucune redirection trouvée pour le port $wanPort."
     }
 }
