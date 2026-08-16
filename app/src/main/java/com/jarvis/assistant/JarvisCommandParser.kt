@@ -986,29 +986,7 @@ object JarvisCommandParser {
             "network_scan" -> {
                 val devices = NetworkController.scanNetwork(context)
                 Prefs.saveScannedDevices(context, devices)
-                val sb = StringBuilder(NetworkController.formatScanResult(devices))
-
-                // Détection automatique du fournisseur de box (voir user request : plus de
-                // formulaire manuel, la configuration se déclenche depuis un scan réseau).
-                val detectedVendor = NetworkController.detectBoxVendor(context)
-                if (detectedVendor != null) {
-                    val alreadyConfigured = RouterController.isConfigured(context)
-                    val vendorChanged = Prefs.getBoxVendor(context) != detectedVendor
-                    Prefs.saveBoxVendor(context, detectedVendor)
-                    val label = RouterController.vendorLabel(context)
-                    if (!alreadyConfigured || vendorChanged) {
-                        sb.append("\n\n📡 Box détectée sur ce réseau : $label.")
-                        if (detectedVendor == "FREEBOX") {
-                            sb.append(" Lance box_pair_freebox pour l'appairer (demande sur l'écran de la Freebox).")
-                        } else {
-                            sb.append(" Demande le mot de passe admin de la box à l'utilisateur (visible sous la box), puis appelle box_set_password{password} avec sa réponse.")
-                        }
-                    }
-                } else if (!RouterController.isConfigured(context)) {
-                    sb.append("\n\nℹ️ Fournisseur de box non identifié automatiquement (SSID non reconnu, ou position/Wi-Fi désactivés) — demande à l'utilisateur quel fournisseur il utilise (Freebox/Livebox/SFR Box/Bbox) puis appelle box_set_vendor{vendor} avec sa réponse.")
-                }
-
-                sb.toString()
+                NetworkController.formatScanResult(devices)
             }
             "network_ping" -> {
                 val device = json.optString("device", "").ifBlank { json.optString("name", "") }
@@ -1043,12 +1021,12 @@ object JarvisCommandParser {
             }
 
             // Box internet unifiée (Freebox / Livebox / SFR Box / Bbox). Configuration
-            // automatique (voir network_scan ci-dessous et RouterController) : plus de
-            // formulaire manuel dans les Réglages — le fournisseur est détecté via le SSID
-            // Wi-Fi lors d'un scan réseau, la Freebox s'appaire toute seule (demande sur son
-            // écran physique), les 3 autres fournisseurs demandent leur mot de passe admin en
-            // conversation (voir box_set_password). Certaines capacités (stockage, redirection
-            // de ports) ne sont pas disponibles partout — RouterController le signale honnêtement.
+            // conversationnelle, sans formulaire dans les Réglages : pour la Freebox, appelle
+            // directement box_pair_freebox (demande d'autorisation affichée sur son écran
+            // physique). Pour les 3 autres fournisseurs, demande le mot de passe admin en
+            // conversation puis appelle box_set_password (voir plus bas). Certaines capacités
+            // (stockage, redirection de ports) ne sont pas disponibles partout — RouterController
+            // le signale honnêtement.
             "box_status" -> RouterController.status(context)
             "box_devices" -> RouterController.listDevices(context)
             "box_wifi_status" -> RouterController.wifiStatus(context)
@@ -1062,14 +1040,12 @@ object JarvisCommandParser {
             }
             "box_remove_port_forward" -> RouterController.removePortForward(context, json.optInt("wanPort", json.optInt("port", 8080)))
 
-            // Configuration automatique de la box (voir network_scan pour la détection du
-            // fournisseur via SSID). box_set_password : pour Livebox/SFR Box/Bbox uniquement
-            // (pas d'écran de confirmation physique sur ces box, contrairement à la Freebox) —
-            // appelée juste après avoir demandé le mot de passe admin en conversation.
-            // box_set_vendor : repli quand la détection auto par SSID échoue (SSID non
-            // reconnu, ou position/Wi-Fi désactivés) — l'utilisateur précise lui-même son
-            // fournisseur en conversation. vendor accepte freebox/livebox/sfr/bbox (insensible
-            // à la casse, variantes comme "orange"/"bouygues" acceptées).
+            // box_set_vendor : l'utilisateur précise son fournisseur en conversation (ex: "j'ai
+            // une Livebox") — vendor accepte freebox/livebox/sfr/bbox (insensible à la casse,
+            // variantes comme "orange"/"bouygues" acceptées). box_set_password : pour Livebox/
+            // SFR Box/Bbox uniquement (pas d'écran de confirmation physique sur ces box,
+            // contrairement à la Freebox) — appelée juste après avoir demandé le mot de passe
+            // admin en conversation.
             "box_set_vendor" -> {
                 val raw = json.optString("vendor", "").lowercase().trim()
                 val code = when {

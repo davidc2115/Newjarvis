@@ -66,8 +66,7 @@ object FreeboxController {
         Prefs.getFreeboxAppId(context).isNotBlank() && Prefs.getFreeboxAppToken(context).isNotBlank()
 
     private fun notConfiguredMessage(): String =
-        "❌ Freebox non appairée. Lance un scan réseau (network_scan) pour la détecter automatiquement, " +
-            "ou appelle directement box_pair_freebox — une demande d'autorisation apparaîtra sur l'écran de la Freebox."
+        "❌ Freebox non appairée. Appelle box_pair_freebox — une demande d'autorisation apparaîtra sur l'écran de la Freebox."
 
     // ─────────────────────────────────────────────────────────────────────────
     // Appairage self-service (login/authorize/) — remplace la saisie manuelle d'app_id/
@@ -78,7 +77,13 @@ object FreeboxController {
     //     -> {app_token, track_id} (app_token pas encore valide tant que non "granted")
     //  2) L'écran LCD de la Freebox affiche la demande, l'utilisateur valide dessus.
     //  3) GET login/authorize/{track_id}/ jusqu'à status != "pending" (granted/denied/
-    //     timeout/unknown) — polling en arrière-plan, ne bloque jamais la conversation.
+    //     timeout/unknown).
+    //
+    // La découverte (api_version) et la requête POST initiale sont faites en SYNCHRONE
+    // (le message renvoyé dans le chat reflète immédiatement un éventuel échec réel, avec
+    // le code HTTP et le message d'erreur exact renvoyés par la Freebox — pas de message
+    // générique "ça a échoué" sans détail). Seule l'ATTENTE de la validation sur l'écran
+    // (jusqu'à 90s) tourne en arrière-plan, avec notification à l'issue.
     // ─────────────────────────────────────────────────────────────────────────
 
     private const val PAIRING_APP_ID = "fr.jarvis.assistant"
@@ -89,60 +94,91 @@ object FreeboxController {
 
     private val pairingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    fun startPairing(context: Context): String {
+    suspend fun startPairing(context: Context): String = withContext(Dispatchers.IO) {
         if (isConfigured(context)) {
-            return "ℹ️ La Freebox est déjà appairée. Si tu veux la ré-appairer (ex: après une réinitialisation de mot de passe admin), dis-le explicitement."
+            return@withContext "ℹ️ La Freebox est déjà appairée. Si tu veux la ré-appairer (ex: après une réinitialisation de mot de passe admin), dis-le explicitement."
         }
+
+        val host = Prefs.getFreeboxHost(context).trimEnd('/')
+        val apiBase = try {
+            getApiBase(context)
+        } catch (e: Exception) {
+            return@withContext "❌ Erreur pendant la découverte de l'API Freebox ($host) : ${e.message}"
+        }
+        if (apiBase == null) {
+            return@withContext "❌ Freebox injoignable à l'adresse $host/api_version. Vérifie que le téléphone est bien connecté au Wi-Fi de la Freebox (pas un autre réseau), et que $host s'ouvre bien dans un navigateur sur ce téléphone."
+        }
+
+        val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Téléphone JARVIS" }
+        val requestBody = JSONObject().apply {
+            put("app_id", PAIRING_APP_ID)
+            put("app_name", PAIRING_APP_NAME)
+            put("app_version", PAIRING_APP_VERSION)
+            put("device_name", deviceName)
+        }
+        val authReq = Request.Builder()
+            .url("${apiBase}login/authorize/")
+            .post(requestBody.toString().toRequestBody(JSON))
+            .build()
+
+        data class AuthOutcome(val token: String?, val trackId: Int, val httpCode: Int, val errorDetail: String?)
+
+        val outcome = try {
+            client.newCall(authReq).execute().use { resp ->
+                val body = resp.body?.string() ?: ""
+                if (!resp.isSuccessful) {
+                    AuthOutcome(null, -1, resp.code, body.take(200).ifBlank { "réponse vide" })
+                } else {
+                    val json = try { JSONObject(body) } catch (e: Exception) {
+                        return@use AuthOutcome(null, -1, resp.code, "réponse non-JSON : ${body.take(200)}")
+                    }
+                    if (!json.optBoolean("success", false)) {
+                        val errorCode = json.optString("error_code", "")
+                        val msg = json.optString("msg", "")
+                        AuthOutcome(null, -1, resp.code, listOf(errorCode, msg).filter { it.isNotBlank() }.joinToString(" — ").ifBlank { "raison inconnue" })
+                    } else {
+                        val result = json.optJSONObject("result")
+                        val token = result?.optString("app_token", "")
+                        val id = result?.optInt("track_id", -1) ?: -1
+                        if (token.isNullOrBlank() || id < 0) {
+                            AuthOutcome(null, -1, resp.code, "réponse « success » mais sans app_token/track_id exploitable : ${body.take(200)}")
+                        } else {
+                            AuthOutcome(token, id, resp.code, null)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            return@withContext "❌ Erreur réseau pendant la demande d'appairage vers $apiBase : ${e.javaClass.simpleName} — ${e.message}"
+        }
+
+        if (outcome.token == null) {
+            return@withContext "❌ La Freebox a refusé la demande d'appairage (HTTP ${outcome.httpCode} — ${outcome.errorDetail}). " +
+                "Causes fréquentes : une demande d'appairage précédente est encore affichée sur l'écran de la Freebox (annule-la puis réessaie), " +
+                "ou l'ajout de nouvelles applications est désactivé (Freebox OS -> Paramètres -> Gestion des accès -> Applications)."
+        }
+
+        val appToken = outcome.token
+        val trackId = outcome.trackId
         pairingScope.launch {
-            runPairing(context.applicationContext)
+            pollPairing(context.applicationContext, apiBase, trackId, appToken)
         }
-        return "📟 Demande d'appairage envoyée à ta Freebox — regarde son écran (façade LCD) et valide la demande « $PAIRING_APP_NAME » dans les ~90 secondes. Je te préviens par notification dès que c'est fait."
+        "📟 Demande d'appairage envoyée à ta Freebox — regarde son écran (façade LCD) et valide la demande « $PAIRING_APP_NAME » dans les ~90 secondes. Je te préviens par notification dès que c'est fait."
     }
 
-    private suspend fun runPairing(appContext: Context) = withContext(Dispatchers.IO) {
+    private suspend fun pollPairing(appContext: Context, apiBase: String, trackId: Int, appToken: String) = withContext(Dispatchers.IO) {
         try {
-            val apiBase = getApiBase(appContext)
-            if (apiBase == null) {
-                notifyPairingResult(appContext, false, "Freebox injoignable (vérifie que le téléphone est bien sur le Wi-Fi de la Freebox).")
-                return@withContext
-            }
-
-            val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Téléphone JARVIS" }
-            val requestBody = JSONObject().apply {
-                put("app_id", PAIRING_APP_ID)
-                put("app_name", PAIRING_APP_NAME)
-                put("app_version", PAIRING_APP_VERSION)
-                put("device_name", deviceName)
-            }
-            val authReq = Request.Builder()
-                .url("${apiBase}login/authorize/")
-                .post(requestBody.toString().toRequestBody(JSON))
-                .build()
-
-            val pairResult = client.newCall(authReq).execute().use { resp ->
-                val body = resp.body?.string() ?: return@use null
-                val json = JSONObject(body)
-                if (!json.optBoolean("success", false)) return@use null
-                val result = json.optJSONObject("result") ?: return@use null
-                val token = result.optString("app_token", "")
-                val id = result.optInt("track_id", -1)
-                if (token.isBlank() || id < 0) null else Pair(token, id)
-            }
-            if (pairResult == null) {
-                notifyPairingResult(appContext, false, "La Freebox a refusé la demande d'appairage (réponse invalide).")
-                return@withContext
-            }
-            val appToken = pairResult.first
-            val trackId = pairResult.second
-
             var status = "pending"
+            var lastHttpCode = 0
             var attempts = 0
             while (status == "pending" && attempts < 60) {
                 delay(2000)
                 attempts++
                 val trackReq = Request.Builder().url("${apiBase}login/authorize/$trackId/").get().build()
                 status = client.newCall(trackReq).execute().use { resp ->
+                    lastHttpCode = resp.code
                     val body = resp.body?.string() ?: return@use "unknown"
+                    if (!resp.isSuccessful) return@use "unknown"
                     JSONObject(body).optJSONObject("result")?.optString("status", "unknown") ?: "unknown"
                 }
             }
@@ -154,11 +190,12 @@ object FreeboxController {
                     notifyPairingResult(appContext, true, "Freebox appairée avec succès — JARVIS peut maintenant la piloter (état, Wi-Fi, appareils, redémarrage).")
                 }
                 "denied" -> notifyPairingResult(appContext, false, "Demande d'appairage refusée sur l'écran de la Freebox.")
-                "timeout", "pending" -> notifyPairingResult(appContext, false, "Délai d'appairage dépassé (personne n'a validé sur l'écran de la Freebox à temps) — réessaie avec box_pair_freebox.")
-                else -> notifyPairingResult(appContext, false, "Statut d'appairage inattendu : $status")
+                "timeout" -> notifyPairingResult(appContext, false, "Délai d'appairage dépassé (personne n'a validé sur l'écran de la Freebox à temps) — réessaie avec box_pair_freebox.")
+                "pending" -> notifyPairingResult(appContext, false, "Toujours en attente après 2 minutes (HTTP $lastHttpCode) — réessaie avec box_pair_freebox si l'écran de la Freebox n'affiche plus la demande.")
+                else -> notifyPairingResult(appContext, false, "Statut d'appairage inattendu : « $status » (HTTP $lastHttpCode).")
             }
         } catch (e: Exception) {
-            notifyPairingResult(appContext, false, "Erreur réseau pendant l'appairage : ${e.message}")
+            notifyPairingResult(appContext, false, "Erreur réseau pendant l'attente de validation : ${e.javaClass.simpleName} — ${e.message}")
         }
     }
 

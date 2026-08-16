@@ -459,7 +459,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Détection et configuration automatiques (Freebox, Livebox, SFR Box, Bbox) : dis à JARVIS « scanne le réseau » ou touche le bouton ci-dessous. La Freebox s'appaire directement sur son écran ; les autres box te demandent leur mot de passe admin en conversation."
+                android:text="Pour une Freebox : touche le bouton ci-dessous, une demande d'autorisation apparaîtra directement sur l'écran de la Freebox (valide-la dans les ~90 secondes). Pour Livebox, SFR Box ou Bbox (pas d'écran de confirmation possible) : dis simplement à JARVIS quel fournisseur tu utilises, il te demandera le mot de passe admin en conversation."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp"
@@ -479,7 +479,7 @@
                 android:id="@+id/rescanBoxButton"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:text="🔍 SCANNER LE RÉSEAU"
+                android:text="🔌 APPAIRER MA FREEBOX"
                 android:textColor="@color/background_dark"
                 android:textStyle="bold"
                 android:gravity="center"

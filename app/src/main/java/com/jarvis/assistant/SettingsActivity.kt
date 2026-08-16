@@ -280,41 +280,33 @@ class SettingsActivity : AppCompatActivity() {
         picovoiceKeyInput.setText(Prefs.getPicovoiceKey(this))
         updateWakeWordButtonLabel(toggleWakeWordButton)
 
-        // ── Box internet (voir RouterController) — configuration désormais automatique :
-        // plus de formulaire manuel. Le fournisseur est détecté via le SSID Wi-Fi lors d'un
-        // scan réseau (dis à JARVIS « scanne le réseau »), la Freebox s'appaire directement
-        // depuis son écran physique, les autres fournisseurs (Livebox/SFR Box/Bbox) demandent
-        // leur mot de passe admin en conversation. Cette section n'affiche que l'état actuel.
+        // ── Box internet (voir RouterController). Pour la Freebox : appairage direct
+        // depuis ce bouton (demande d'autorisation affichée sur l'écran de la Freebox). Pour
+        // les autres fournisseurs (Livebox/SFR Box/Bbox, pas d'écran de confirmation possible),
+        // configuration en conversation avec JARVIS (précise le fournisseur puis son mot de
+        // passe admin). Cette section affiche l'état actuel.
         val boxStatusText = findViewById<TextView>(R.id.boxStatusText)
-        val rescanBoxButton = findViewById<TextView>(R.id.rescanBoxButton)
+        val pairFreeboxButton = findViewById<TextView>(R.id.rescanBoxButton)
 
         fun refreshBoxStatus() {
             val vendor = RouterController.vendorLabel(this)
             boxStatusText.text = if (RouterController.isConfigured(this)) {
                 "✅ $vendor configurée et opérationnelle."
             } else {
-                "ℹ️ Aucune box configurée pour l'instant. Dis à JARVIS « scanne le réseau » (ou touche le bouton ci-dessous) pour la détecter automatiquement."
+                "ℹ️ Aucune box configurée pour l'instant. Si tu as une Freebox, touche le bouton ci-dessous. Sinon, dis à JARVIS quel fournisseur tu utilises (Livebox/SFR Box/Bbox)."
             }
         }
         refreshBoxStatus()
 
-        rescanBoxButton.setOnClickListener {
-            rescanBoxButton.isEnabled = false
+        pairFreeboxButton.setOnClickListener {
+            pairFreeboxButton.isEnabled = false
             CoroutineScope(Dispatchers.Main).launch {
                 val message = withContext(Dispatchers.IO) {
-                    val devices = NetworkController.scanNetwork(applicationContext)
-                    Prefs.saveScannedDevices(applicationContext, devices)
-                    val vendor = NetworkController.detectBoxVendor(applicationContext)
-                    if (vendor != null) {
-                        Prefs.saveBoxVendor(applicationContext, vendor)
-                        "📡 Box détectée : ${RouterController.vendorLabel(applicationContext)}."
-                    } else {
-                        "ℹ️ Fournisseur non identifié automatiquement (SSID renommé, ou position/Wi-Fi désactivés) — précise-le à JARVIS en conversation."
-                    }
+                    FreeboxController.startPairing(applicationContext)
                 }
                 Toast.makeText(this@SettingsActivity, message, Toast.LENGTH_LONG).show()
                 refreshBoxStatus()
-                rescanBoxButton.isEnabled = true
+                pairFreeboxButton.isEnabled = true
             }
         }
 
