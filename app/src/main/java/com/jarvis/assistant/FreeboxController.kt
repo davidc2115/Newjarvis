@@ -22,7 +22,7 @@ import javax.crypto.spec.SecretKeySpec
  * Authentification par app_token (obtenu une fois pour toutes lors de l'appairage
  * de l'application "JARVIS Assistant" avec la Freebox, cf. Freebox OS -> Paramètres
  * -> Gestion des accès -> Applications) : JAMAIS codé en dur ici, uniquement lu
- * depuis Prefs (saisi par l'utilisateur dans ⚙ -> Domotique -> Freebox), pour ne
+ * depuis Prefs (saisi par l'utilisateur dans ⚙ -> 📡 Box/Écoute -> Freebox OS), pour ne
  * jamais exposer ce jeton dans le code source (dépôt GitHub public).
  *
  * Flux d'authentification (documentation officielle https://dev.freebox.fr/sdk/os/login/) :
@@ -58,7 +58,7 @@ object FreeboxController {
         Prefs.getFreeboxAppId(context).isNotBlank() && Prefs.getFreeboxAppToken(context).isNotBlank()
 
     private fun notConfiguredMessage(): String =
-        "❌ Freebox non configurée. Renseigne dans ⚙ -> Domotique -> Freebox : l'app_id et l'app_token " +
+        "❌ Freebox non configurée. Renseigne dans ⚙ -> 📡 Box/Écoute -> Freebox OS : l'app_id et l'app_token " +
             "obtenus lors de l'appairage de l'application avec ta Freebox (Freebox OS -> Paramètres -> " +
             "Gestion des accès -> Applications autorisées)."
 

@@ -198,7 +198,7 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
-                android:text="🎙️ Écoute"
+                android:text="📡 Box/Écoute"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"

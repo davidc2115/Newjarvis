@@ -72,6 +72,30 @@ object DeviceControlController {
             context.startActivity(intent)
             val heureStr = "%02d:%02d".format(hour, minute)
             "⏰ Réveil réglé à $heureStr${if (message.isNotBlank()) " (« $message »)" else ""}."
+        } catch (e: SecurityException) {
+            // BUG RÉEL CORRIGÉ : sur certains ROM/OEM, com.android.deskclock exige la
+            // permission custom com.android.alarm.permission.SET_ALARM en plus de la
+            // permission standard SET_ALARM (déjà déclarées toutes les deux dans le
+            // manifest) — mais si l'appli a été installée AVANT cet ajout au manifest,
+            // Android ne réévalue les permissions qu'à la réinstallation, pas à la simple
+            // mise à jour. On retente ici en ouvrant directement l'appli Horloge (sans
+            // skipUi) plutôt que de relayer tel quel le message technique "Permission
+            // Denial" illisible pour l'utilisateur.
+            try {
+                val fallback = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+                    putExtra(AlarmClock.EXTRA_HOUR, hour)
+                    putExtra(AlarmClock.EXTRA_MINUTES, minute)
+                    putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+                    if (message.isNotBlank()) putExtra(AlarmClock.EXTRA_MESSAGE, message)
+                    if (daysOfWeek.isNotEmpty()) putExtra(AlarmClock.EXTRA_DAYS, ArrayList(daysOfWeek))
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(fallback)
+                val heureStr = "%02d:%02d".format(hour, minute)
+                "⏰ J'ouvre l'appli Horloge pour confirmer le réveil de $heureStr — la création silencieuse est bloquée par une restriction de ce téléphone (réinstalle l'app si ça persiste, Android ne prend parfois en compte une nouvelle permission qu'après une réinstallation complète)."
+            } catch (e2: Exception) {
+                "❌ Impossible de créer le réveil : ton téléphone bloque cette action (permission manquante). Réinstalle l'app JARVIS pour appliquer la permission nécessaire, ou crée le réveil manuellement dans ton appli Horloge."
+            }
         } catch (e: Exception) {
             "❌ Échec de la création du réveil : ${e.message}"
         }

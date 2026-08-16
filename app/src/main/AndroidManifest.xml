@@ -78,6 +78,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.SET_ALARM" />
+    <!-- BUG RÉEL CORRIGÉ : sur certains ROM/OEM, com.android.deskclock.HandleSetAlarmActivity
+         exige EN PLUS cette permission custom (distincte de la permission standard ci-dessus)
+         pour accepter l'intent ACTION_SET_ALARM — sans elle, l'appel échouait avec
+         "Permission Denial: ... requires com.android.alarm.permission.SET_ALARM" alors même
+         que la permission standard était bien déclarée. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
