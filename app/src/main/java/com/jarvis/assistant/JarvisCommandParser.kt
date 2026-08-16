@@ -1032,12 +1032,25 @@ object JarvisCommandParser {
                 result.message
             }
 
-            // Freebox OS — accès complet lecture/écriture (réseau, Wi-Fi, domotique
-            // Freebox Home). Voir FreeboxController pour le détail de l'authentification.
-            "freebox_status" -> FreeboxController.status(context)
-            "freebox_devices" -> FreeboxController.listDevices(context, json.optString("filter", ""))
-            "freebox_wifi_status" -> FreeboxController.wifiStatus(context)
-            "freebox_wifi_set" -> FreeboxController.wifiSet(context, json.optBoolean("enable", true))
+            // Box internet unifiée (Freebox / Livebox / SFR Box / Bbox selon Prefs.getBoxVendor(),
+            // choisi par l'utilisateur dans ⚙ -> 📡 Box Internet). Voir RouterController pour le
+            // détail des capacités par fournisseur (certaines, comme le stockage ou la redirection
+            // de ports, ne sont pas disponibles partout — RouterController le signale honnêtement).
+            "box_status" -> RouterController.status(context)
+            "box_devices" -> RouterController.listDevices(context)
+            "box_wifi_status" -> RouterController.wifiStatus(context)
+            "box_wifi_set" -> RouterController.wifiSet(context, json.optBoolean("enable", true))
+            "box_reboot" -> RouterController.reboot(context)
+            "box_storage" -> RouterController.storageInfo(context)
+            "box_port_forward" -> {
+                val wanPort = json.optInt("wanPort", json.optInt("port", 8080))
+                val lanPort = json.optInt("lanPort", wanPort)
+                RouterController.configurePortForward(context, wanPort, lanPort, json.optString("comment", "Site JARVIS"))
+            }
+            "box_remove_port_forward" -> RouterController.removePortForward(context, json.optInt("wanPort", json.optInt("port", 8080)))
+
+            // Freebox Home (domotique : capteurs, prises, volets Delta/Pop...) — reste
+            // spécifique à la Freebox, aucun autre fournisseur n'a d'équivalent matériel.
             "freebox_home_devices" -> FreeboxController.homeDevices(context, json.optString("filter", ""))
             "freebox_home_set" -> {
                 val device = json.optString("device", "")
@@ -1067,13 +1080,6 @@ object JarvisCommandParser {
             }
             "stop_local_web_server" -> LocalWebServerController.stop(context)
             "local_web_server_status" -> LocalWebServerController.status(context)
-
-            "port_forward_freebox" -> {
-                val wanPort = json.optInt("wanPort", json.optInt("port", 8080))
-                val lanPort = json.optInt("lanPort", wanPort)
-                FreeboxController.configurePortForward(context, wanPort, lanPort, json.optString("comment", "Site JARVIS"))
-            }
-            "remove_port_forward_freebox" -> FreeboxController.removePortForward(context, json.optInt("wanPort", json.optInt("port", 8080)))
 
             "test_api_keys" -> ApiKeyTestController.testAllConfiguredKeys(context)
 

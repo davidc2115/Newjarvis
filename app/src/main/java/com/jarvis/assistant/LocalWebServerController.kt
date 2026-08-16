@@ -37,9 +37,9 @@ object LocalWebServerController {
         if (DuckDnsController.isConfigured(context)) {
             sb.append("\n🦆 DuckDNS configuré (${DuckDnsController.fullDomain(context)}) : ")
             sb.append("utilise duckdns_update pour pointer ce nom vers ton IP publique actuelle, ")
-            sb.append("puis configure une redirection de port sur ta Freebox (port_forward_freebox) pour un accès depuis l'extérieur.")
+            sb.append("puis configure une redirection de port sur ta box (box_port_forward) pour un accès depuis l'extérieur.")
         } else {
-            sb.append("\n💡 Pour un accès depuis l'extérieur (pas seulement ton Wi-Fi), configure DuckDNS dans ⚙ Paramètres, puis une redirection de port sur ta Freebox.")
+            sb.append("\n💡 Pour un accès depuis l'extérieur (pas seulement ton Wi-Fi), configure DuckDNS dans ⚙ Paramètres, puis une redirection de port sur ta box.")
         }
         return sb.toString()
     }

@@ -300,23 +300,61 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
 
-        // ── Freebox OS (voir FreeboxController) — accès complet lecture/écriture,
-        // distinct du partage SMB ci-dessus qui ne donne accès qu'aux fichiers.
+        // ── Box internet unifiée (voir RouterController) — Freebox, Livebox (Orange),
+        // SFR Box ou Bbox (Bouygues) selon le fournisseur choisi ici. Distinct du partage
+        // SMB ci-dessus qui ne donne accès qu'aux fichiers.
+        val boxVendorSpinner     = findViewById<Spinner>(R.id.boxVendorSpinner)
+        val freeboxFieldsGroup   = findViewById<LinearLayout>(R.id.freeboxFieldsGroup)
+        val boxFieldsGroup       = findViewById<LinearLayout>(R.id.boxFieldsGroup)
         val freeboxHostInput     = findViewById<EditText>(R.id.freeboxHostInput)
         val freeboxAppIdInput    = findViewById<EditText>(R.id.freeboxAppIdInput)
         val freeboxAppTokenInput = findViewById<EditText>(R.id.freeboxAppTokenInput)
-        val saveFreeboxButton    = findViewById<TextView>(R.id.saveFreeboxButton)
+        val boxHostInput         = findViewById<EditText>(R.id.boxHostInput)
+        val boxPasswordInput     = findViewById<EditText>(R.id.boxPasswordInput)
+        val saveBoxButton        = findViewById<TextView>(R.id.saveBoxButton)
+
+        val boxVendorCodes = listOf("FREEBOX", "LIVEBOX", "SFR", "BBOX")
+        val boxVendorLabels = listOf("Freebox", "Livebox (Orange)", "SFR Box", "Bbox (Bouygues)")
+        boxVendorSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, boxVendorLabels)
+
+        fun updateBoxFieldsVisibility(vendorCode: String) {
+            val isFreebox = vendorCode == "FREEBOX"
+            freeboxFieldsGroup.visibility = if (isFreebox) View.VISIBLE else View.GONE
+            boxFieldsGroup.visibility = if (isFreebox) View.GONE else View.VISIBLE
+        }
 
         freeboxHostInput.setText(Prefs.getFreeboxHost(this))
         freeboxAppIdInput.setText(Prefs.getFreeboxAppId(this))
         freeboxAppTokenInput.setText(Prefs.getFreeboxAppToken(this))
+        boxHostInput.setText(Prefs.getBoxHost(this, ""))
+        boxPasswordInput.setText(Prefs.getBoxPassword(this))
 
-        saveFreeboxButton.setOnClickListener {
-            val host = freeboxHostInput.text.toString().trim()
-            Prefs.saveFreeboxHost(this, if (host.isBlank()) "http://mafreebox.freebox.fr" else host)
-            Prefs.saveFreeboxAppId(this, freeboxAppIdInput.text.toString().trim())
-            Prefs.saveFreeboxAppToken(this, freeboxAppTokenInput.text.toString().trim())
-            Toast.makeText(this, "✅ Freebox enregistrée.", Toast.LENGTH_LONG).show()
+        val savedVendor = Prefs.getBoxVendor(this)
+        boxVendorSpinner.setSelection(boxVendorCodes.indexOf(savedVendor).let { if (it >= 0) it else 0 })
+        updateBoxFieldsVisibility(savedVendor)
+
+        boxVendorSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateBoxFieldsVisibility(boxVendorCodes[position])
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        saveBoxButton.setOnClickListener {
+            val vendorCode = boxVendorCodes[boxVendorSpinner.selectedItemPosition]
+            Prefs.saveBoxVendor(this, vendorCode)
+            if (vendorCode == "FREEBOX") {
+                val host = freeboxHostInput.text.toString().trim()
+                Prefs.saveFreeboxHost(this, if (host.isBlank()) "http://mafreebox.freebox.fr" else host)
+                Prefs.saveFreeboxAppId(this, freeboxAppIdInput.text.toString().trim())
+                Prefs.saveFreeboxAppToken(this, freeboxAppTokenInput.text.toString().trim())
+                Toast.makeText(this, "✅ Freebox enregistrée.", Toast.LENGTH_LONG).show()
+            } else {
+                Prefs.saveBoxHost(this, boxHostInput.text.toString().trim())
+                Prefs.saveBoxPassword(this, boxPasswordInput.text.toString())
+                val label = boxVendorLabels[boxVendorCodes.indexOf(vendorCode)]
+                Toast.makeText(this, "✅ $label enregistrée.", Toast.LENGTH_LONG).show()
+            }
         }
 
         // ── DuckDNS (voir DuckDnsController) — nom de domaine gratuit pour héberger

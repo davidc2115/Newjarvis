@@ -55,6 +55,13 @@ object RouterController {
         Vendor.BBOX -> BboxController.wifiSet(context, enable)
     }
 
+    /** Seule la Freebox expose un endpoint dedie a l'etat Wi-Fi seul (SSID, canal...) ;
+     * pour les autres fournisseurs on retombe honnetement sur le statut general. */
+    suspend fun wifiStatus(context: Context): String = when (vendor(context)) {
+        Vendor.FREEBOX -> FreeboxController.wifiStatus(context)
+        else -> status(context) + "\n\nℹ️ L'état Wi-Fi détaillé (SSID, canal...) n'est pas disponible séparément pour ${vendorLabel(context)} — état général de la box ci-dessus."
+    }
+
     suspend fun listDevices(context: Context): String = when (vendor(context)) {
         Vendor.FREEBOX -> FreeboxController.listDevices(context)
         Vendor.LIVEBOX -> LiveboxController.listDevices(context)
