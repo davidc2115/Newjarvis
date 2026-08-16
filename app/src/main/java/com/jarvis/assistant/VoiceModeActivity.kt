@@ -68,9 +68,9 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Même style d'orbe partout : mode vocal manuel (bouton micro) et
         // détection par mot d'activation affichent désormais exactement la même
         // animation, pilotée uniquement par la préférence utilisateur.
-        orbView.visualStyle = if (Prefs.getOrbStyle(this) == "PULSE") {
-            OrbView.VisualStyle.PULSE
-        } else {
+        orbView.visualStyle = try {
+            OrbView.VisualStyle.valueOf(Prefs.getOrbStyle(this))
+        } catch (e: IllegalArgumentException) {
             OrbView.VisualStyle.NETWORK_SPHERE
         }
         tts = TextToSpeech(this, this)

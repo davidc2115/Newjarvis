@@ -21,7 +21,7 @@ class OrbView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     enum class OrbState { IDLE, LISTENING, THINKING, SPEAKING }
-    enum class VisualStyle { PULSE, NETWORK_SPHERE }
+    enum class VisualStyle { PULSE, NETWORK_SPHERE, OBSIDIAN_WEB }
 
     var accentColor: Int = Prefs.DEFAULT_ACCENT_COLOR
         set(value) {
@@ -96,6 +96,7 @@ class OrbView @JvmOverloads constructor(
         when (visualStyle) {
             VisualStyle.PULSE -> drawPulseOrb(canvas)
             VisualStyle.NETWORK_SPHERE -> drawNetworkSphere(canvas)
+            VisualStyle.OBSIDIAN_WEB -> drawObsidianWeb(canvas)
         }
     }
 
@@ -229,6 +230,103 @@ class OrbView @JvmOverloads constructor(
             Shader.TileMode.CLAMP
         )
         canvas.drawCircle(cx, cy, glowRadius, glowPaint)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Style "Toile Obsidian" : un graphe de nœuds à plat (comme la vue graphe
+    // d'Obsidian), FIXE tant que JARVIS n'est pas actif, et qui prend vie
+    // (nœuds qui dérivent doucement, liens qui pulsent) dès qu'il écoute,
+    // réfléchit ou parle — demandé explicitement pour évoquer le vault de
+    // notes plutôt qu'une sphère 3D générique.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private data class WebNode(val bx: Float, val by: Float, val phase: Float, val isHub: Boolean)
+
+    // Disposition en spirale de Fibonacci (phyllotaxie) : répartition organique et
+    // homogène dans un disque, calculée UNE SEULE FOIS (positions "de base" fixes) —
+    // c'est ce qui garantit un rendu identique à chaque frame en état IDLE.
+    private val webNodes: List<WebNode> by lazy { generateWebNodes(22) }
+
+    private fun generateWebNodes(count: Int): List<WebNode> {
+        val nodes = mutableListOf<WebNode>()
+        val goldenAngle = Math.PI * (3.0 - sqrt(5.0))
+        nodes.add(WebNode(0f, 0f, 0f, isHub = true))
+        for (i in 1 until count) {
+            val r = sqrt(i / (count - 1f))
+            val theta = goldenAngle * i
+            val x = (cos(theta) * r).toFloat()
+            val y = (sin(theta) * r).toFloat()
+            // phase individuelle (dérivée de l'index) pour que chaque nœud oscille de
+            // façon désynchronisée des autres une fois animé — sinon tout bougerait à
+            // l'unisson, effet mécanique plutôt qu'organique/vivant.
+            val phase = (i * 0.6180339887f) % 1f * 2f * Math.PI.toFloat()
+            nodes.add(WebNode(x, y, phase, isHub = false))
+        }
+        return nodes
+    }
+
+    private fun drawObsidianWeb(canvas: Canvas) {
+        val cx = width / 2f
+        val cy = height / 2f
+        val scale = minOf(width, height) / 2f * 0.9f
+
+        // Amplitude de dérive des nœuds : nulle en IDLE (positions strictement fixes,
+        // comme demandé), puis croissante selon l'activité — réflexion = le plus vif.
+        val driftAmplitude = when (state) {
+            OrbState.IDLE -> 0f
+            OrbState.LISTENING -> 0.05f
+            OrbState.THINKING -> 0.11f
+            OrbState.SPEAKING -> 0.08f
+        }
+        val pulseSpeed = when (state) {
+            OrbState.IDLE -> 0f
+            OrbState.LISTENING -> 1f
+            OrbState.THINKING -> 1.8f
+            OrbState.SPEAKING -> 1.3f
+        }
+        val t = pulsePhase * 2f * Math.PI.toFloat() * pulseSpeed
+
+        val screenPoints = webNodes.map { n ->
+            val dx = if (driftAmplitude > 0f) sin(t + n.phase) * driftAmplitude else 0f
+            val dy = if (driftAmplitude > 0f) cos(t * 0.8f + n.phase) * driftAmplitude else 0f
+            Triple(cx + (n.bx + dx) * scale, cy + (n.by + dy) * scale, n.isHub)
+        }
+
+        // Liens : toute paire de nœuds suffisamment proches, comme pour la sphère réseau,
+        // avec une opacité qui "respire" doucement une fois actif (statique en IDLE).
+        val threshold = scale * 0.55f
+        for (i in screenPoints.indices) {
+            val (x1, y1, _) = screenPoints[i]
+            for (j in i + 1 until screenPoints.size) {
+                val (x2, y2, _) = screenPoints[j]
+                val dist = hypot((x1 - x2).toDouble(), (y1 - y2).toDouble()).toFloat()
+                if (dist < threshold) {
+                    val shimmer = if (pulseSpeed > 0f) (sin(t + i * 0.4f + j * 0.7f) * 0.5f + 0.5f) else 0.5f
+                    val alpha = (28 + shimmer * 55).toInt().coerceIn(20, 90)
+                    linePaint.color = accentColor
+                    linePaint.alpha = alpha
+                    canvas.drawLine(x1, y1, x2, y2, linePaint)
+                }
+            }
+        }
+
+        for ((x, y, isHub) in screenPoints) {
+            val pulse = if (pulseSpeed > 0f) 0.7f + 0.3f * sin(t * 1.3f + x + y) else 1f
+            if (isHub) {
+                dotPaint.shader = RadialGradient(
+                    x, y, scale * 0.16f,
+                    intArrayOf(Color.WHITE, accentColor, Color.TRANSPARENT),
+                    floatArrayOf(0f, 0.45f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawCircle(x, y, scale * 0.16f * pulse, dotPaint)
+                dotPaint.shader = null
+            } else {
+                dotPaint.color = accentColor
+                dotPaint.alpha = (150 * pulse).toInt().coerceIn(80, 220)
+                canvas.drawCircle(x, y, (3f + 1.5f * pulse), dotPaint)
+            }
+        }
     }
 
     private fun adjustAlpha(color: Int, factor: Float): Int {

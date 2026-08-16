@@ -56,7 +56,11 @@ class OrbStyleCarouselAdapter(
         val (id, label) = styles[position]
         holder.label.text = label
         holder.orb.accentColor = accentColor
-        holder.orb.visualStyle = if (id == "PULSE") OrbView.VisualStyle.PULSE else OrbView.VisualStyle.NETWORK_SPHERE
+        holder.orb.visualStyle = try {
+            OrbView.VisualStyle.valueOf(id)
+        } catch (e: IllegalArgumentException) {
+            OrbView.VisualStyle.NETWORK_SPHERE
+        }
         holder.orb.state = OrbView.OrbState.IDLE
 
         val isSelected = id == selected

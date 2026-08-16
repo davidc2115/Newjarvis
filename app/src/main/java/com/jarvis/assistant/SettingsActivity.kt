@@ -521,7 +521,7 @@ class SettingsActivity : AppCompatActivity() {
         colorCarousel.adapter = colorCarouselAdapter
         LinearSnapHelper().attachToRecyclerView(colorCarousel)
 
-        val styleOptions = listOf("PULSE" to "Orbe pulsante", "NETWORK_SPHERE" to "Sphère réseau")
+        val styleOptions = listOf("PULSE" to "Orbe pulsante", "NETWORK_SPHERE" to "Sphère réseau", "OBSIDIAN_WEB" to "Toile Obsidian")
         orbStyleCarouselAdapter = OrbStyleCarouselAdapter(this, styleOptions, selectedOrbStyle, selectedAccentColor) { styleId ->
             selectedOrbStyle = styleId
             Prefs.saveOrbStyle(this, styleId)
