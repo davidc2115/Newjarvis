@@ -765,34 +765,6 @@ object Prefs {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // ACCÈS SMB/CIFS GÉNÉRIQUE (voir SmbController) — remplace la réintégration
-    // complète de l'API Freebox par un accès standard au partage réseau
-    // (fonctionne aussi avec un NAS, un PC Windows partagé, etc.), à la
-    // demande explicite de l'utilisateur suite au retrait de FreeboxController.
-    // ═════════════════════════════════════════════════════════════════════════
-
-    fun getSmbHost(context: Context): String =
-        prefs(context).getString("smb_host", "") ?: ""
-
-    fun saveSmbHost(context: Context, host: String) {
-        prefs(context).edit().putString("smb_host", host.trim()).apply()
-    }
-
-    fun getSmbUsername(context: Context): String =
-        prefs(context).getString("smb_username", "") ?: ""
-
-    fun saveSmbUsername(context: Context, username: String) {
-        prefs(context).edit().putString("smb_username", username.trim()).apply()
-    }
-
-    fun getSmbPassword(context: Context): String =
-        prefs(context).getString("smb_password", "") ?: ""
-
-    fun saveSmbPassword(context: Context, password: String) {
-        prefs(context).edit().putString("smb_password", password).apply()
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
     // FREEBOX OS API (contrôle complet : LAN, Wi-Fi, domotique Freebox Home)
     // Ré-ajoutée à la demande explicite de l'utilisateur (accès total lecture/écriture
     // depuis JARVIS). app_token = jeton obtenu lors de l'appairage de l'app avec la
@@ -853,27 +825,6 @@ object Prefs {
 
     fun saveBoxPassword(context: Context, password: String) {
         prefs(context).edit().putString("box_password", password).apply()
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // DUCKDNS (nom de domaine gratuit + mise a jour d'IP, pour heberger un site
-    // genere par JARVIS directement depuis le telephone). Le jeton DuckDNS n'est
-    // JAMAIS code en dur dans le code source (depot public) : uniquement saisi
-    // ici via l'ecran Parametres, comme pour les autres cles/jetons de l'app.
-    // ═════════════════════════════════════════════════════════════════════════
-
-    fun getDuckDnsDomain(context: Context): String =
-        prefs(context).getString("duckdns_domain", "") ?: ""
-
-    fun saveDuckDnsDomain(context: Context, domain: String) {
-        prefs(context).edit().putString("duckdns_domain", domain.trim().lowercase().removeSuffix(".duckdns.org")).apply()
-    }
-
-    fun getDuckDnsToken(context: Context): String =
-        prefs(context).getString("duckdns_token", "") ?: ""
-
-    fun saveDuckDnsToken(context: Context, token: String) {
-        prefs(context).edit().putString("duckdns_token", token.trim()).apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════

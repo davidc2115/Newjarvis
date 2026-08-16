@@ -21,6 +21,7 @@ import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -279,97 +280,42 @@ class SettingsActivity : AppCompatActivity() {
         picovoiceKeyInput.setText(Prefs.getPicovoiceKey(this))
         updateWakeWordButtonLabel(toggleWakeWordButton)
 
-        // ── Accès SMB (voir SmbController) — demandé explicitement, absent des Paramètres
-        // jusqu'ici (seule la commande chat smb_configure existait pour le régler).
-        val smbHostInput     = findViewById<EditText>(R.id.smbHostInput)
-        val smbUsernameInput = findViewById<EditText>(R.id.smbUsernameInput)
-        val smbPasswordInput = findViewById<EditText>(R.id.smbPasswordInput)
-        val saveSmbButton    = findViewById<TextView>(R.id.saveSmbButton)
+        // ── Box internet (voir RouterController) — configuration désormais automatique :
+        // plus de formulaire manuel. Le fournisseur est détecté via le SSID Wi-Fi lors d'un
+        // scan réseau (dis à JARVIS « scanne le réseau »), la Freebox s'appaire directement
+        // depuis son écran physique, les autres fournisseurs (Livebox/SFR Box/Bbox) demandent
+        // leur mot de passe admin en conversation. Cette section n'affiche que l'état actuel.
+        val boxStatusText = findViewById<TextView>(R.id.boxStatusText)
+        val rescanBoxButton = findViewById<TextView>(R.id.rescanBoxButton)
 
-        smbHostInput.setText(Prefs.getSmbHost(this))
-        smbUsernameInput.setText(Prefs.getSmbUsername(this))
-        smbPasswordInput.setText(Prefs.getSmbPassword(this))
-
-        saveSmbButton.setOnClickListener {
-            val message = SmbController.configure(
-                this,
-                smbHostInput.text.toString().trim(),
-                smbUsernameInput.text.toString().trim(),
-                smbPasswordInput.text.toString()
-            )
-            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        }
-
-        // ── Box internet unifiée (voir RouterController) — Freebox, Livebox (Orange),
-        // SFR Box ou Bbox (Bouygues) selon le fournisseur choisi ici. Distinct du partage
-        // SMB ci-dessus qui ne donne accès qu'aux fichiers.
-        val boxVendorSpinner     = findViewById<Spinner>(R.id.boxVendorSpinner)
-        val freeboxFieldsGroup   = findViewById<LinearLayout>(R.id.freeboxFieldsGroup)
-        val boxFieldsGroup       = findViewById<LinearLayout>(R.id.boxFieldsGroup)
-        val freeboxHostInput     = findViewById<EditText>(R.id.freeboxHostInput)
-        val freeboxAppIdInput    = findViewById<EditText>(R.id.freeboxAppIdInput)
-        val freeboxAppTokenInput = findViewById<EditText>(R.id.freeboxAppTokenInput)
-        val boxHostInput         = findViewById<EditText>(R.id.boxHostInput)
-        val boxPasswordInput     = findViewById<EditText>(R.id.boxPasswordInput)
-        val saveBoxButton        = findViewById<TextView>(R.id.saveBoxButton)
-
-        val boxVendorCodes = listOf("FREEBOX", "LIVEBOX", "SFR", "BBOX")
-        val boxVendorLabels = listOf("Freebox", "Livebox (Orange)", "SFR Box", "Bbox (Bouygues)")
-        boxVendorSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, boxVendorLabels)
-
-        fun updateBoxFieldsVisibility(vendorCode: String) {
-            val isFreebox = vendorCode == "FREEBOX"
-            freeboxFieldsGroup.visibility = if (isFreebox) View.VISIBLE else View.GONE
-            boxFieldsGroup.visibility = if (isFreebox) View.GONE else View.VISIBLE
-        }
-
-        freeboxHostInput.setText(Prefs.getFreeboxHost(this))
-        freeboxAppIdInput.setText(Prefs.getFreeboxAppId(this))
-        freeboxAppTokenInput.setText(Prefs.getFreeboxAppToken(this))
-        boxHostInput.setText(Prefs.getBoxHost(this, ""))
-        boxPasswordInput.setText(Prefs.getBoxPassword(this))
-
-        val savedVendor = Prefs.getBoxVendor(this)
-        boxVendorSpinner.setSelection(boxVendorCodes.indexOf(savedVendor).let { if (it >= 0) it else 0 })
-        updateBoxFieldsVisibility(savedVendor)
-
-        boxVendorSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                updateBoxFieldsVisibility(boxVendorCodes[position])
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        saveBoxButton.setOnClickListener {
-            val vendorCode = boxVendorCodes[boxVendorSpinner.selectedItemPosition]
-            Prefs.saveBoxVendor(this, vendorCode)
-            if (vendorCode == "FREEBOX") {
-                val host = freeboxHostInput.text.toString().trim()
-                Prefs.saveFreeboxHost(this, if (host.isBlank()) "http://mafreebox.freebox.fr" else host)
-                Prefs.saveFreeboxAppId(this, freeboxAppIdInput.text.toString().trim())
-                Prefs.saveFreeboxAppToken(this, freeboxAppTokenInput.text.toString().trim())
-                Toast.makeText(this, "✅ Freebox enregistrée.", Toast.LENGTH_LONG).show()
+        fun refreshBoxStatus() {
+            val vendor = RouterController.vendorLabel(this)
+            boxStatusText.text = if (RouterController.isConfigured(this)) {
+                "✅ $vendor configurée et opérationnelle."
             } else {
-                Prefs.saveBoxHost(this, boxHostInput.text.toString().trim())
-                Prefs.saveBoxPassword(this, boxPasswordInput.text.toString())
-                val label = boxVendorLabels[boxVendorCodes.indexOf(vendorCode)]
-                Toast.makeText(this, "✅ $label enregistrée.", Toast.LENGTH_LONG).show()
+                "ℹ️ Aucune box configurée pour l'instant. Dis à JARVIS « scanne le réseau » (ou touche le bouton ci-dessous) pour la détecter automatiquement."
             }
         }
+        refreshBoxStatus()
 
-        // ── DuckDNS (voir DuckDnsController) — nom de domaine gratuit pour héberger
-        // un site JARVIS directement depuis ce téléphone.
-        val duckdnsDomainInput = findViewById<EditText>(R.id.duckdnsDomainInput)
-        val duckdnsTokenInput  = findViewById<EditText>(R.id.duckdnsTokenInput)
-        val saveDuckDnsButton  = findViewById<TextView>(R.id.saveDuckDnsButton)
-
-        duckdnsDomainInput.setText(Prefs.getDuckDnsDomain(this))
-        duckdnsTokenInput.setText(Prefs.getDuckDnsToken(this))
-
-        saveDuckDnsButton.setOnClickListener {
-            Prefs.saveDuckDnsDomain(this, duckdnsDomainInput.text.toString().trim())
-            Prefs.saveDuckDnsToken(this, duckdnsTokenInput.text.toString().trim())
-            Toast.makeText(this, "✅ DuckDNS enregistré.", Toast.LENGTH_LONG).show()
+        rescanBoxButton.setOnClickListener {
+            rescanBoxButton.isEnabled = false
+            CoroutineScope(Dispatchers.Main).launch {
+                val message = withContext(Dispatchers.IO) {
+                    val devices = NetworkController.scanNetwork(applicationContext)
+                    Prefs.saveScannedDevices(applicationContext, devices)
+                    val vendor = NetworkController.detectBoxVendor(applicationContext)
+                    if (vendor != null) {
+                        Prefs.saveBoxVendor(applicationContext, vendor)
+                        "📡 Box détectée : ${RouterController.vendorLabel(applicationContext)}."
+                    } else {
+                        "ℹ️ Fournisseur non identifié automatiquement (SSID renommé, ou position/Wi-Fi désactivés) — précise-le à JARVIS en conversation."
+                    }
+                }
+                Toast.makeText(this@SettingsActivity, message, Toast.LENGTH_LONG).show()
+                refreshBoxStatus()
+                rescanBoxButton.isEnabled = true
+            }
         }
 
         // ── Cartes dynamiques de modèles ──────────────────────────────────────

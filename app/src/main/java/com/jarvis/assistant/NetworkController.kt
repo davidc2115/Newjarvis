@@ -93,6 +93,35 @@ object NetworkController {
         return "$prefix$last"
     }
 
+    // Préfixes de SSID connus des box grand public françaises — convention stable utilisée
+    // par chaque FAI pour son SSID par défaut (l'utilisateur peut l'avoir renommé, auquel cas
+    // la détection échoue honnêtement plutôt que de deviner : voir box_set_vendor en repli).
+    private val SSID_VENDOR_PREFIXES = listOf(
+        "FREEBOX" to listOf("Freebox-", "freebox_"),
+        "LIVEBOX" to listOf("Livebox-", "Livebox ", "Orange-"),
+        "SFR" to listOf("SFR_", "SFR-", "NEUF_"),
+        "BBOX" to listOf("Bbox-", "Bbox_", "BOUYGUES-")
+    )
+
+    /**
+     * Déduit le fournisseur de box internet ("FREEBOX"/"LIVEBOX"/"SFR"/"BBOX") à partir du SSID
+     * Wi-Fi actuellement connecté, ou null si non déterminable (SSID renommé par l'utilisateur,
+     * permission de localisation refusée — requise par Android pour lire le vrai SSID depuis
+     * Android 8+, ou pas de Wi-Fi connecté). Ne devine jamais au hasard : mieux vaut demander
+     * explicitement à l'utilisateur (voir box_set_vendor) qu'afficher un fournisseur incorrect.
+     */
+    fun detectBoxVendor(context: Context): String? {
+        val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return null
+        @Suppress("DEPRECATION")
+        val rawSsid = wm.connectionInfo?.ssid ?: return null
+        val ssid = rawSsid.trim('"')
+        if (ssid.isBlank() || ssid == "<unknown ssid>" || ssid == "0x") return null
+        for ((vendor, prefixes) in SSID_VENDOR_PREFIXES) {
+            if (prefixes.any { ssid.startsWith(it, ignoreCase = true) }) return vendor
+        }
+        return null
+    }
+
     /**
      * Balaie les 254 adresses du sous-réseau /24 courant en parallèle
      * (hôtes ET ports sondés concurremment) et retourne les appareils qui

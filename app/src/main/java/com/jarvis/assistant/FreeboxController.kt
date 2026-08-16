@@ -1,7 +1,15 @@
 package com.jarvis.assistant
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -58,9 +66,122 @@ object FreeboxController {
         Prefs.getFreeboxAppId(context).isNotBlank() && Prefs.getFreeboxAppToken(context).isNotBlank()
 
     private fun notConfiguredMessage(): String =
-        "❌ Freebox non configurée. Renseigne dans ⚙ -> 📡 Box/Écoute -> Freebox OS : l'app_id et l'app_token " +
-            "obtenus lors de l'appairage de l'application avec ta Freebox (Freebox OS -> Paramètres -> " +
-            "Gestion des accès -> Applications autorisées)."
+        "❌ Freebox non appairée. Lance un scan réseau (network_scan) pour la détecter automatiquement, " +
+            "ou appelle directement box_pair_freebox — une demande d'autorisation apparaîtra sur l'écran de la Freebox."
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Appairage self-service (login/authorize/) — remplace la saisie manuelle d'app_id/
+    // app_token : l'app_id n'est pas un secret (comparable à un identifiant OAuth
+    // client_id), il peut donc être une constante fixe dans le code (dépôt public sans
+    // risque). Flux officiel documenté https://dev.freebox.fr/sdk/os/login/ :
+    //  1) POST login/authorize/ {app_id, app_name, app_version, device_name}
+    //     -> {app_token, track_id} (app_token pas encore valide tant que non "granted")
+    //  2) L'écran LCD de la Freebox affiche la demande, l'utilisateur valide dessus.
+    //  3) GET login/authorize/{track_id}/ jusqu'à status != "pending" (granted/denied/
+    //     timeout/unknown) — polling en arrière-plan, ne bloque jamais la conversation.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const val PAIRING_APP_ID = "fr.jarvis.assistant"
+    private const val PAIRING_APP_NAME = "JARVIS Assistant"
+    private const val PAIRING_APP_VERSION = "1.0"
+    private const val NOTIF_CHANNEL_ID = "jarvis_box_pairing"
+    private const val NOTIF_ID = 9401
+
+    private val pairingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    fun startPairing(context: Context): String {
+        if (isConfigured(context)) {
+            return "ℹ️ La Freebox est déjà appairée. Si tu veux la ré-appairer (ex: après une réinitialisation de mot de passe admin), dis-le explicitement."
+        }
+        pairingScope.launch {
+            runPairing(context.applicationContext)
+        }
+        return "📟 Demande d'appairage envoyée à ta Freebox — regarde son écran (façade LCD) et valide la demande « $PAIRING_APP_NAME » dans les ~90 secondes. Je te préviens par notification dès que c'est fait."
+    }
+
+    private suspend fun runPairing(appContext: Context) = withContext(Dispatchers.IO) {
+        try {
+            val apiBase = getApiBase(appContext)
+            if (apiBase == null) {
+                notifyPairingResult(appContext, false, "Freebox injoignable (vérifie que le téléphone est bien sur le Wi-Fi de la Freebox).")
+                return@withContext
+            }
+
+            val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Téléphone JARVIS" }
+            val requestBody = JSONObject().apply {
+                put("app_id", PAIRING_APP_ID)
+                put("app_name", PAIRING_APP_NAME)
+                put("app_version", PAIRING_APP_VERSION)
+                put("device_name", deviceName)
+            }
+            val authReq = Request.Builder()
+                .url("${apiBase}login/authorize/")
+                .post(requestBody.toString().toRequestBody(JSON))
+                .build()
+
+            val pairResult = client.newCall(authReq).execute().use { resp ->
+                val body = resp.body?.string() ?: return@use null
+                val json = JSONObject(body)
+                if (!json.optBoolean("success", false)) return@use null
+                val result = json.optJSONObject("result") ?: return@use null
+                val token = result.optString("app_token", "")
+                val id = result.optInt("track_id", -1)
+                if (token.isBlank() || id < 0) null else Pair(token, id)
+            }
+            if (pairResult == null) {
+                notifyPairingResult(appContext, false, "La Freebox a refusé la demande d'appairage (réponse invalide).")
+                return@withContext
+            }
+            val appToken = pairResult.first
+            val trackId = pairResult.second
+
+            var status = "pending"
+            var attempts = 0
+            while (status == "pending" && attempts < 60) {
+                delay(2000)
+                attempts++
+                val trackReq = Request.Builder().url("${apiBase}login/authorize/$trackId/").get().build()
+                status = client.newCall(trackReq).execute().use { resp ->
+                    val body = resp.body?.string() ?: return@use "unknown"
+                    JSONObject(body).optJSONObject("result")?.optString("status", "unknown") ?: "unknown"
+                }
+            }
+
+            when (status) {
+                "granted" -> {
+                    Prefs.saveFreeboxAppId(appContext, PAIRING_APP_ID)
+                    Prefs.saveFreeboxAppToken(appContext, appToken)
+                    notifyPairingResult(appContext, true, "Freebox appairée avec succès — JARVIS peut maintenant la piloter (état, Wi-Fi, appareils, redémarrage).")
+                }
+                "denied" -> notifyPairingResult(appContext, false, "Demande d'appairage refusée sur l'écran de la Freebox.")
+                "timeout", "pending" -> notifyPairingResult(appContext, false, "Délai d'appairage dépassé (personne n'a validé sur l'écran de la Freebox à temps) — réessaie avec box_pair_freebox.")
+                else -> notifyPairingResult(appContext, false, "Statut d'appairage inattendu : $status")
+            }
+        } catch (e: Exception) {
+            notifyPairingResult(appContext, false, "Erreur réseau pendant l'appairage : ${e.message}")
+        }
+    }
+
+    private fun notifyPairingResult(context: Context, success: Boolean, message: String) {
+        try {
+            val manager = context.getSystemService(NotificationManager::class.java) ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                manager.createNotificationChannel(
+                    NotificationChannel(NOTIF_CHANNEL_ID, "JARVIS — Appairage box", NotificationManager.IMPORTANCE_DEFAULT)
+                )
+            }
+            val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
+                .setContentTitle(if (success) "✅ Freebox appairée" else "❌ Appairage Freebox échoué")
+                .setContentText(message)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+                .setSmallIcon(if (success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .build()
+            manager.notify(NOTIF_ID, notif)
+        } catch (_: SecurityException) {
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Découverte de la version d'API + login
@@ -380,7 +501,7 @@ object FreeboxController {
     // ─────────────────────────────────────────────────────────────────────────
     // Redirection de port (fw/redir/) — expose un service tournant sur ce téléphone
     // (voir LocalWebServerController) au reste d'internet via la Freebox, gratuit,
-    // sans aucun tiers. Combiné à DuckDnsController pour une adresse stable.
+    // sans aucun tiers (accessible via l'IP publique brute, affichée ci-dessous).
     // ─────────────────────────────────────────────────────────────────────────
 
     /** Adresse IPv4 locale du téléphone sur le réseau actuel, ou null si indisponible. */
@@ -442,10 +563,7 @@ object FreeboxController {
         val publicIp = if (statusPair != null && statusPair.first) statusPair.second.optJSONObject("result")?.optString("ipv4", "") ?: "" else ""
 
         val sb = StringBuilder("✅ Redirection de port créée sur la Freebox : le port public $wanPort pointe maintenant vers ce téléphone ($lanIp:$lanPort).\n")
-        if (publicIp.isNotBlank()) sb.append("🌍 Accessible depuis internet : http://$publicIp:$wanPort/\n")
-        if (DuckDnsController.isConfigured(context)) {
-            sb.append("🦆 Ou via ton adresse DuckDNS (une fois à jour avec duckdns_update) : http://${DuckDnsController.fullDomain(context)}:$wanPort/")
-        }
+        if (publicIp.isNotBlank()) sb.append("🌍 Accessible depuis internet : http://$publicIp:$wanPort/ (IP publique — change si ta box redémarre ou change d'adresse ; pour un nom stable, publie plutôt sur GitHub Pages avec publish_website_github)")
         return sb.toString().trim()
     }
 

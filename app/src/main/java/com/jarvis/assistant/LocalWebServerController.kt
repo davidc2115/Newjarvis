@@ -8,10 +8,12 @@ import java.io.File
 /**
  * LocalWebServerController — point d'entrée JARVIS_CMD pour démarrer/arrêter le
  * serveur web local (LocalWebServerService) qui sert un site généré directement
- * depuis le téléphone. Combiné à DuckDnsController (adresse stable) et à une
- * redirection de port sur la Freebox (voir FreeboxController), ça permet d'exposer
- * le site à internet gratuitement, sans hébergeur tiers — au prix d'une
- * disponibilité qui dépend du téléphone (allumé, sur le même réseau, chargé).
+ * depuis le téléphone. Combiné à une redirection de port sur la box (voir
+ * RouterController, box_port_forward — Freebox/Livebox uniquement) pour exposer
+ * le site à internet via son IP publique, gratuitement, sans hébergeur tiers — au
+ * prix d'une disponibilité qui dépend du téléphone (allumé, sur le même réseau,
+ * chargé) et d'une IP publique qui peut changer (préférer publish_website_github
+ * pour un hébergement permanent avec nom de domaine stable).
  */
 object LocalWebServerController {
 
@@ -34,13 +36,7 @@ object LocalWebServerController {
         val localUrl = "http://${localIpAddress(context) ?: "<IP-de-ton-téléphone>"}:$port/"
         val sb = StringBuilder("🌐 Serveur local démarré : « ${siteDir.name} » servi sur le port $port.\n")
         sb.append("📶 Accessible sur ton réseau Wi-Fi local : $localUrl\n")
-        if (DuckDnsController.isConfigured(context)) {
-            sb.append("\n🦆 DuckDNS configuré (${DuckDnsController.fullDomain(context)}) : ")
-            sb.append("utilise duckdns_update pour pointer ce nom vers ton IP publique actuelle, ")
-            sb.append("puis configure une redirection de port sur ta box (box_port_forward) pour un accès depuis l'extérieur.")
-        } else {
-            sb.append("\n💡 Pour un accès depuis l'extérieur (pas seulement ton Wi-Fi), configure DuckDNS dans ⚙ Paramètres, puis une redirection de port sur ta box.")
-        }
+        sb.append("\n💡 Pour un accès depuis l'extérieur (pas seulement ton Wi-Fi), configure une redirection de port sur ta box (box_port_forward, Freebox/Livebox uniquement).")
         return sb.toString()
     }
 
@@ -59,7 +55,6 @@ object LocalWebServerController {
         val localUrl = "http://${localIpAddress(context) ?: "<IP-de-ton-téléphone>"}:$port/"
         val sb = StringBuilder("🌐 Serveur local actif : « $root » sur le port $port (${LocalWebServerService.requestCount} requête(s) servies).\n")
         sb.append("📶 $localUrl")
-        if (DuckDnsController.isConfigured(context)) sb.append("\n🦆 DuckDNS : https://${DuckDnsController.fullDomain(context)}/ (nécessite la redirection de port Freebox configurée).")
         return sb.toString()
     }
 
