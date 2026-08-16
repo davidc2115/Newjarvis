@@ -59,10 +59,19 @@ Java_com_jarvis_assistant_NativeStableDiffusion_generate(
     std::string prompt(promptChars);
     env->ReleaseStringUTFChars(promptJ, promptChars);
 
+    // Prompt négatif standard (aligné sur ImageGenController.NEGATIVE_PROMPT côté Kotlin) :
+    // corrige la principale cause des rendus "abstraits/flous/déformés" signalés — un modèle
+    // SD sans aucune contrainte négative part sans garde-fou contre les artefacts classiques.
+    static const char* kNegativePrompt =
+        "blurry, out of focus, low quality, low resolution, worst quality, jpeg artifacts, "
+        "deformed, disfigured, distorted, mutated, bad anatomy, extra limbs, missing limbs, "
+        "malformed hands, poorly drawn face, ugly, duplicate, watermark, signature, text, "
+        "cropped, abstract blob, noise";
+
     sd_img_gen_params_t genParams;
     sd_img_gen_params_init(&genParams);
     genParams.prompt = prompt.c_str();
-    genParams.negative_prompt = "";
+    genParams.negative_prompt = kNegativePrompt;
     genParams.width = width;
     genParams.height = height;
     genParams.sample_params.sample_steps = steps;

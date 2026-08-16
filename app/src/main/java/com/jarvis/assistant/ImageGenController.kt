@@ -73,6 +73,18 @@ object ImageGenController {
     private val JSON = "application/json; charset=utf-8".toMediaType()
     private val fileDateFormat = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.getDefault())
 
+    // Prompt négatif standard, appliqué aux moteurs Stable Diffusion (Hugging Face, AI Horde)
+    // qui l'acceptent — corrige la cause principale des rendus "abstraits/flous/déformés"
+    // signalés : sans prompt négatif, un modèle SD de base part sans aucune contrainte
+    // contre les artefacts classiques (anatomie ratée, mains difformes, flou, basse
+    // résolution...). Gemini et OpenAI (meilleure qualité générale, en tête de la cascade)
+    // n'ont pas ce paramètre — cette liste ne s'applique qu'aux fournisseurs SD.
+    private const val NEGATIVE_PROMPT =
+        "blurry, out of focus, low quality, low resolution, worst quality, jpeg artifacts, " +
+            "deformed, disfigured, distorted, mutated, bad anatomy, extra limbs, missing limbs, " +
+            "malformed hands, poorly drawn face, ugly, duplicate, watermark, signature, text, " +
+            "cropped, abstract blob, noise"
+
     suspend fun generateImage(context: Context, prompt: String): Result {
         if (prompt.isBlank()) {
             return Result("❌ Aucune description d'image fournie.", null, null)
@@ -141,10 +153,12 @@ object ImageGenController {
                 return null
             }
 
-            // Résolution modeste et peu d'étapes pour rester dans un temps raisonnable sur CPU mobile.
+            // Résolution modeste pour rester dans un temps raisonnable sur CPU mobile ; steps
+            // relevé de 20 à 26 (compromis qualité/temps — le prompt négatif est géré côté
+            // natif dans jarvis_sd_jni.cpp, voir ce fichier pour le détail).
             val width = 512
             val height = 512
-            val steps = 20
+            val steps = 26
 
             val rgbBytes = NativeStableDiffusion.generate(prompt, width, height, steps)
             if (rgbBytes == null) {
@@ -185,16 +199,22 @@ object ImageGenController {
 
     private suspend fun tryAiHorde(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         return try {
+            // Convention officielle AI Horde pour le prompt négatif : concaténé au prompt
+            // positif via le séparateur " ### " (pas un champ JSON séparé — confirmé contre
+            // l'implémentation de référence SillyTavern, un des plus gros clients AI Horde).
+            // steps 30 (au lieu de 20) + karras=true (meilleur ordonnancement du bruit) :
+            // corrige la principale cause des rendus flous/déformés en dernier recours.
             val submitBody = JSONObject()
-                .put("prompt", prompt)
+                .put("prompt", "$prompt ### $NEGATIVE_PROMPT")
                 .put(
                     "params",
                     JSONObject()
                         .put("width", 512)
                         .put("height", 512)
-                        .put("steps", 20)
+                        .put("steps", 30)
                         .put("cfg_scale", 7)
-                        .put("sampler_name", "k_euler")
+                        .put("sampler_name", "k_euler_a")
+                        .put("karras", true)
                         .put("n", 1)
                 )
                 .put("nsfw", false)
@@ -469,7 +489,24 @@ object ImageGenController {
         if (token.isBlank()) return null
 
         return try {
-            val body = JSONObject().put("inputs", prompt).toString().toRequestBody(JSON)
+            // Paramètres explicites (guidance_scale, num_inference_steps, negative_prompt,
+            // résolution native SDXL 1024x1024) plutôt que de laisser la passerelle sur ses
+            // valeurs par défaut — c'était la cause principale des rendus "abstraits/flous/
+            // déformés" signalés : sans prompt négatif ni nombre d'étapes suffisant, un modèle
+            // SDXL de base produit facilement ce type d'artefact. Schéma confirmé par la doc
+            // officielle Hugging Face Inference Providers (task text-to-image).
+            val body = JSONObject()
+                .put("inputs", prompt)
+                .put(
+                    "parameters",
+                    JSONObject()
+                        .put("negative_prompt", NEGATIVE_PROMPT)
+                        .put("num_inference_steps", 30)
+                        .put("guidance_scale", 7.5)
+                        .put("width", 1024)
+                        .put("height", 1024)
+                )
+                .toString().toRequestBody(JSON)
             val request = Request.Builder()
                 .url("https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0")
                 .addHeader("Authorization", "Bearer $token")
