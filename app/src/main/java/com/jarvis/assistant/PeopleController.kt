@@ -218,26 +218,47 @@ object PeopleController {
         return lines
     }
 
-    /** Bloc markdown enrichi (emojis + gras) reconstruit à partir des mêmes données que le
-     * frontmatter — voir COORDS_MARKER ci-dessus pour le pourquoi. */
+    /**
+     * Bloc markdown enrichi reconstruit à partir des mêmes données que le frontmatter — voir
+     * COORDS_MARKER ci-dessus pour le pourquoi (toujours régénéré, jamais du texte libre
+     * round-trippé). Groupé PERSONNEL / PROFESSIONNEL avec sous-titres en gras et séparateur,
+     * pour que le rendu ressemble aux notes riches que JARVIS sait déjà produire ailleurs
+     * (obsidian_create_note) plutôt qu'à une simple liste plate d'étiquettes.
+     */
     private fun buildCoordsSection(
         cat: String, nickname: String?, phone: String?, phonePro: String?, email: String?,
         address: String?, addressPro: String?, birthday: String?, company: String?,
         position: String?, latitude: Double?, longitude: Double?, installDate: String?
     ): String {
-        val sb = StringBuilder("$COORDS_MARKER\n")
+        val sb = StringBuilder("$COORDS_MARKER\n\n")
         sb.append("🏷️ **Catégorie** : ${categoryLabel(cat)}\n")
-        nickname?.let { sb.append("💬 **Surnom** : $it\n") }
-        birthday?.let { sb.append("🎂 **Anniversaire** : $it\n") }
-        phone?.let { sb.append("📞 **Téléphone** : $it\n") }
-        email?.let { sb.append("✉️ **Email** : $it\n") }
-        address?.let { sb.append("🏠 **Adresse** : $it\n") }
-        phonePro?.let { sb.append("📱 **Téléphone pro** : $it\n") }
-        company?.let { sb.append("🏢 **Entreprise** : $it\n") }
-        addressPro?.let { sb.append("📍 **Adresse pro** : $it\n") }
-        position?.let { sb.append("💼 **Poste** : $it\n") }
-        if (latitude != null && longitude != null) sb.append("🌐 **GPS** : $latitude, $longitude\n")
-        installDate?.let { sb.append("📆 **Date d'installation** : $it\n") }
+
+        val personalLines = mutableListOf<String>()
+        nickname?.let { personalLines.add("💬 Surnom : $it") }
+        birthday?.let { personalLines.add("🎂 Anniversaire : $it") }
+        phone?.let { personalLines.add("📞 Téléphone : $it") }
+        email?.let { personalLines.add("✉️ Email : $it") }
+        address?.let { personalLines.add("🏠 Adresse : $it") }
+
+        val proLines = mutableListOf<String>()
+        company?.let { proLines.add("🏢 Entreprise : $it") }
+        position?.let { proLines.add("🧑‍💼 Poste : $it") }
+        phonePro?.let { proLines.add("📱 Téléphone pro : $it") }
+        addressPro?.let { proLines.add("📍 Adresse pro : $it") }
+
+        if (personalLines.isNotEmpty()) {
+            sb.append("\n🔹 **PERSONNEL**\n")
+            personalLines.forEach { sb.append("$it\n") }
+        }
+        if (proLines.isNotEmpty()) {
+            sb.append("\n🔹 **PROFESSIONNEL**\n")
+            proLines.forEach { sb.append("$it\n") }
+        }
+        if (latitude != null && longitude != null || installDate != null) {
+            sb.append("\n")
+            if (latitude != null && longitude != null) sb.append("🌐 GPS : $latitude, $longitude\n")
+            installDate?.let { sb.append("📆 Date d'installation : $it\n") }
+        }
         return sb.toString().trimEnd()
     }
 
