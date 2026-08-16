@@ -358,6 +358,14 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // conversation où il n'y a aucun autre indice contextuel).
     // ─────────────────────────────────────────────────────────────────────────
 
+    // BUG RÉEL CORRIGÉ : "salut"/"bonjour"/"jarvis" étaient dans cette liste de mots ignorés —
+    // or c'est EXACTEMENT le contenu du tout premier message d'une nouvelle conversation la
+    // plupart du temps ("Salut Jarvis", "Bonjour"...). Résultat : words finissait vide, la
+    // fonction retournait null, et aucun contexte vault n'était jamais injecté précisément au
+    // moment où c'était le plus utile (début de conversation, aucun autre indice contextuel
+    // disponible) — cause directe de "après un redémarrage/nouvelle conversation, JARVIS ne
+    // retrouve plus mes notes". Ces 3 mots ne présentaient de toute façon aucun risque réel de
+    // faux positifs (peu probable qu'un titre de note s'appelle "salut").
     private val CONTEXT_STOPWORDS_FR = setOf(
         "les", "des", "une", "le", "la", "de", "du", "un", "et", "est", "tu", "je", "il", "elle", "on", "nous",
         "vous", "ils", "elles", "que", "qui", "quoi", "pour", "avec", "dans", "sur", "mon", "ma", "mes", "ton",
@@ -365,7 +373,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
         "peux", "peut", "veux", "veut", "dit", "dis", "comme", "plus", "très", "pas", "ne", "se", "ça", "cela",
         "alors", "donc", "mais", "ou", "où", "quand", "comment", "pourquoi", "aussi", "bien", "déjà", "encore",
         "toujours", "jamais", "rappelle", "rappel", "souviens", "souvenir", "dernier", "dernière", "quel", "quelle",
-        "merci", "salut", "bonjour", "jarvis"
+        "merci"
     )
 
     /**
@@ -384,7 +392,19 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
             .split(" ")
             .filter { it.length >= 4 && it !in CONTEXT_STOPWORDS_FR }
             .distinct()
-        if (words.isEmpty()) return null
+        // Message trop générique pour en tirer un mot-clé (ex: "yo", "ça va ?") : plutôt que de
+        // ne rien injecter du tout, on signale quand même l'existence et les titres des notes
+        // les plus récentes — un aperçu léger, sans le contenu complet — pour que JARVIS ait
+        // conscience du vault dès le début d'une conversation même sans mot-clé à chercher.
+        if (words.isEmpty()) {
+            val recent = root.walkTopDown()
+                .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
+                .sortedByDescending { it.lastModified() }
+                .take(maxNotes)
+                .toList()
+            if (recent.isEmpty()) return null
+            return recent.joinToString("\n") { "### ${it.nameWithoutExtension} (récent)" }
+        }
 
         val matches = mutableListOf<Pair<File, String>>()
         for (file in root.walkTopDown()) {
