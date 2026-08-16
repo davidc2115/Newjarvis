@@ -189,6 +189,69 @@ Ce vault est géré par **JARVIS Assistant**.
         }
     }
 
+    /**
+     * Supprime un dossier du vault et TOUT son contenu (récursif) — manquant jusqu'ici :
+     * seule la création de dossier (createFolder) et la suppression d'une note individuelle
+     * (deleteNote, fichiers .md uniquement) existaient, aucune action pour retirer un dossier
+     * entier. IRRÉVERSIBLE, l'IA doit confirmer avec l'utilisateur avant d'appeler ceci (comme
+     * pour obsidian_wipe/obsidian_delete_note — convention déjà en place dans le prompt).
+     */
+    fun deleteFolder(context: Context, path: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        if (path.isBlank()) return "❌ Précise le dossier à supprimer."
+        return try {
+            val root = getVaultRoot(context)
+            val safePath = path.split("/", "\\").joinToString("/") { it.replace(Regex("[:*?\"<>|]"), "-").trim() }
+            val dir = File(root, safePath)
+            // Garde-fou : ne jamais permettre de supprimer la racine du vault elle-même via
+            // cette action (obsidian_wipe existe déjà, explicitement, pour ce cas précis) —
+            // sans ce contrôle, un chemin vide/"." effacerait tout le vault silencieusement.
+            if (dir.canonicalPath == root.canonicalPath) {
+                return "❌ Utilise obsidian_wipe pour vider tout le vault — cette action ne supprime qu'un sous-dossier précis."
+            }
+            if (!dir.exists() || !dir.isDirectory) return "❌ Dossier introuvable : $safePath"
+            var deletedFiles = 0
+            dir.walkBottomUp().forEach { f ->
+                if (f.isFile) { if (f.delete()) deletedFiles++ } else if (f != dir) f.delete()
+            }
+            dir.delete()
+            "🗑️ Dossier « $safePath » supprimé ($deletedFiles fichier(s) avec)."
+        } catch (e: Exception) {
+            "❌ Erreur suppression dossier : ${e.message}"
+        }
+    }
+
+    /**
+     * Renomme/déplace un dossier du vault (et tout son contenu) — ex: "Notes Rapides" ->
+     * "Idées", ou déplacer un dossier entier ailleurs dans l'arborescence en changeant son
+     * chemin. Contrairement à moveNote (qui déplace UNE note), ceci déplace le dossier en bloc.
+     */
+    fun renameFolder(context: Context, path: String, newPath: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        if (path.isBlank() || newPath.isBlank()) return "❌ Précise le dossier à renommer ET son nouveau nom/chemin."
+        return try {
+            val root = getVaultRoot(context)
+            val safeOld = path.split("/", "\\").joinToString("/") { it.replace(Regex("[:*?\"<>|]"), "-").trim() }
+            val safeNew = newPath.split("/", "\\").joinToString("/") { it.replace(Regex("[:*?\"<>|]"), "-").trim() }
+            val src = File(root, safeOld)
+            if (!src.exists() || !src.isDirectory) return "❌ Dossier introuvable : $safeOld"
+            val dest = File(root, safeNew)
+            if (dest.exists()) return "❌ « $safeNew » existe déjà — choisis un autre nom."
+            dest.parentFile?.mkdirs()
+            // renameTo() échoue silencieusement entre certains volumes (ex: stockage interne vs
+            // carte SD) — repli copie+suppression comme pour moveNote, pour rester fiable.
+            if (src.renameTo(dest)) {
+                "✅ Dossier renommé : « $safeOld » -> « $safeNew »"
+            } else {
+                src.copyRecursively(dest, overwrite = false)
+                src.deleteRecursively()
+                "✅ Dossier renommé : « $safeOld » -> « $safeNew »"
+            }
+        } catch (e: Exception) {
+            "❌ Erreur renommage dossier : ${e.message}"
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Create note
     // ─────────────────────────────────────────────────────────────────────────

@@ -694,6 +694,17 @@ object JarvisCommandParser {
             "obsidian_reset_path" -> ObsidianController.resetVaultPath(context)
             "obsidian_wipe" -> ObsidianController.wipeVault(context)
             "obsidian_create_folder" -> ObsidianController.createFolder(context, json.optString("path", ""))
+            "obsidian_delete_folder" -> {
+                val path = json.optString("path", "")
+                if (path.isBlank()) "❌ Précise le dossier à supprimer."
+                else ObsidianController.deleteFolder(context, path)
+            }
+            "obsidian_rename_folder" -> {
+                val path = json.optString("path", "")
+                val newPath = json.optString("newPath", "").ifBlank { json.optString("newName", "") }
+                if (path.isBlank() || newPath.isBlank()) "❌ Précise le dossier ET son nouveau nom/chemin."
+                else ObsidianController.renameFolder(context, path, newPath)
+            }
             "obsidian_create_note" -> {
                 val title = json.optString("title", "")
                 val content = json.optString("content", "")
