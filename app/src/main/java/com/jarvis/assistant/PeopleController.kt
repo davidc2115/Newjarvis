@@ -47,16 +47,23 @@ object PeopleController {
     // alors que les fiches existaient bel et bien. En centralisant la normalisation ici et en
     // l'appliquant À LA FOIS à l'écriture et à la lecture, save et recherche restent toujours
     // cohérents entre eux, quel que soit le mot exact employé par l'utilisateur/l'IA.
+    // BUG RÉEL CORRIGÉ : le test "pro" en sous-chaîne SUR LA CHAÎNE ENTIÈRE faisait matcher
+    // n'importe quel mot contenant "pro" ailleurs qu'au début — "ami proche" (à cause de
+    // "proche"), "propriétaire", "produit"... tombaient tous à tort dans "travail" au lieu
+    // de "personnel"/"autre". Découpe désormais en MOTS et teste chaque mot individuellement
+    // (via "profession" plutôt que le trop court "pro"), ce qui élimine ces faux positifs
+    // tout en couvrant toujours "professionnel(le)(s)".
     private fun normalizeCategoryToken(raw: String): String? {
         val c = raw.lowercase().trim()
         if (c.isBlank()) return null
         if (c in VALID_CATEGORIES) return c
+        val words = c.split(Regex("[^\\p{L}]+")).filter { it.isNotBlank() }
+        fun matches(vararg needles: String) = words.any { w -> needles.any { w.contains(it) } }
         return when {
-            c.contains("trav") || c.contains("pro") || c.contains("boulot") || c.contains("bureau") ||
-                c.contains("collèg") || c.contains("colleg") || c.contains("business") -> "travail"
-            c.contains("perso") || c.contains("ami") -> "personnel"
-            c.contains("famil") -> "famille"
-            c.contains("client") -> "client"
+            matches("trav", "boulot", "bureau", "collèg", "colleg", "business", "profession") -> "travail"
+            matches("perso", "ami") -> "personnel"
+            matches("famil") -> "famille"
+            matches("client") -> "client"
             else -> "autre"
         }
     }
@@ -87,19 +94,39 @@ object PeopleController {
             .replace(Regex("\\p{Mn}+"), "")
             .replace(Regex("\\s+"), " ")
 
+    // BUG RÉEL CORRIGÉ : findExactNameMatch() (utilisée à l'ÉCRITURE par saveContact) était
+    // volontairement stricte (égalité exacte normalisée uniquement), alors que findContact()
+    // plus bas (utilisée à la LECTURE par get_contact_details/search_contact_profile/...)
+    // acceptait déjà une correspondance en sous-chaîne. Résultat concret : demander de
+    // compléter "Jean" après avoir enregistré "Jean Dupont" (catégorie famille) créait un
+    // SECOND fichier "Jean.md" orphelin — catégorie "autre" par défaut puisqu'aucune fiche
+    // existante n'était trouvée à l'écriture — pendant que relire "Jean" retrouvait toujours
+    // l'original correct via la recherche tolérante. D'où une fiche "coincée sur autre" ou
+    // "correcte" selon la formulation exacte employée pour la retrouver, alors qu'il
+    // s'agissait en réalité de deux fichiers différents pour la même personne. Écriture et
+    // lecture utilisent maintenant EXACTEMENT la même résolution (voir resolveContactFile).
+    private fun findExactNameMatch(context: Context, name: String): File? = resolveContactFile(context, name)
+
     /**
-     * Cherche une fiche existante dont le nom correspond EXACTEMENT (une fois casse et
-     * accents ignorés) au nom donné — pour réutiliser cette même fiche au lieu d'en créer
-     * une nouvelle sous une orthographe légèrement différente ("Jean Dupont" vs "jean
-     * DUPONT" vs "Jéan Dupont"). Volontairement strict (égalité exacte normalisée, pas de
-     * correspondance partielle) pour ne jamais fusionner deux personnes différentes par
-     * erreur — ça fragmentait les fiches d'un même contact en plusieurs fichiers séparés,
-     * chacun avec seulement une partie des infos enregistrées au fil du temps.
+     * Résout le fichier correspondant à [name] — logique UNIQUE partagée par la lecture
+     * (findContact) et l'écriture (saveContact/addVisit/addAttachment), pour qu'un nom
+     * formulé différemment d'un tour à l'autre résolve toujours vers LE MÊME fichier des
+     * deux côtés (voir le commentaire de findExactNameMatch ci-dessus pour le bug que ça
+     * corrige). Ordre : 1) nom de fichier littéral exact, 2) nom normalisé (accents/casse
+     * ignorés) strictement égal, 3) repli tolérant en sous-chaîne dans un sens ou l'autre.
      */
-    private fun findExactNameMatch(context: Context, name: String): File? {
+    private fun resolveContactFile(context: Context, name: String): File? {
+        val folder = contactsFolder(context)
+        File(folder, "${safeFileName(name)}.md").let { if (it.exists()) return it }
+
         val target = normalizeName(name)
-        val files = contactsFolder(context).listFiles { f -> f.extension == "md" } ?: emptyArray()
-        return files.firstOrNull { normalizeName(it.nameWithoutExtension) == target }
+        val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
+        files.firstOrNull { normalizeName(it.nameWithoutExtension) == target }?.let { return it }
+
+        return files.firstOrNull { f ->
+            val n = normalizeName(f.nameWithoutExtension)
+            n.contains(target) || target.contains(n)
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -635,17 +662,8 @@ object PeopleController {
 
     // ─────────────────────────────────────────────────────────────────────────
 
-    private fun findContact(context: Context, name: String): ContactNote? {
-        val folder = contactsFolder(context)
-        val exact = File(folder, "${safeFileName(name)}.md")
-        parseContactFile(exact)?.let { return it }
-
-        // Recherche approximative si le nom exact ne correspond à aucun fichier
-        val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
-        val q = name.lowercase()
-        return files.mapNotNull { parseContactFile(it) }
-            .firstOrNull { it.name.lowercase().contains(q) }
-    }
+    private fun findContact(context: Context, name: String): ContactNote? =
+        resolveContactFile(context, name)?.let { parseContactFile(it) }
 
     /**
      * Affiche TOUT ce qui est enregistré sur ce contact, en liste propre avec emojis —
