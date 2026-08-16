@@ -449,6 +449,17 @@ object FileGenController {
     fun openFile(context: Context, path: String): String {
         val file = File(path)
         if (!file.exists()) return "❌ Fichier introuvable : $path"
+
+        // BUG RÉEL CORRIGÉ : un site généré par generate_website est un DOSSIER multi-fichiers
+        // (index.html + styles.css + script.js + images/ + autres pages .html), pas un document
+        // autonome — l'ouvrir comme n'importe quel autre fichier ci-dessous (FileProvider sur
+        // index.html seul) cassait le CSS/JS/images/navigation. Un site généré se reconnaît à
+        // site.json dans le même dossier (écrit par WebsiteGenController) : dans ce cas, sert
+        // le dossier entier via le serveur web local au lieu d'ouvrir index.html isolément.
+        if (file.name.endsWith(".html", ignoreCase = true) && File(file.parentFile, "site.json").exists()) {
+            return WebsiteGenController.openInBrowserViaLocalServer(context, file.parentFile!!)
+        }
+
         return try {
             val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             val mime = mimeTypeFor(path)

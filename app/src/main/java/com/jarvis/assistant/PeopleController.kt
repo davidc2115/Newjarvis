@@ -108,6 +108,15 @@ object PeopleController {
 
     private const val VISITS_MARKER = "## Historique des rendez-vous"
     private const val ATTACHMENTS_MARKER = "## 📎 Pièces jointes"
+    // BUG RÉEL CORRIGÉ : ouvert directement dans Obsidian, un fichier de fiche contact ne
+    // montrait quasiment que le bloc YAML (frontmatter) suivi d'une note brute — toute la
+    // mise en forme riche (emojis, gras, sections Personnel/Professionnel) n'existait QUE de
+    // façon éphémère dans les réponses du chat (formatFullDetails), jamais enregistrée dans
+    // le fichier réel. COORDS_MARKER délimite un bloc markdown enrichi, entièrement
+    // RÉGÉNÉRÉ à partir des données du frontmatter à CHAQUE écriture (jamais lu comme du
+    // texte libre modifiable), pour que la fiche soit un vrai document markdown agréable à
+    // lire tel quel, en plus des infos structurées du frontmatter.
+    private const val COORDS_MARKER = "## 📇 Coordonnées"
 
     private data class ContactNote(
         val name: String,
@@ -146,10 +155,58 @@ object PeopleController {
     }
 
     private fun notesWithoutKnownSections(text: String): String {
-        val cut = listOf(VISITS_MARKER, ATTACHMENTS_MARKER)
+        val cut = listOf(COORDS_MARKER, VISITS_MARKER, ATTACHMENTS_MARKER)
             .mapNotNull { m -> text.indexOf(m).takeIf { it >= 0 } }
             .minOrNull() ?: text.length
         return text.substring(0, cut).trim()
+    }
+
+    /** Lignes de frontmatter YAML — centralisé pour que saveContact/addVisit/addAttachment
+     * écrivent toujours exactement les mêmes champs, dans le même ordre. */
+    private fun buildFrontmatterLines(
+        cat: String, nickname: String?, phone: String?, phonePro: String?, email: String?,
+        address: String?, addressPro: String?, birthday: String?, company: String?,
+        position: String?, latitude: Double?, longitude: Double?, installDate: String?
+    ): List<String> {
+        val lines = mutableListOf("category: $cat")
+        nickname?.let { lines.add("nickname: \"$it\"") }
+        phone?.let { lines.add("phone: \"$it\"") }
+        phonePro?.let { lines.add("phone_pro: \"$it\"") }
+        email?.let { lines.add("email: \"$it\"") }
+        address?.let { lines.add("address: \"$it\"") }
+        addressPro?.let { lines.add("address_pro: \"$it\"") }
+        birthday?.let { lines.add("birthday: \"$it\"") }
+        company?.let { lines.add("company: \"$it\"") }
+        position?.let { lines.add("position: \"$it\"") }
+        latitude?.let { lines.add("latitude: $it") }
+        longitude?.let { lines.add("longitude: $it") }
+        installDate?.let { lines.add("install_date: \"$it\"") }
+        lines.add("updated: ${updatedFormat.format(Date())}")
+        lines.add("tags: [jarvis, contact]")
+        return lines
+    }
+
+    /** Bloc markdown enrichi (emojis + gras) reconstruit à partir des mêmes données que le
+     * frontmatter — voir COORDS_MARKER ci-dessus pour le pourquoi. */
+    private fun buildCoordsSection(
+        cat: String, nickname: String?, phone: String?, phonePro: String?, email: String?,
+        address: String?, addressPro: String?, birthday: String?, company: String?,
+        position: String?, latitude: Double?, longitude: Double?, installDate: String?
+    ): String {
+        val sb = StringBuilder("$COORDS_MARKER\n")
+        sb.append("🏷️ **Catégorie** : ${categoryLabel(cat)}\n")
+        nickname?.let { sb.append("💬 **Surnom** : $it\n") }
+        birthday?.let { sb.append("🎂 **Anniversaire** : $it\n") }
+        phone?.let { sb.append("📞 **Téléphone** : $it\n") }
+        email?.let { sb.append("✉️ **Email** : $it\n") }
+        address?.let { sb.append("🏠 **Adresse** : $it\n") }
+        phonePro?.let { sb.append("📱 **Téléphone pro** : $it\n") }
+        company?.let { sb.append("🏢 **Entreprise** : $it\n") }
+        addressPro?.let { sb.append("📍 **Adresse pro** : $it\n") }
+        position?.let { sb.append("💼 **Poste** : $it\n") }
+        if (latitude != null && longitude != null) sb.append("🌐 **GPS** : $latitude, $longitude\n")
+        installDate?.let { sb.append("📆 **Date d'installation** : $it\n") }
+        return sb.toString().trimEnd()
     }
 
     /** Version publique légère (pour l'export KML notamment), sans les détails internes de parsing. */
@@ -274,21 +331,10 @@ object PeopleController {
             val finalVisits = existing?.visits ?: emptyList()
             val finalAttachments = existing?.attachments ?: emptyList()
 
-            val frontmatterLines = mutableListOf("category: $cat")
-            finalNickname?.let { frontmatterLines.add("nickname: \"$it\"") }
-            finalPhone?.let { frontmatterLines.add("phone: \"$it\"") }
-            finalPhonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
-            finalEmail?.let { frontmatterLines.add("email: \"$it\"") }
-            finalAddress?.let { frontmatterLines.add("address: \"$it\"") }
-            finalAddressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
-            finalBirthday?.let { frontmatterLines.add("birthday: \"$it\"") }
-            finalCompany?.let { frontmatterLines.add("company: \"$it\"") }
-            finalPosition?.let { frontmatterLines.add("position: \"$it\"") }
-            finalLat?.let { frontmatterLines.add("latitude: $it") }
-            finalLng?.let { frontmatterLines.add("longitude: $it") }
-            finalInstallDate?.let { frontmatterLines.add("install_date: \"$it\"") }
-            frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
-            frontmatterLines.add("tags: [jarvis, contact]")
+            val frontmatterLines = buildFrontmatterLines(
+                cat, finalNickname, finalPhone, finalPhonePro, finalEmail, finalAddress,
+                finalAddressPro, finalBirthday, finalCompany, finalPosition, finalLat, finalLng, finalInstallDate
+            )
 
             val content = buildString {
                 append("---\n")
@@ -296,6 +342,11 @@ object PeopleController {
                 append("\n---\n\n")
                 append("# $canonicalName\n\n")
                 if (finalNotes.isNotBlank()) append(finalNotes) else append("_Aucune note._")
+                append("\n\n")
+                append(buildCoordsSection(
+                    cat, finalNickname, finalPhone, finalPhonePro, finalEmail, finalAddress,
+                    finalAddressPro, finalBirthday, finalCompany, finalPosition, finalLat, finalLng, finalInstallDate
+                ))
                 if (finalVisits.isNotEmpty()) {
                     append("\n\n$VISITS_MARKER\n")
                     finalVisits.forEach { append("- $it\n") }
@@ -327,21 +378,11 @@ object PeopleController {
             val targetName = contact?.name ?: name
             val file = File(folder, "${safeFileName(targetName)}.md")
 
-            val frontmatterLines = mutableListOf("category: $category")
-            contact?.nickname?.let { frontmatterLines.add("nickname: \"$it\"") }
-            contact?.phone?.let { frontmatterLines.add("phone: \"$it\"") }
-            contact?.phonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
-            contact?.email?.let { frontmatterLines.add("email: \"$it\"") }
-            contact?.address?.let { frontmatterLines.add("address: \"$it\"") }
-            contact?.addressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
-            contact?.birthday?.let { frontmatterLines.add("birthday: \"$it\"") }
-            contact?.company?.let { frontmatterLines.add("company: \"$it\"") }
-            contact?.position?.let { frontmatterLines.add("position: \"$it\"") }
-            contact?.latitude?.let { frontmatterLines.add("latitude: $it") }
-            contact?.longitude?.let { frontmatterLines.add("longitude: $it") }
-            contact?.installDate?.let { frontmatterLines.add("install_date: \"$it\"") }
-            frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
-            frontmatterLines.add("tags: [jarvis, contact]")
+            val frontmatterLines = buildFrontmatterLines(
+                category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
+                contact?.address, contact?.addressPro, contact?.birthday, contact?.company,
+                contact?.position, contact?.latitude, contact?.longitude, contact?.installDate
+            )
 
             val content = buildString {
                 append("---\n")
@@ -350,6 +391,12 @@ object PeopleController {
                 append("# $targetName\n\n")
                 val notesText = contact?.notes?.takeIf { it.isNotBlank() } ?: "_Aucune note._"
                 append(notesText)
+                append("\n\n")
+                append(buildCoordsSection(
+                    category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
+                    contact?.address, contact?.addressPro, contact?.birthday, contact?.company,
+                    contact?.position, contact?.latitude, contact?.longitude, contact?.installDate
+                ))
                 append("\n\n$VISITS_MARKER\n")
                 updatedVisits.forEach { append("- $it\n") }
                 val existingAttachments = contact?.attachments ?: emptyList()
@@ -389,21 +436,11 @@ object PeopleController {
             val file = File(contactsFolder(context), "${safeFileName(targetName)}.md")
             val updatedAttachments = (contact?.attachments ?: emptyList()) + destFile.absolutePath
 
-            val frontmatterLines = mutableListOf("category: $category")
-            contact?.nickname?.let { frontmatterLines.add("nickname: \"$it\"") }
-            contact?.phone?.let { frontmatterLines.add("phone: \"$it\"") }
-            contact?.phonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
-            contact?.email?.let { frontmatterLines.add("email: \"$it\"") }
-            contact?.address?.let { frontmatterLines.add("address: \"$it\"") }
-            contact?.addressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
-            contact?.birthday?.let { frontmatterLines.add("birthday: \"$it\"") }
-            contact?.company?.let { frontmatterLines.add("company: \"$it\"") }
-            contact?.position?.let { frontmatterLines.add("position: \"$it\"") }
-            contact?.latitude?.let { frontmatterLines.add("latitude: $it") }
-            contact?.longitude?.let { frontmatterLines.add("longitude: $it") }
-            contact?.installDate?.let { frontmatterLines.add("install_date: \"$it\"") }
-            frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
-            frontmatterLines.add("tags: [jarvis, contact]")
+            val frontmatterLines = buildFrontmatterLines(
+                category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
+                contact?.address, contact?.addressPro, contact?.birthday, contact?.company,
+                contact?.position, contact?.latitude, contact?.longitude, contact?.installDate
+            )
 
             val content = buildString {
                 append("---\n")
@@ -412,6 +449,12 @@ object PeopleController {
                 append("# $targetName\n\n")
                 val notesText = contact?.notes?.takeIf { it.isNotBlank() } ?: "_Aucune note._"
                 append(notesText)
+                append("\n\n")
+                append(buildCoordsSection(
+                    category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
+                    contact?.address, contact?.addressPro, contact?.birthday, contact?.company,
+                    contact?.position, contact?.latitude, contact?.longitude, contact?.installDate
+                ))
                 val visits = contact?.visits ?: emptyList()
                 if (visits.isNotEmpty()) {
                     append("\n\n$VISITS_MARKER\n")

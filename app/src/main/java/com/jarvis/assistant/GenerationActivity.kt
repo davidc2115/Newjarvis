@@ -313,18 +313,18 @@ class GenerationActivity : AppCompatActivity() {
     }
 
     private fun openWebsiteFile(file: File) {
-        try {
-            lastWebsiteFile = file
-            val uri = WebsiteGenController.getShareableUri(this, file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "text/html")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // BUG RÉEL CORRIGÉ : ACTION_VIEW sur index.html seul via FileProvider ne donne accès
+        // qu'à CE fichier — styles.css/script.js/images/autres pages restent inaccessibles au
+        // navigateur (site qui semblait "sans image, à une seule page"). Sert maintenant le
+        // dossier entier via le serveur web local (voir WebsiteGenController pour le détail).
+        lastWebsiteFile = file
+        Thread {
+            val siteDir = file.parentFile ?: file
+            val result = WebsiteGenController.openInBrowserViaLocalServer(this, siteDir)
+            if (result.startsWith("❌")) {
+                runOnUiThread { Toast.makeText(this, result, Toast.LENGTH_LONG).show() }
             }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Impossible d'ouvrir le site : ${e.message}", Toast.LENGTH_LONG).show()
-        }
+        }.start()
     }
 
     /** Propose "Ouvrir" ou "Modifier" pour un site déjà généré (galerie ou bouton rapide). */

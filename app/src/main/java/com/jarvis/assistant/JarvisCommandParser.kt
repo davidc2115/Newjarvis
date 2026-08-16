@@ -797,6 +797,25 @@ object JarvisCommandParser {
                         val p = arr.optString(i, "")
                         if (p.isNotBlank()) images.add(p)
                     } }
+                    // BUG RÉEL CORRIGÉ : l'IA ne connaît JAMAIS le chemin réel d'une photo
+                    // envoyée dans le chat — elle ne la reçoit qu'en base64 "vision", jamais
+                    // sous forme de chemin texte — donc "images" restait quasi toujours vide
+                    // même quand l'utilisateur avait bien envoyé des photos, d'où des sites
+                    // générés sans la moindre image. Même repli que attach_contact_file : si
+                    // l'IA n'a fourni aucun chemin, on récupère nous-mêmes les photos envoyées
+                    // récemment dans CETTE conversation.
+                    if (images.isEmpty()) {
+                        ConversationStore.messages
+                            .filter { it.isUser }
+                            .takeLast(20)
+                            .flatMap { msg ->
+                                val fromAttachments = msg.attachments.filter { it.mimeType.startsWith("image/") }.map { it.path }
+                                if (fromAttachments.isNotEmpty()) fromAttachments
+                                else listOfNotNull(msg.attachmentPath?.takeIf { it.isNotBlank() })
+                            }
+                            .distinct()
+                            .forEach { images.add(it) }
+                    }
                     GenerationService.enqueue(context, "website", description, imagePaths = images.takeIf { it.isNotEmpty() })
                     "🌐 Génération du site lancée en arrière-plan. Une notification t'avertira " +
                         "dès que c'est prêt (ou en cas d'échec)."

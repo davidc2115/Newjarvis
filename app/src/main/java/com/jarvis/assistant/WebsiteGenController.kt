@@ -58,7 +58,10 @@ object WebsiteGenController {
         "galerie si pertinent) — chaque \"prompt\" doit être en ANGLAIS, détaillé (sujet, " +
         "composition, éclairage, ambiance), adapté au style du site (photorealistic pour un " +
         "commerce/restaurant/entreprise, illustration/flat design pour un site plus créatif, " +
-        "selon ce qui convient le mieux à la description donnée)."
+        "selon ce qui convient le mieux à la description donnée). INCLUS TOUJOURS un slot " +
+        "supplémentaire avec \"key\":\"logo\" en PREMIER dans \"images\" : un logo simple et " +
+        "moderne pour le site (icône/emblème minimaliste adapté au nom et au thème, PAS une " +
+        "photo, style vectoriel/flat, fond uni ou transparent, composition centrée carrée)."
 
     private const val CSS_INSTRUCTIONS =
         "Tu es un designer web premium. Génère UNIQUEMENT du CSS pur et valide (pas de balise " +
@@ -69,7 +72,9 @@ object WebsiteGenController {
         "du site, PAS bleu/blanc par défaut) et la typographie (au moins une police Google Fonts " +
         "adaptée au ton, à importer via @import url(...) en haut du fichier)\n" +
         "- body, .container (largeur max centrée avec marges)\n" +
-        "- .site-header (bandeau fixe/sticky en haut), .nav (barre de nav), .nav-links (liste de " +
+        "- .site-header (bandeau fixe/sticky en haut), .nav (barre de nav), .nav-brand (bloc logo+nom, " +
+        "aligné en ligne avec un espacement entre les deux), .nav-logo (image logo dans l'en-tête, " +
+        "hauteur fixe autour de 36-40px, largeur auto, border-radius léger), .nav-links (liste de " +
         "liens, cachée en mobile par défaut), .nav-toggle (bouton hamburger, visible seulement en " +
         "mobile), .nav-open (classe ajoutée en JS quand le menu mobile est ouvert — .nav-open " +
         ".nav-links doit alors s'afficher)\n" +
@@ -186,8 +191,14 @@ object WebsiteGenController {
 
             // 6) Contenu de chaque page, injecté dans le gabarit commun (nav/head/footer garantis
             // identiques sur toutes les pages, générés une seule fois en Kotlin ci-dessous)
-            val imagesListForPrompt = if (availableImages.isEmpty()) "(aucune image disponible — n'insère aucune balise <img>)"
-                else availableImages.joinToString(", ") { "images/$it" }
+            // Le slot "logo" (voir PLAN_INSTRUCTIONS) est traité comme une image de marque
+            // pour l'en-tête, pas comme une illustration de contenu — exclu de la liste
+            // présentée à l'IA pour le corps des pages, utilisé séparément dans le gabarit.
+            val logoFile = availableImages.firstOrNull { it.substringBeforeLast('.') == "logo" }
+            val logoPath = logoFile?.let { "images/$it" }
+            val contentImages = availableImages.filterNot { it == logoFile }
+            val imagesListForPromptFiltered = if (contentImages.isEmpty()) "(aucune image disponible — n'insère aucune balise <img>)"
+                else contentImages.joinToString(", ") { "images/$it" }
 
             for ((file, _) in pages) {
                 val pagePrompt = "$PAGE_INSTRUCTIONS\n\n" +
@@ -195,10 +206,10 @@ object WebsiteGenController {
                     "Nom du site : $siteName\n" +
                     "Page à rédiger : « $file »" + (if (file == "index") " (page d'accueil — utilise .hero en haut)" else "") + "\n" +
                     "Pages du site (pour référence, ne régénère pas la nav) : ${pages.joinToString(", ") { it.second }}\n" +
-                    "Images disponibles (chemins EXACTS à utiliser, n'en invente aucune autre) : $imagesListForPrompt"
+                    "Images disponibles (chemins EXACTS à utiliser, n'en invente aucune autre) : $imagesListForPromptFiltered"
                 val bodyRaw = askAi(context, pagePrompt)
                 val bodyHtml = cleanCodeResponse(bodyRaw, "html")
-                val fullPage = buildPageShell(siteName, pages, file, bodyHtml)
+                val fullPage = buildPageShell(siteName, pages, file, bodyHtml, logoPath)
                 File(siteDir, "$file.html").writeText(fullPage)
             }
 
@@ -354,7 +365,7 @@ object WebsiteGenController {
     // Gabarit HTML commun (nav/head/footer identiques sur toutes les pages)
     // ─────────────────────────────────────────────────────────────────────────
 
-    private fun buildPageShell(siteName: String, pages: List<Pair<String, String>>, currentFile: String, bodyHtml: String): String {
+    private fun buildPageShell(siteName: String, pages: List<Pair<String, String>>, currentFile: String, bodyHtml: String, logoPath: String? = null): String {
         val navLinks = pages.joinToString("\n            ") { (file, label) ->
             val href = "$file.html"
             val active = if (file == currentFile) " class=\"active\"" else ""
@@ -371,7 +382,7 @@ object WebsiteGenController {
 <body>
 <header class="site-header">
     <div class="container nav">
-        <div class="nav-brand">${escapeHtml(siteName)}</div>
+        <div class="nav-brand">${if (logoPath != null) "<img src=\"$logoPath\" alt=\"${escapeHtml(siteName)}\" class=\"nav-logo\"> " else ""}<span>${escapeHtml(siteName)}</span></div>
         <button class="nav-toggle" aria-label="Menu">☰</button>
         <nav class="nav-links">
             $navLinks
@@ -530,4 +541,37 @@ document.addEventListener('DOMContentLoaded', function () {
     /** URI content:// (via FileProvider) pour ouvrir/partager la page d'accueil d'un site généré. */
     fun getShareableUri(context: Context, file: File): android.net.Uri =
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+
+    // BUG RÉEL CORRIGÉ : ouvrir index.html seul via FileProvider/ACTION_VIEW ne donne au
+    // navigateur une permission de lecture QUE sur ce fichier précis — styles.css, script.js,
+    // les images/ et les autres pages (liens relatifs entre pages) restent inaccessibles
+    // (chaque ressource relative nécessiterait sa propre permission content://, jamais
+    // accordée). Résultat observé : "le site créé n'a pas d'image, pas de logo, une seule
+    // page" alors que le site généré sur le disque est bien complet et multi-pages — c'est
+    // uniquement la façon de l'OUVRIR qui cassait tout. On sert donc le dossier entier via le
+    // même serveur web local que start_local_web_server (java.net.ServerSocket, déjà présent
+    // et fonctionnel), puis on ouvre une vraie URL http://127.0.0.1 dessus — les chemins
+    // relatifs se résolvent alors normalement, exactement comme un site vraiment hébergé.
+    fun openInBrowserViaLocalServer(context: Context, siteDir: File): String {
+        if (!siteDir.exists() || !File(siteDir, "index.html").exists()) {
+            return "❌ Site introuvable ou incomplet : ${siteDir.absolutePath}"
+        }
+        val startMsg = LocalWebServerController.start(context, siteDir)
+        if (startMsg.startsWith("❌")) return startMsg
+        // Le serveur démarre sur un thread séparé (voir LocalWebServerService.startServer) —
+        // quasi instantané mais pas garanti terminé au retour de start(), d'où cette courte
+        // marge avant d'ouvrir le navigateur dessus.
+        Thread.sleep(400)
+        val port = LocalWebServerService.currentPort.takeIf { it != 0 } ?: 8080
+        val url = "http://127.0.0.1:$port/"
+        return try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            "🌐 Site ouvert dans le navigateur : $url\nLe serveur local reste actif pour que tout (styles, images, navigation entre pages) s'affiche correctement — utilise stop_local_web_server une fois fini, sinon il continue de tourner en arrière-plan (consomme de la batterie)."
+        } catch (e: Exception) {
+            "❌ Impossible d'ouvrir le navigateur : ${e.message}. Le site reste accessible sur $url tant que le serveur local tourne."
+        }
+    }
 }
