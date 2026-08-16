@@ -105,7 +105,7 @@
                 android:id="@+id/pendingImageThumbnail"
                 android:layout_width="56dp"
                 android:layout_height="56dp"
-                android:scaleType="centerCrop" />
+                android:scaleType="fitCenter" />
 
             <TextView
                 android:id="@+id/removePendingImageButton"
