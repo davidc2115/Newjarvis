@@ -59,12 +59,17 @@ object PeopleController {
         if (c in VALID_CATEGORIES) return c
         val words = c.split(Regex("[^\\p{L}]+")).filter { it.isNotBlank() }
         fun matches(vararg needles: String) = words.any { w -> needles.any { w.contains(it) } }
+        // Catégories PERSONNALISÉES : demandé explicitement — un mot qui ne correspond à
+        // aucun des 4 synonymes ci-dessous n'est plus forcé dans "autre", il devient sa
+        // propre catégorie telle quelle (ex: "voisins", "sport"). "autre" reste réservé au
+        // cas où aucune catégorie n'est fournie du tout (voir normalizeCategory ci-dessous),
+        // pas un fourre-tout pour "je ne reconnais pas ce mot".
         return when {
             matches("trav", "boulot", "bureau", "collèg", "colleg", "business", "profession") -> "travail"
             matches("perso", "ami") -> "personnel"
             matches("famil") -> "famille"
             matches("client") -> "client"
-            else -> "autre"
+            else -> c
         }
     }
 
@@ -719,13 +724,9 @@ object PeopleController {
         }.trim()
     }
 
-    private fun singleCategoryLabel(cat: String): String = when (cat) {
-        "travail" -> "travail"
-        "personnel" -> "personnel"
-        "famille" -> "famille"
-        "client" -> "client"
-        else -> "autre"
-    }
+    // Catégorie personnalisée : affichée telle quelle plutôt que forcée en "autre" — voir
+    // normalizeCategoryToken pour le pourquoi.
+    private fun singleCategoryLabel(cat: String): String = cat.ifBlank { "autre" }
 
     /** [cat] peut contenir plusieurs catégories séparées par des virgules (ex: "famille, travail"). */
     private fun categoryLabel(cat: String): String =
