@@ -691,6 +691,7 @@ object JarvisCommandParser {
                 else ObsidianController.searchNotes(context, query)
             }
             "obsidian_list" -> ObsidianController.listNotes(context, json.optString("folder", ""))
+            "obsidian_list_folders" -> ObsidianController.listFolders(context, json.optString("path", ""))
             "obsidian_reset_path" -> ObsidianController.resetVaultPath(context)
             "obsidian_wipe" -> ObsidianController.wipeVault(context)
             "obsidian_create_folder" -> ObsidianController.createFolder(context, json.optString("path", ""))

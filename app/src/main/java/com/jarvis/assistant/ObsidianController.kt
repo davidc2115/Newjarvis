@@ -252,6 +252,42 @@ Ce vault est géré par **JARVIS Assistant**.
         }
     }
 
+    /**
+     * Liste les VRAIS sous-dossiers du vault (arborescence réelle sur disque), pas seulement
+     * ceux qui contiennent déjà une note — bug réel corrigé : jusqu'ici, aucune action ne
+     * listait les dossiers eux-mêmes (obsidian_list liste des NOTES, getVaultStats ne comptait
+     * que les dossiers CONTENANT au moins une note .md). Un dossier créé (obsidian_create_folder)
+     * mais encore vide était donc invisible à toute action ultérieure — dans une nouvelle
+     * conversation ou après un redémarrage, JARVIS n'avait aucun moyen de savoir qu'il existait
+     * déjà et pouvait soit dire "introuvable", soit en recréer un autre avec un nom légèrement
+     * différent (casse, accents, formulation) au lieu de réutiliser l'existant.
+     */
+    fun listFolders(context: Context, path: String = ""): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        val root = getVaultRoot(context)
+        if (!root.exists() || !root.isDirectory) {
+            return "❌ Le dossier du vault n'existe pas ou n'est pas accessible : ${root.absolutePath}."
+        }
+        val baseDir = if (path.isBlank()) root else File(root, path)
+        if (!baseDir.exists() || !baseDir.isDirectory) return "📁 Le dossier \"$path\" n'existe pas dans le vault."
+
+        val folders = baseDir.walkTopDown()
+            .filter { it.isDirectory && it != baseDir && it.name != ".obsidian" && !it.path.contains("${File.separator}.obsidian${File.separator}") }
+            .sortedBy { it.relativeTo(root).path.lowercase() }
+            .toList()
+
+        if (folders.isEmpty()) {
+            return "📁 Aucun sous-dossier ${if (path.isBlank()) "dans le vault" else "dans \"$path\""} (à part les notes directement dedans)."
+        }
+        val sb = StringBuilder("📁 **${folders.size} dossier(s)** ${if (path.isBlank()) "dans le vault" else "dans \"$path\""} :\n\n")
+        folders.forEach { dir ->
+            val rel = dir.relativeTo(root).path
+            val noteCount = dir.listFiles { f -> f.isFile && f.extension == "md" }?.size ?: 0
+            sb.append("📁 $rel ($noteCount note(s))\n")
+        }
+        return sb.toString().trim()
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Create note
     // ─────────────────────────────────────────────────────────────────────────
@@ -659,7 +695,13 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
 
             val totalSize  = allFiles.sumOf { it.length() }
             val sizeKb     = totalSize / 1024
-            val folders    = allFiles.mapNotNull { it.parentFile?.name }.toSet()
+            // Compte les VRAIS sous-dossiers (arborescence réelle), pas seulement ceux qui
+            // contiennent déjà une note — un dossier créé mais encore vide comptait comme 0
+            // avant ce correctif, ce qui cachait son existence même à l'utilisateur qui
+            // demandait "combien de dossiers j'ai".
+            val folders = root.walkTopDown()
+                .filter { it.isDirectory && it != root && it.name != ".obsidian" && !it.path.contains("${File.separator}.obsidian${File.separator}") }
+                .toList()
             val todayStr   = dateFormat.format(Date())
             val todayNotes = allFiles.count { it.name.startsWith(todayStr) }
 
