@@ -198,6 +198,48 @@ object FreeboxController {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Écriture : redémarrage de la box
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun reboot(context: Context): String {
+        if (!isConfigured(context)) return notConfiguredMessage()
+        val (ok, json) = authedRequest(context, "POST", "system/reboot/") ?: return "❌ Freebox injoignable."
+        return if (ok) "🔄 Redémarrage de la Freebox lancé — elle sera injoignable quelques minutes."
+            else "❌ Erreur Freebox : ${json.optString("msg", "inconnue")}"
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Lecture : disques (interne + USB)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun storageInfo(context: Context): String {
+        if (!isConfigured(context)) return notConfiguredMessage()
+        val (ok, json) = authedRequest(context, "GET", "storage/disk/") ?: return "❌ Freebox injoignable."
+        if (!ok) return "❌ Erreur Freebox : ${json.optString("msg", "inconnue")}"
+        val disks = json.optJSONArray("result") ?: JSONArray()
+        if (disks.length() == 0) return "💾 Aucun disque détecté sur la Freebox (interne ou USB)."
+        val sb = StringBuilder("💾 Disques Freebox :\n\n")
+        for (i in 0 until disks.length()) {
+            val d = disks.optJSONObject(i) ?: continue
+            val type = d.optString("type", "?")
+            val model = d.optString("model", "Disque").ifBlank { "Disque" }
+            val totalGo = d.optLong("total_bytes", 0) / 1_000_000_000
+            val partitions = d.optJSONArray("partitions")
+            sb.append("📀 $model ($type) — ${totalGo} Go\n")
+            if (partitions != null) {
+                for (j in 0 until partitions.length()) {
+                    val p = partitions.optJSONObject(j) ?: continue
+                    val label = p.optString("label", p.optString("id", "partition"))
+                    val usedGo = p.optLong("used_bytes", 0) / 1_000_000_000
+                    val partTotalGo = p.optLong("total_bytes", 0) / 1_000_000_000
+                    sb.append("   • $label : ${usedGo}/${partTotalGo} Go utilisés\n")
+                }
+            }
+        }
+        return sb.toString().trim()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Lecture/écriture : Wi-Fi
     // ─────────────────────────────────────────────────────────────────────────
 

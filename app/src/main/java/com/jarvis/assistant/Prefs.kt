@@ -824,6 +824,38 @@ object Prefs {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // BOX INTERNET UNIFIÉE (voir RouterController) — un seul système pour piloter
+    // Freebox, Livebox (Orange), SFR Box ou Bbox (Bouygues) selon le fournisseur
+    // choisi ici. La Freebox continue d'utiliser app_id/app_token ci-dessus
+    // (appairage officiel) ; les 3 autres n'ont pas de mécanisme d'appairage à
+    // l'écran (pas d'écran physique sur ces box) donc utilisent le mot de passe
+    // admin local, jamais codé en dur (saisi uniquement ici via ⚙, dépôt public).
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getBoxVendor(context: Context): String =
+        prefs(context).getString("box_vendor", "FREEBOX") ?: "FREEBOX"
+
+    fun saveBoxVendor(context: Context, vendor: String) {
+        prefs(context).edit().putString("box_vendor", vendor).apply()
+    }
+
+    fun getBoxHost(context: Context, default: String): String {
+        val raw = prefs(context).getString("box_host", "") ?: ""
+        return raw.ifBlank { default }
+    }
+
+    fun saveBoxHost(context: Context, host: String) {
+        prefs(context).edit().putString("box_host", host.trim()).apply()
+    }
+
+    fun getBoxPassword(context: Context): String =
+        prefs(context).getString("box_password", "") ?: ""
+
+    fun saveBoxPassword(context: Context, password: String) {
+        prefs(context).edit().putString("box_password", password).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // DUCKDNS (nom de domaine gratuit + mise a jour d'IP, pour heberger un site
     // genere par JARVIS directement depuis le telephone). Le jeton DuckDNS n'est
     // JAMAIS code en dur dans le code source (depot public) : uniquement saisi
