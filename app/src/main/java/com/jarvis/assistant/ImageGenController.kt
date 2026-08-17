@@ -449,14 +449,22 @@ object ImageGenController {
                                 org.json.JSONArray().put("TEXT").put("IMAGE")
                             )
                             .put(
-                                "imageConfig",
-                                JSONObject().put("aspectRatio", geminiAspectRatio(format))
+                                "responseFormat",
+                                JSONObject().put(
+                                    "image",
+                                    JSONObject().put("aspectRatio", geminiAspectRatio(format))
+                                )
                             )
                     )
                     .toString()
                     .toRequestBody(JSON)
 
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/" +
+                // Endpoint v1 (pas v1beta) + generationConfig.responseFormat.image.aspectRatio :
+                // format confirmé par la doc REST officielle actuelle de gemini-3.1-flash-image
+                // (ai.google.dev/gemini-api/docs/generate-content/image-generation). L'ancien
+                // champ generationConfig.imageConfig.aspectRatio est silencieusement ignoré par
+                // l'API — c'était la cause du format (portrait/paysage) jamais respecté.
+                val url = "https://generativelanguage.googleapis.com/v1/models/" +
                     "gemini-3.1-flash-image:generateContent?key=$apiKey"
 
                 val request = Request.Builder()
