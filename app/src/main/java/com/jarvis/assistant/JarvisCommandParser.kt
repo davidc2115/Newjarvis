@@ -46,7 +46,8 @@ object JarvisCommandParser {
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
-        "perplexity_search", "firecrawl_scrape", "search_glifs", "run_glif"
+        "perplexity_search", "firecrawl_scrape", "search_glifs", "run_glif",
+        "termux_sd_setup", "termux_sd_status"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -406,6 +407,10 @@ object JarvisCommandParser {
                 val query = json.optString("query", "")
                 GlifController.searchWorkflows(context, query).message
             }
+
+            // ─── Stable Diffusion local via Termux (opt-in, voir TermuxController) ────
+            "termux_sd_setup" -> TermuxController.setupAndLaunch(context).message
+            "termux_sd_status" -> TermuxController.checkWebuiStatus(context).message
 
             "delete_event" -> {
                 val eventId = json.optLong("eventId", -1)

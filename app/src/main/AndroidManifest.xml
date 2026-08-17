@@ -87,6 +87,27 @@
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- ── Intégration Stable Diffusion WebUI via Termux (opt-in, voir TermuxController) ──
+         Permission dédiée exigée par Termux lui-même (com.termux.permission.RUN_COMMAND) pour
+         qu'une app tierce puisse lui envoyer des commandes — SANS ELLE, Termux refuse
+         silencieusement toute commande venant de JARVIS. Accordée par l'utilisateur via
+         Réglages système Android (pas une simple pop-up runtime, Termux l'exige via la page
+         "Autorisations" de l'app dans les paramètres Android), EN PLUS d'un réglage manuel
+         obligatoire à faire une seule fois DANS Termux (allow-external-apps=true dans
+         ~/.termux/termux.properties) que JARVIS ne peut pas modifier lui-même (sandbox
+         Android : chaque app a son propre répertoire privé, JARVIS n'a pas accès à celui de
+         Termux). Termux doit être installé par l'utilisateur lui-même (F-Droid recommandé,
+         la version Play Store ne supporte plus RUN_COMMAND). -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- targetSdkVersion >= 30 (Android 11+) : sans cette déclaration, JARVIS ne peut même
+         pas VÉRIFIER si Termux est installé ni lui envoyer d'intent (restriction de visibilité
+         des paquets) — l'appairage échouerait silencieusement, exactement le genre de bug
+         invisible que ce projet évite systématiquement ailleurs (voir FreeboxController). -->
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
     <application
         android:name=".JarvisApplication"
         android:allowBackup="true"

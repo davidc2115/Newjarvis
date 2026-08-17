@@ -51,6 +51,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var localModelPathText: TextView
     private lateinit var downloadProgressText: TextView
 
+    // Stable Diffusion local via Termux (voir TermuxController) — vues chargées à la volée
+    // dans setupTermuxSdSection() plutôt qu'en lateinit ici : section optionnelle isolée,
+    // pas de risque de crash si un id venait à manquer lors d'une future refonte de l'onglet.
+
 
     private lateinit var colorCarousel: RecyclerView
     private lateinit var orbStyleCarousel: RecyclerView
@@ -396,10 +400,65 @@ class SettingsActivity : AppCompatActivity() {
             }
             updateWakeWordButtonLabel(toggleWakeWordButton)
         }
+
+        setupTermuxSdSection()
     }
 
     private fun updateWakeWordButtonLabel(button: TextView) {
         button.text = if (Prefs.isWakeWordEnabled(this)) "DÉSACTIVER L'ÉCOUTE PERMANENTE" else "ACTIVER L'ÉCOUTE PERMANENTE"
+    }
+
+    /**
+     * Section "Stable Diffusion local via Termux" de l'onglet Local — isolée dans sa propre
+     * fonction (plutôt que mêlée au bloc onCreate déjà dense) car elle combine 3 responsabilités
+     * propres à cette intégration : toggle d'activation (Prefs.isTermuxSdEnabled), raccourci vers
+     * l'écran de permissions Android (étape manuelle obligatoire, voir TermuxController), et 2
+     * actions réseau/RUN_COMMAND asynchrones (configurer, vérifier le statut).
+     */
+    private fun setupTermuxSdSection() {
+        val toggleButton = findViewById<TextView>(R.id.toggleTermuxSdButton)
+        val appSettingsButton = findViewById<TextView>(R.id.termuxAppSettingsButton)
+        val setupButton = findViewById<TextView>(R.id.termuxSetupButton)
+        val statusButton = findViewById<TextView>(R.id.termuxStatusButton)
+        val statusText = findViewById<TextView>(R.id.termuxStatusText)
+
+        fun refreshToggleLabel() {
+            toggleButton.text = if (Prefs.isTermuxSdEnabled(this)) {
+                "✅ ACTIVÉ — utilisé en priorité pour générer les images"
+            } else {
+                "⬜ DÉSACTIVÉ — appuie pour activer"
+            }
+        }
+        refreshToggleLabel()
+
+        toggleButton.setOnClickListener {
+            Prefs.setTermuxSdEnabled(this, !Prefs.isTermuxSdEnabled(this))
+            refreshToggleLabel()
+        }
+
+        appSettingsButton.setOnClickListener {
+            TermuxController.openAppSettings(this)
+        }
+
+        setupButton.setOnClickListener {
+            setupButton.isEnabled = false
+            val result = TermuxController.setupAndLaunch(this)
+            statusText.text = result.message
+            Toast.makeText(this, if (result.success) "✅ Lancé, voir le statut ci-dessous" else "❌ Voir le détail ci-dessous", Toast.LENGTH_SHORT).show()
+            setupButton.isEnabled = true
+        }
+
+        statusButton.setOnClickListener {
+            statusButton.isEnabled = false
+            statusText.text = "⏳ Vérification en cours…"
+            CoroutineScope(Dispatchers.Main).launch {
+                val result = withContext(Dispatchers.IO) {
+                    TermuxController.checkWebuiStatus(applicationContext)
+                }
+                statusText.text = result.message
+                statusButton.isEnabled = true
+            }
+        }
     }
 
     /** Crée une carte visuelle pour un modèle du catalogue. */

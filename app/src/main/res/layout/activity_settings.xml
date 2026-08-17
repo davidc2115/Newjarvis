@@ -719,6 +719,87 @@
                 android:background="@drawable/bg_input"
                 android:layout_marginBottom="16dp" />
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🖥️ Stable Diffusion local via Termux (gratuit, sans limite, fidèle au prompt)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Fait tourner le vrai WebUI Stable Diffusion (AUTOMATIC1111) dans Termux, en local sur le téléphone — aucune clé, aucune limite, qualité identique à un usage desktop. 3 étapes manuelles obligatoires avant le premier lancement (JARVIS ne peut pas les faire à ta place, ce sont des protections Android/Termux entre apps) :\n\n1️⃣ Installe Termux depuis F-Droid (PAS le Play Store, version abandonnée).\n2️⃣ Dans Termux : echo &quot;allow-external-apps=true&quot; &gt;&gt; ~/.termux/termux.properties puis termux-reload-settings.\n3️⃣ Autorise JARVIS à envoyer des commandes à Termux (bouton ci-dessous, ouvre directement le bon écran Android).\n\nUne fois fait, active l'option puis appuie sur « Configurer » : premier lancement plus long (téléchargement d'un modèle ~4 Go)."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/toggleTermuxSdButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="⬜ DÉSACTIVÉ — appuie pour activer"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/termuxAppSettingsButton"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:text="⚙️ OUVRIR LES PERMISSIONS ANDROID (étape 3)"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/termuxSetupButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="🚀 CONFIGURER STABLE DIFFUSION (TERMUX)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/termuxStatusButton"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:text="🔍 VÉRIFIER LE STATUT"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/termuxStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_input"
+                android:padding="12dp"
+                android:text="Statut inconnu — appuie sur « Vérifier le statut »"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:layout_marginBottom="16dp" />
+
         </LinearLayout>
 
     </LinearLayout>

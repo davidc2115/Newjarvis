@@ -1001,6 +1001,22 @@ object Prefs {
         prefs(context).edit().putString("glif_api_token", token.trim()).apply()
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // STABLE DIFFUSION WEBUI VIA TERMUX (voir TermuxController)
+    // ═════════════════════════════════════════════════════════════════════════
+    // Désactivé par défaut : nécessite une installation manuelle complète côté utilisateur
+    // (Termux + allow-external-apps + permission RUN_COMMAND) avant d'avoir le moindre effet
+    // — jamais activé automatiquement, pour ne jamais tenter silencieusement une commande
+    // Termux chez un utilisateur qui n'a rien configuré.
+    private const val KEY_TERMUX_SD_ENABLED = "termux_sd_enabled"
+
+    fun isTermuxSdEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_TERMUX_SD_ENABLED, false)
+
+    fun setTermuxSdEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_TERMUX_SD_ENABLED, enabled).apply()
+    }
+
     // ─── Interne ──────────────────────────────────────────────────────────────
 
     private fun prefs(context: Context) =

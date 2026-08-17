@@ -153,6 +153,13 @@ object ImageGenController {
         // bel et bien configurée mais rejetée pour une raison précise (ex: HTTP 400/403).
         val diagnostics = mutableListOf<String>()
 
+        // 0. Stable Diffusion local via Termux (AUTOMATIC1111 WebUI), si l'utilisateur a activé
+        // et configuré cette option — voir TermuxController. Placé EN PREMIER : c'est le seul
+        // moteur 100% local et sans quota/coût, donc prioritaire quand il est disponible ; mais
+        // silencieusement ignoré (retourne null, pas d'entrée diagnostic) si l'option n'est pas
+        // activée, pour ne jamais ralentir ni perturber les utilisateurs qui ne l'utilisent pas.
+        tryTermuxWebui(context, prompt, fmt, diagnostics)?.let { return it }
+
         // 1. Google Gemini, si une clé est configurée.
         tryGemini(context, prompt, fmt, diagnostics)?.let { return it }
 
@@ -381,6 +388,37 @@ object ImageGenController {
         return bitmap
     }
 
+    // ─── 0. Stable Diffusion local via Termux (AUTOMATIC1111 WebUI) ───────────
+    // Voir TermuxController pour le détail (installation, permission, API REST locale). Ce
+    // fournisseur est un cas particulier de la cascade : il ne fait RIEN (retourne null sans
+    // toucher aux diagnostics) tant que l'utilisateur n'a pas explicitement activé l'option dans
+    // ⚙ → Génération d'images, contrairement aux autres qui sont "actifs" dès qu'une clé existe.
+
+    private suspend fun tryTermuxWebui(context: Context, prompt: String, format: String, diagnostics: MutableList<String>): Result? {
+        if (!Prefs.isTermuxSdEnabled(context)) return null
+
+        val status = TermuxController.checkWebuiStatus(context)
+        if (!status.success) {
+            diagnostics.add("Stable Diffusion local (Termux) : ${status.message}")
+            return null
+        }
+
+        val raw = TermuxController.generateImage(context, prompt, format)
+        if (!raw.success || raw.bytes == null) {
+            diagnostics.add("Stable Diffusion local (Termux) : ${raw.error ?: "échec inconnu"}")
+            return null
+        }
+
+        val savedPath = saveToGallery(context, raw.bytes, prompt)
+        val base64 = Base64.encodeToString(raw.bytes, Base64.NO_WRAP)
+        return Result(
+            "🎨 Image générée pour « $prompt » (Stable Diffusion local via Termux, 100% hors-ligne).\n📁 Enregistrée dans : $savedPath",
+            base64,
+            "image/png",
+            savedPath
+        )
+    }
+
     // ─── 1. Google Gemini (Nano Banana) ────────────────────────────────────────
 
     private fun tryGemini(context: Context, prompt: String, format: String, diagnostics: MutableList<String>): Result? {
@@ -601,7 +639,10 @@ object ImageGenController {
 
     // ─────────────────────────────────────────────────────────────────────────
 
-    private fun saveToGallery(context: Context, bytes: ByteArray, prompt: String): String {
+    // internal (pas private) : réutilisée par TermuxController pour sauvegarder les images
+    // générées via Stable Diffusion WebUI (Termux) exactement de la même façon (dossier,
+    // indexation MediaStore) que les autres fournisseurs de cette cascade.
+    internal fun saveToGallery(context: Context, bytes: ByteArray, prompt: String): String {
         return try {
             val dir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
