@@ -37,7 +37,18 @@ import java.util.concurrent.TimeUnit
  *      requestPermission(), mais la validation finale se fait dans les réglages Android).
  *
  * Une fois ces 3 prérequis remplis, setupAndLaunch() envoie un script d'installation +
- * lancement du WebUI en arrière-plan via l'intent RUN_COMMAND (com.termux.RUN_COMMAND), et
+ * lancement du WebUI via l'intent RUN_COMMAND (com.termux.RUN_COMMAND) EN SESSION VISIBLE
+ * (EXTRA_COMMAND_BACKGROUND=false) plutôt qu'en arrière-plan pur : signalement utilisateur
+ * "1 task en cours mais rien ne s'affiche dans Termux" — un envoi en RUN_COMMAND_BACKGROUND=true
+ * (comme codé initialement) ne crée AUCUNE session Termux visible par conception (doc officielle
+ * github.com/termux/termux-app/wiki/RUN_COMMAND-Intent), donc rien à voir en ouvrant Termux
+ * n'était PAS un bug côté JARVIS mais le comportement documenté d'un envoi "background" — juste
+ * inexploitable pour un utilisateur qui veut une preuve visuelle que ça tourne (et un diagnostic
+ * en cas d'échec réseau/install pendant le téléchargement du modèle ~4 Go). En session visible,
+ * Termux s'ouvre et affiche le script s'exécuter en direct ; sur Android >= 10 ceci peut être
+ * bloqué tant que l'utilisateur n'a pas tapé sur la notification Termux (restriction Android de
+ * démarrage d'activité depuis l'arrière-plan, documentée par Termux) — relayé explicitement dans
+ * le message de succès plus bas plutôt que supposé acquis.
  * checkWebuiStatus() / generateImage() dialoguent ensuite en HTTP pur avec l'API REST du WebUI
  * (127.0.0.1:7860) — ce sont les 2 seuls mécanismes 100% documentés et fiables ; le canal de
  * retour de résultat de RUN_COMMAND (PendingIntent) a été délibérément écarté car ses clés
@@ -155,7 +166,7 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
                 setClassName(TERMUX_PACKAGE, RUN_COMMAND_SERVICE)
                 putExtra(EXTRA_COMMAND_PATH, "/data/data/com.termux/files/usr/bin/bash")
                 putExtra(EXTRA_COMMAND_ARGUMENTS, arrayOf("-c", SETUP_SCRIPT))
-                putExtra(EXTRA_COMMAND_BACKGROUND, true)
+                putExtra(EXTRA_COMMAND_BACKGROUND, false)
                 putExtra(EXTRA_COMMAND_SESSION_ACTION, "0")
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -166,14 +177,15 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
             DiagnosticsLog.log(context, "TERMUX_SD", "Commande d'installation envoyée à Termux (RUN_COMMAND accepté par Android, pas de garantie que Termux l'exécute réellement si allow-external-apps=false côté termux.properties).")
             Result(
                 true,
-                "✅ Installation lancée dans Termux (arrière-plan). Premier lancement : plusieurs " +
-                    "minutes (téléchargement du modèle ~4 Go selon ta connexion). Utilise « Vérifier " +
-                    "le statut » pour savoir quand c'est prêt. Si le statut reste « injoignable » après " +
-                    "plusieurs minutes, ouvre Termux toi-même : si aucune activité n'y apparaît (pas de " +
-                    "téléchargement en cours), la cause la plus probable est l'étape 2 non aboutie " +
-                    "(allow-external-apps=true jamais réellement écrit dans ~/.termux/termux.properties) " +
-                    "— relance la commande de l'étape 2 directement dans Termux et vérifie qu'aucune " +
-                    "erreur ne s'affiche avant de relancer la configuration ici."
+                "✅ Installation envoyée à Termux. Termux devrait s'ouvrir automatiquement et afficher " +
+                    "le script s'exécuter en direct (mises à jour de paquets, puis téléchargement du " +
+                    "modèle ~4 Go). Si RIEN ne s'ouvre, une notification « Termux » est probablement " +
+                    "apparue dans le volet de notifications Android (restriction Android empêchant " +
+                    "l'ouverture automatique depuis l'arrière-plan) — appuie dessus pour voir la session. " +
+                    "Premier lancement : plusieurs minutes selon ta connexion. Utilise « Vérifier le " +
+                    "statut » une fois l'installation terminée dans Termux (retour à l'invite de " +
+                    "commande) pour confirmer que le WebUI a bien démarré. Si une erreur s'affiche " +
+                    "dans Termux avant la fin, c'est la cause exacte du souci — relis-la directement."
             )
         } catch (e: Exception) {
             DiagnosticsLog.log(context, "TERMUX_SD", "Échec de l'envoi RUN_COMMAND : ${e.javaClass.simpleName} — ${e.message}")
