@@ -47,7 +47,8 @@ object JarvisCommandParser {
         "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "run_glif",
-        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "ollama_status"
+        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "ollama_status",
+        "list_contact_templates"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -630,24 +631,92 @@ object JarvisCommandParser {
             "save_contact_profile" -> {
                 val name = json.optString("name", "")
                 if (name.isBlank()) "❌ Nom du contact manquant."
-                else PeopleController.saveContact(
-                    context = context,
-                    name = name,
-                    category = if (json.has("category")) cleanOptionalField(json.optString("category", "")) else null,
-                    nickname = cleanOptionalField(json.optString("nickname", "")),
-                    phone = cleanOptionalField(json.optString("phone", "")),
-                    phonePro = cleanOptionalField(json.optString("phonePro", "")),
-                    email = cleanOptionalField(json.optString("email", "")),
-                    address = cleanOptionalField(json.optString("address", "")),
-                    addressPro = cleanOptionalField(json.optString("addressPro", "")),
-                    birthday = cleanOptionalField(json.optString("birthday", "")),
-                    company = cleanOptionalField(json.optString("company", "")),
-                    position = cleanOptionalField(json.optString("position", "")),
-                    latitude = if (json.has("latitude")) json.optDouble("latitude") else null,
-                    longitude = if (json.has("longitude")) json.optDouble("longitude") else null,
-                    installDate = cleanOptionalField(json.optString("installDate", "")),
-                    notes = cleanOptionalField(json.optString("notes", ""))
-                )
+                else {
+                    // Paramètre optionnel "template" : applique un modèle de fiche créé au
+                    // préalable (save_contact_template) — sert à la fois à PRÉ-REMPLIR un
+                    // nouveau contact et à METTRE À JOUR un contact existant avec les valeurs
+                    // du modèle. Priorité : champ donné explicitement dans CETTE demande >
+                    // valeur du modèle > valeur déjà enregistrée sur la fiche (gérée plus loin
+                    // par PeopleController.saveContact, qui conserve l'existant si on lui passe
+                    // null) > défaut. Un champ du modèle ne s'applique donc JAMAIS par-dessus un
+                    // champ explicitement précisé dans le même message.
+                    val templateName = cleanOptionalField(json.optString("template", ""))
+                    val template = templateName?.let { Prefs.findContactTemplate(context, it) }
+                    val templateWarning = if (templateName != null && template == null) {
+                        "\n⚠️ Modèle « $templateName » introuvable — contact enregistré sans lui " +
+                            "(vérifie le nom exact avec la liste des modèles)."
+                    } else ""
+
+                    val explicitCategory = if (json.has("category")) cleanOptionalField(json.optString("category", "")) else null
+
+                    val result = PeopleController.saveContact(
+                        context = context,
+                        name = name,
+                        category = explicitCategory ?: template?.category,
+                        nickname = cleanOptionalField(json.optString("nickname", "")) ?: template?.nickname,
+                        phone = cleanOptionalField(json.optString("phone", "")) ?: template?.phone,
+                        phonePro = cleanOptionalField(json.optString("phonePro", "")) ?: template?.phonePro,
+                        email = cleanOptionalField(json.optString("email", "")) ?: template?.email,
+                        address = cleanOptionalField(json.optString("address", "")) ?: template?.address,
+                        addressPro = cleanOptionalField(json.optString("addressPro", "")) ?: template?.addressPro,
+                        birthday = cleanOptionalField(json.optString("birthday", "")) ?: template?.birthday,
+                        company = cleanOptionalField(json.optString("company", "")) ?: template?.company,
+                        position = cleanOptionalField(json.optString("position", "")) ?: template?.position,
+                        latitude = if (json.has("latitude")) json.optDouble("latitude") else null,
+                        longitude = if (json.has("longitude")) json.optDouble("longitude") else null,
+                        installDate = cleanOptionalField(json.optString("installDate", "")),
+                        notes = cleanOptionalField(json.optString("notes", "")) ?: template?.notes
+                    )
+                    result + templateWarning
+                }
+            }
+
+            "save_contact_template" -> {
+                val name = json.optString("name", "")
+                if (name.isBlank()) "❌ Nom du modèle manquant."
+                else {
+                    Prefs.saveContactTemplate(
+                        context,
+                        Prefs.ContactTemplate(
+                            name = name.trim(),
+                            category = cleanOptionalField(json.optString("category", "")),
+                            nickname = cleanOptionalField(json.optString("nickname", "")),
+                            phone = cleanOptionalField(json.optString("phone", "")),
+                            phonePro = cleanOptionalField(json.optString("phonePro", "")),
+                            email = cleanOptionalField(json.optString("email", "")),
+                            address = cleanOptionalField(json.optString("address", "")),
+                            addressPro = cleanOptionalField(json.optString("addressPro", "")),
+                            birthday = cleanOptionalField(json.optString("birthday", "")),
+                            company = cleanOptionalField(json.optString("company", "")),
+                            position = cleanOptionalField(json.optString("position", "")),
+                            notes = cleanOptionalField(json.optString("notes", ""))
+                        )
+                    )
+                    "✅ Modèle de fiche contact « ${name.trim()} » enregistré. Utilisable pour créer un nouveau " +
+                        "contact ou mettre à jour un contact existant en le citant (paramètre template)."
+                }
+            }
+
+            "list_contact_templates" -> {
+                val templates = Prefs.getContactTemplates(context)
+                if (templates.isEmpty()) "ℹ️ Aucun modèle de fiche contact enregistré pour l'instant."
+                else templates.joinToString("\n\n") { t ->
+                    val fields = listOfNotNull(
+                        t.category?.let { "catégorie : $it" },
+                        t.company?.let { "société : $it" },
+                        t.position?.let { "poste : $it" },
+                        t.phone?.let { "tél : $it" },
+                        t.email?.let { "email : $it" }
+                    )
+                    if (fields.isEmpty()) "**${t.name}**" else "**${t.name}** — ${fields.joinToString(", ")}"
+                }
+            }
+
+            "delete_contact_template" -> {
+                val name = json.optString("name", "")
+                if (name.isBlank()) "❌ Nom du modèle manquant."
+                else if (Prefs.deleteContactTemplate(context, name)) "✅ Modèle « ${name.trim()} » supprimé."
+                else "❌ Aucun modèle nommé « ${name.trim()} » trouvé."
             }
             "search_contact_profile" -> {
                 val query = json.optString("query", "")

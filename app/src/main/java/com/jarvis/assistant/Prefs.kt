@@ -1101,6 +1101,107 @@ object Prefs {
         prefs(context).edit().putBoolean(KEY_TERMUX_SD_ENABLED, enabled).apply()
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // MODÈLES DE FICHES CONTACT (templates réutilisables)
+    // ═════════════════════════════════════════════════════════════════════════
+    // Un modèle est un jeu de valeurs par défaut nommé (ex: "Client pro", "Famille"),
+    // créé une fois puis réutilisé pour : (1) pré-remplir un NOUVEAU contact, (2) mettre
+    // à jour un contact EXISTANT en lui appliquant ces valeurs. Champs identiques à ceux
+    // de PeopleController.saveContact() pour que le mapping modèle → contact soit direct.
+    // Stocké en JSON dans les SharedPreferences (même schéma que GenerationRecord ci-dessus).
+
+    data class ContactTemplate(
+        val name: String,
+        val category: String? = null,
+        val nickname: String? = null,
+        val phone: String? = null,
+        val phonePro: String? = null,
+        val email: String? = null,
+        val address: String? = null,
+        val addressPro: String? = null,
+        val birthday: String? = null,
+        val company: String? = null,
+        val position: String? = null,
+        val notes: String? = null
+    ) {
+        fun toJson(): JSONObject = JSONObject().apply {
+            put("name", name)
+            put("category", category ?: "")
+            put("nickname", nickname ?: "")
+            put("phone", phone ?: "")
+            put("phonePro", phonePro ?: "")
+            put("email", email ?: "")
+            put("address", address ?: "")
+            put("addressPro", addressPro ?: "")
+            put("birthday", birthday ?: "")
+            put("company", company ?: "")
+            put("position", position ?: "")
+            put("notes", notes ?: "")
+        }
+        companion object {
+            fun fromJson(j: JSONObject) = ContactTemplate(
+                name = j.optString("name"),
+                category = j.optString("category", "").ifBlank { null },
+                nickname = j.optString("nickname", "").ifBlank { null },
+                phone = j.optString("phone", "").ifBlank { null },
+                phonePro = j.optString("phonePro", "").ifBlank { null },
+                email = j.optString("email", "").ifBlank { null },
+                address = j.optString("address", "").ifBlank { null },
+                addressPro = j.optString("addressPro", "").ifBlank { null },
+                birthday = j.optString("birthday", "").ifBlank { null },
+                company = j.optString("company", "").ifBlank { null },
+                position = j.optString("position", "").ifBlank { null },
+                notes = j.optString("notes", "").ifBlank { null }
+            )
+        }
+    }
+
+    /** Triés par nom pour un affichage/recherche stable. */
+    fun getContactTemplates(context: Context): List<ContactTemplate> {
+        val json = prefs(context).getString("contact_templates", "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { ContactTemplate.fromJson(arr.getJSONObject(it)) }
+                .sortedBy { it.name.lowercase() }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** Recherche insensible à la casse/accents, comme findExactNameMatch côté contacts. */
+    fun findContactTemplate(context: Context, name: String): ContactTemplate? {
+        val normalized = name.trim().lowercase()
+        if (normalized.isBlank()) return null
+        return getContactTemplates(context).firstOrNull { it.name.trim().lowercase() == normalized }
+    }
+
+    /**
+     * Crée le modèle [template] ou, s'il en existe déjà un du même nom (comparaison
+     * insensible à la casse), le remplace entièrement — comportement "upsert" plutôt que
+     * doublons silencieux ou erreur bloquante, cohérent avec saveContact() qui réutilise
+     * lui aussi une fiche existante de même nom au lieu d'en créer une nouvelle.
+     */
+    fun saveContactTemplate(context: Context, template: ContactTemplate) {
+        val normalized = template.name.trim().lowercase()
+        val list = getContactTemplates(context).filter { it.name.trim().lowercase() != normalized }.toMutableList()
+        list.add(template)
+        writeContactTemplates(context, list)
+    }
+
+    /** Retourne true si un modèle correspondant a bien été trouvé et supprimé. */
+    fun deleteContactTemplate(context: Context, name: String): Boolean {
+        val normalized = name.trim().lowercase()
+        val before = getContactTemplates(context)
+        val after = before.filter { it.name.trim().lowercase() != normalized }
+        if (after.size == before.size) return false
+        writeContactTemplates(context, after)
+        return true
+    }
+
+    private fun writeContactTemplates(context: Context, list: List<ContactTemplate>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(it.toJson()) }
+        prefs(context).edit().putString("contact_templates", arr.toString()).apply()
+    }
+
     // ─── Interne ──────────────────────────────────────────────────────────────
 
     private fun prefs(context: Context) =
