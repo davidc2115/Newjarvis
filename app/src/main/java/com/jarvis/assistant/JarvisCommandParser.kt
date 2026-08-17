@@ -46,7 +46,7 @@ object JarvisCommandParser {
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
-        "perplexity_search", "firecrawl_scrape", "search_glifs", "run_glif",
+        "perplexity_search", "firecrawl_scrape", "run_glif",
         "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "ollama_status"
     )
 
@@ -405,13 +405,9 @@ object JarvisCommandParser {
                 else FirecrawlController.scrape(context, url).message
             }
             "run_glif" -> {
-                val workflowId = json.optString("workflowId", "").ifBlank { json.optString("id", "") }
-                val input = json.optString("input", "")
-                GlifController.runWorkflow(context, workflowId, input).message
-            }
-            "search_glifs" -> {
-                val query = json.optString("query", "")
-                GlifController.searchWorkflows(context, query).message
+                val prompt = json.optString("prompt", "").ifBlank { json.optString("input", "") }
+                val continueProjectId = json.optString("projectId", "").ifBlank { null }
+                GlifController.composeProject(context, prompt, continueProjectId).message
             }
 
             // ─── Stable Diffusion local via Termux (opt-in, voir TermuxController) ────

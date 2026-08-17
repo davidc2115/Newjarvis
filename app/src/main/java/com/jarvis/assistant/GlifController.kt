@@ -2,27 +2,36 @@ package com.jarvis.assistant
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Glif — exécute des workflows IA (« glifs ») créés sur glif.app (chaînes de modèles
- * texte/image/audio/vidéo partagées par la communauté). Contrairement à Perplexity/Firecrawl,
- * Glif n'expose PLUS d'API REST simple : leur ancienne API (simple-api.glif.app) a été
- * dépréciée le 2026-05-20 lors du passage à "Glif 2.0" — le seul point d'entrée programmatique
- * restant est leur serveur MCP hébergé (https://glif.app/mcp), qui parle JSON-RPC 2.0 plutôt
- * qu'une API REST classique. Ce contrôleur implémente donc un client MCP minimal, dédié à ce
- * seul serveur (pas un système générique multi-serveurs MCP — choix explicite de l'utilisateur),
- * limité aux 2 outils utiles côté JARVIS : search_workflows et run_workflow (voir
- * github.com/glifxyz/glif-mcp-server pour la liste complète des noms d'outils exposés par ce
- * serveur, réutilisés tels quels ici puisque le serveur hébergé expose la même interface que la
- * version locale historique du serveur).
+ * Glif — agent IA de composition média (image/vidéo/audio) sur glif.app, piloté via son serveur
+ * MCP hébergé, JSON-RPC 2.0 plutôt qu'une API REST classique.
+ *
+ * Signalement utilisateur "serveur MCP injoignable" (2026-08-17) diagnostiqué via la doc
+ * officielle actuelle (glif.app/mcp + glif.app/llms.txt, fetchées directement) : DEUX choses
+ * avaient changé depuis l'implémentation initiale de ce contrôleur, même schéma que la
+ * dépréciation Groq/le champ aspectRatio Gemini plus tôt dans cette session (un détail d'API
+ * correct au moment de l'écriture a évolué depuis, silencieusement) :
+ *   1. Endpoint déplacé de https://glif.app/mcp (page marketing HTML depuis, plus un endpoint
+ *      JSON-RPC — d'où "injoignable", le POST atterrissait sur une page web) vers
+ *      https://glif.app/api/mcp.
+ *   2. Le modèle "workflow" (glifs communautaires identifiés par ID, outils search_workflows/
+ *      run_workflow) a été entièrement remplacé par un modèle "projet" en langage naturel :
+ *      compose_project{prompt, project_id?} démarre/continue un projet et renvoie un job_id à
+ *      suivre via get_job_status{job_id} jusqu'à status "completed"/"failed" — il n'existe plus
+ *      de recherche de glif communautaire par nom (list_projects ne liste que les PROPRES
+ *      projets de l'utilisateur), donc search_workflows n'a plus d'équivalent direct et a été
+ *      retiré plutôt que de laisser une action qui échouerait silencieusement.
+ * Auth Bearer (glif_v1_...) toujours valide pour les clients HTTP directs (non-Claude) d'après
+ * la doc — seul le flux "Claude connecteur" bascule sur OAuth, non concerné ici.
  *
  * Transport HTTP "Streamable" du protocole MCP (spec 2025-06-18) : chaque requête JSON-RPC est
  * un POST simple ; le serveur peut répondre soit en JSON direct (Content-Type: application/json)
@@ -35,7 +44,7 @@ object GlifController {
 
     data class Result(val success: Boolean, val message: String)
 
-    private const val MCP_URL = "https://glif.app/mcp"
+    private const val MCP_URL = "https://glif.app/api/mcp"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -44,17 +53,51 @@ object GlifController {
 
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    suspend fun runWorkflow(context: Context, workflowId: String, input: String): Result = withContext(Dispatchers.IO) {
-        if (workflowId.isBlank()) return@withContext Result(false, "❌ Aucun identifiant de workflow Glif fourni.")
-        callTool(
-            context, "run_workflow",
-            JSONObject().put("id", workflowId).put("inputs", JSONArray().put(input))
-        )
-    }
+    // Une génération dure "souvent 1 à 5 minutes" d'après la doc — 30 tentatives à 10s
+    // couvrent donc le cas normal avec une marge confortable sans attendre indéfiniment.
+    private const val JOB_POLL_MAX_ATTEMPTS = 30
+    private const val JOB_POLL_DELAY_MS = 10_000L
 
-    suspend fun searchWorkflows(context: Context, query: String): Result = withContext(Dispatchers.IO) {
-        if (query.isBlank()) return@withContext Result(false, "❌ Aucun terme de recherche fourni pour chercher un glif.")
-        callTool(context, "search_workflows", JSONObject().put("query", query))
+    /**
+     * Démarre (ou continue si [continueProjectId] est fourni) un projet Glif à partir d'une
+     * description en langage naturel, puis attend la fin de la génération en sondant
+     * get_job_status. Remplace l'ancien run_workflow{workflowId,input} — il n'y a plus d'ID de
+     * workflow à connaître, seulement une description ; voir la doc en tête de fichier.
+     */
+    suspend fun composeProject(context: Context, prompt: String, continueProjectId: String? = null): Result = withContext(Dispatchers.IO) {
+        if (prompt.isBlank()) return@withContext Result(false, "❌ Décris ce que tu veux que Glif génère (image/vidéo/audio).")
+
+        val startArgs = JSONObject().put("prompt", prompt)
+        if (!continueProjectId.isNullOrBlank()) startArgs.put("project_id", continueProjectId)
+        val started = callTool(context, "compose_project", startArgs)
+        if (!started.success) return@withContext started
+
+        val jobId = Regex("\"job_id\"\\s*:\\s*\"([^\"]+)\"").find(started.message)?.groupValues?.get(1)
+        if (jobId.isNullOrBlank()) {
+            // Réponse reçue mais sans job_id exploitable (schéma inattendu) : on relaie quand
+            // même le texte brut plutôt que d'échouer silencieusement — l'utilisateur/JARVIS
+            // pourront au moins voir ce que Glif a réellement répondu.
+            return@withContext started
+        }
+
+        var attempts = 0
+        while (attempts < JOB_POLL_MAX_ATTEMPTS) {
+            delay(JOB_POLL_DELAY_MS)
+            attempts++
+            val statusResult = callTool(context, "get_job_status", JSONObject().put("job_id", jobId))
+            if (!statusResult.success) return@withContext statusResult
+            val status = Regex("\"status\"\\s*:\\s*\"(\\w+)\"").find(statusResult.message)?.groupValues?.get(1)
+            when (status) {
+                "completed" -> return@withContext statusResult
+                "failed" -> return@withContext Result(false, "❌ Glif : génération échouée — ${statusResult.message}")
+                // "pending"/"running"/statut inconnu/absent : on continue de sonder.
+            }
+        }
+        Result(
+            false,
+            "⏳ Glif : toujours en cours après ${JOB_POLL_MAX_ATTEMPTS * JOB_POLL_DELAY_MS / 1000}s — " +
+                "le projet continue en arrière-plan côté Glif, consultable sur glif.app (job $jobId)."
+        )
     }
 
     /**
