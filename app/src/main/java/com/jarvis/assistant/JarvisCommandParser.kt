@@ -45,7 +45,8 @@ object JarvisCommandParser {
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
         "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
-        "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations"
+        "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
+        "perplexity_search", "firecrawl_scrape", "search_glifs", "run_glif"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -381,6 +382,29 @@ object JarvisCommandParser {
             "web_search" -> {
                 val query = json.optString("query", "")
                 WebSearchController.search(context, query)
+            }
+
+            // ─── Intégrations distantes (Perplexity / Firecrawl / Glif) ───────────────
+            // Voir Prefs.getApiKeysFor(Provider.PERPLEXITY)/getFirecrawlApiKey/getGlifApiToken : clés saisies
+            // uniquement par l'utilisateur dans ⚙ → Clés API, jamais codées en dur (dépôt public).
+            "perplexity_search" -> {
+                val query = json.optString("query", "")
+                val r = PerplexityController.search(context, query)
+                r.message
+            }
+            "firecrawl_scrape" -> {
+                val url = json.optString("url", "")
+                if (url.isBlank()) "❌ Précise l'URL de la page à lire."
+                else FirecrawlController.scrape(context, url).message
+            }
+            "run_glif" -> {
+                val workflowId = json.optString("workflowId", "").ifBlank { json.optString("id", "") }
+                val input = json.optString("input", "")
+                GlifController.runWorkflow(context, workflowId, input).message
+            }
+            "search_glifs" -> {
+                val query = json.optString("query", "")
+                GlifController.searchWorkflows(context, query).message
             }
 
             "delete_event" -> {

@@ -972,6 +972,35 @@ object Prefs {
         prefs(context).edit().putString("generation_history", arr.toString()).apply()
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // INTÉGRATIONS MCP DISTANTES (Perplexity, Firecrawl, Glif)
+    // ═════════════════════════════════════════════════════════════════════════
+    // Playwright n'a pas d'équivalent hébergé/distant officiel (c'est un serveur MCP local qui
+    // pilote un vrai navigateur via Node.js — pas embarquable dans un APK Android) : remplacé
+    // en pratique par web_search/open_maps déjà existants. Les 3 ci-dessous exposent une API
+    // HTTP distante utilisable directement depuis le téléphone.
+
+    // Perplexity n'a PAS de stockage dédié ici : PerplexityController réutilise directement
+    // Prefs.getApiKeysFor(context, Provider.PERPLEXITY), la clé déjà configurable dans
+    // ⚙ → Clés API (Perplexity est déjà un fournisseur du mode Automatique de chat) — inutile
+    // de faire ressaisir la même clé une deuxième fois dans un champ séparé.
+
+    /** Clé API Firecrawl (firecrawl.dev, préfixe "fc-") — extraction propre de pages web. */
+    fun getFirecrawlApiKey(context: Context): String =
+        prefs(context).getString("firecrawl_api_key", "") ?: ""
+
+    fun saveFirecrawlApiKey(context: Context, key: String) {
+        prefs(context).edit().putString("firecrawl_api_key", key.trim()).apply()
+    }
+
+    /** Jeton API Glif (glif.app/settings/api-tokens) — exécution de workflows IA (glifs). */
+    fun getGlifApiToken(context: Context): String =
+        prefs(context).getString("glif_api_token", "") ?: ""
+
+    fun saveGlifApiToken(context: Context, token: String) {
+        prefs(context).edit().putString("glif_api_token", token.trim()).apply()
+    }
+
     // ─── Interne ──────────────────────────────────────────────────────────────
 
     private fun prefs(context: Context) =

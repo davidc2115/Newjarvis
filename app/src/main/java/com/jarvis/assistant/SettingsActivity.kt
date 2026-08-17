@@ -45,6 +45,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var apiKeysContainer: LinearLayout
 
     private lateinit var hfTokenInput: EditText
+    private lateinit var firecrawlKeyInput: EditText
+    private lateinit var glifTokenInput: EditText
     private lateinit var customModelUrlInput: EditText
     private lateinit var localModelPathText: TextView
     private lateinit var downloadProgressText: TextView
@@ -137,6 +139,8 @@ class SettingsActivity : AppCompatActivity() {
         apiKeysContainer      = findViewById(R.id.apiKeysContainer)
 
         hfTokenInput          = findViewById(R.id.hfTokenInput)
+        firecrawlKeyInput     = findViewById(R.id.firecrawlKeyInput)
+        glifTokenInput        = findViewById(R.id.glifTokenInput)
         customModelUrlInput   = findViewById(R.id.customModelUrlInput)
         localModelPathText    = findViewById(R.id.localModelPathText)
         downloadProgressText  = findViewById(R.id.downloadProgressText)
@@ -259,6 +263,8 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun loadSavedValues() {
         hfTokenInput.setText(Prefs.getHfToken(this))
+        firecrawlKeyInput.setText(Prefs.getFirecrawlApiKey(this))
+        glifTokenInput.setText(Prefs.getGlifApiToken(this))
         baseUrlInput.setText(Prefs.getBaseUrl(this))
         modelInput.setText(Prefs.getModel(this))
         val initialProvider = Prefs.getProvider(this)
@@ -358,6 +364,8 @@ class SettingsActivity : AppCompatActivity() {
         saveApiKeysButton.setOnClickListener {
             val keys = apiKeyFields.mapValues { (_, field) -> field.text.toString().trim() }
             Prefs.saveApiKeys(this, keys)
+            Prefs.saveFirecrawlApiKey(this, firecrawlKeyInput.text.toString().trim())
+            Prefs.saveGlifApiToken(this, glifTokenInput.text.toString().trim())
             Toast.makeText(this, "✅ Toutes les clés API enregistrées", Toast.LENGTH_SHORT).show()
         }
 

@@ -323,6 +323,54 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
 
+            <!-- Intégrations distantes (voir FirecrawlController/GlifController). Perplexity
+                 n'a pas de champ ici : sa clé est déjà dans la liste dynamique ci-dessus
+                 (apiKeysContainer, Provider.PERPLEXITY), pas de doublon. -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔥 Firecrawl (lecture de pages web)"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="4dp" />
+
+            <EditText
+                android:id="@+id/firecrawlKeyInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="Clé Firecrawl (fc-...)"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/glifTokenLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🧩 Glif (workflows IA glif.app)"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="4dp" />
+
+            <EditText
+                android:id="@+id/glifTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="Jeton Glif (glif.app/settings/api-tokens)"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginBottom="4dp" />
+
             <TextView
                 android:id="@+id/saveApiKeysButton"
                 android:layout_width="match_parent"
