@@ -402,6 +402,34 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         setupTermuxSdSection()
+        setupDebugLogsButton()
+    }
+
+    /**
+     * Bouton "Voir / copier le journal" — même schéma que showCrashReportIfAny() dans
+     * MainActivity (AlertDialog copiable), mais pour DiagnosticsLog (échecs de cascade
+     * IA/image/commandes, PAS des plantages) : la seule façon honnête de "voir les logs" côté
+     * JARVIS, qui n'a aucun accès distant au téléphone de l'utilisateur.
+     */
+    private fun setupDebugLogsButton() {
+        val button = findViewById<TextView>(R.id.viewDebugLogsButton)
+        button.setOnClickListener {
+            val content = DiagnosticsLog.readRecent(this, 200)
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("🩺 Journal de diagnostics")
+                .setMessage(content)
+                .setPositiveButton("Copier") { _, _ ->
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Journal JARVIS", content))
+                    Toast.makeText(this, "Journal copié dans le presse-papier", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Fermer", null)
+                .setNeutralButton("Vider") { _, _ ->
+                    DiagnosticsLog.clear(this)
+                    Toast.makeText(this, "Journal vidé", Toast.LENGTH_SHORT).show()
+                }
+                .show()
+        }
     }
 
     private fun updateWakeWordButtonLabel(button: TextView) {

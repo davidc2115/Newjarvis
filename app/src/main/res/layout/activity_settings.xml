@@ -542,6 +542,48 @@
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp" />
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Journal de diagnostics (voir DiagnosticsLog) — échecs réels de la cascade IA
+                 texte/image/commandes, horodatés. JARVIS n'a AUCUN accès distant au téléphone :
+                 ce bouton est la façon honnête de consulter ce qui s'est réellement passé, sans
+                 avoir à demander en conversation. Peut aussi être demandé directement à JARVIS
+                 (« montre-moi les derniers logs »). -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🩺 Journal de diagnostics"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Historique local des derniers échecs réels (ex: « Toutes les IA ont échoué »), avec horodatage et détail par fournisseur — utile pour diagnostiquer un souci sans avoir à se souvenir du message d'erreur exact."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/viewDebugLogsButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="📋 VOIR / COPIER LE JOURNAL"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="16dp" />
+
         </LinearLayout>
 
 

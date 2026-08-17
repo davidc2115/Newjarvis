@@ -47,7 +47,7 @@ object JarvisCommandParser {
         "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "search_glifs", "run_glif",
-        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts"
+        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -149,9 +149,14 @@ object JarvisCommandParser {
 
         val results = matches.map { match ->
             val jsonStr = match.payload.trim()
+            // action extrait AVANT le try/catch de l'exécution (pas juste du parsing JSON) pour
+            // pouvoir l'inclure dans DiagnosticsLog même si executeAction lève une exception —
+            // sans quoi une action qui plante ne laisserait aucune trace de LAQUELLE, seulement
+            // le message d'erreur générique affiché une fois puis perdu.
+            var action = ""
             try {
                 val json = JSONObject(jsonStr)
-                val action = json.optString("action", "").lowercase()
+                action = json.optString("action", "").lowercase()
                 val resultText = executeAction(context, action, json)
                 val img = pendingImageBase64
                 val mime = pendingImageMime
@@ -159,6 +164,7 @@ object JarvisCommandParser {
                 pendingImageMime = null
                 CommandResult.Executed(resultText, action, action in INFORMATIONAL_ACTIONS, img, mime)
             } catch (e: Exception) {
+                DiagnosticsLog.log(context, "JARVIS_CMD", "Action « $action » — exception : ${e.javaClass.simpleName} ${e.message}")
                 CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}", "", false)
             }
         }
@@ -411,6 +417,12 @@ object JarvisCommandParser {
             // ─── Stable Diffusion local via Termux (opt-in, voir TermuxController) ────
             "termux_sd_setup" -> TermuxController.setupAndLaunch(context).message
             "termux_sd_status" -> TermuxController.checkWebuiStatus(context).message
+
+            // ─── Journal de diagnostics (échecs de cascade IA/image/commandes, voir
+            // DiagnosticsLog) — JARVIS n'a aucun accès distant au téléphone, ce journal
+            // consultable en conversation est la façon honnête de "voir les logs".
+            "read_debug_logs" -> DiagnosticsLog.readRecent(context)
+            "clear_debug_logs" -> DiagnosticsLog.clear(context)
 
             "delete_event" -> {
                 val eventId = json.optLong("eventId", -1)

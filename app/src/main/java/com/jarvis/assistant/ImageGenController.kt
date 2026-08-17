@@ -182,6 +182,10 @@ object ImageGenController {
             "\n\nDétail des échecs :\n" + diagnostics.joinToString("\n") { "• $it" }
         } else ""
 
+        // Journalisé pour consultation ultérieure (action read_debug_logs) — le détail complet
+        // de chaque fournisseur essayé disparaît sinon dès que ce message quitte l'écran du chat.
+        DiagnosticsLog.log(context, "IMAGE", "Échec total (${diagnostics.size} fournisseur(s) essayé(s)) : " + diagnostics.joinToString(" | "))
+
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +
                 "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué, AI Horde). " +
