@@ -47,7 +47,7 @@ object JarvisCommandParser {
         "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "search_glifs", "run_glif",
-        "termux_sd_setup", "termux_sd_status"
+        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -706,6 +706,7 @@ object JarvisCommandParser {
                 if (name.isBlank()) "❌ Nom du contact manquant."
                 else PeopleController.navigateToContact(context, name)
             }
+            "refresh_all_contacts" -> PeopleController.refreshAllContacts(context)
 
             // Vault Obsidian réel (notes libres, distinct des fiches contacts ci-dessus) —
             // toujours utiliser ces actions plutôt que de deviner un contenu : le chemin

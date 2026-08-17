@@ -278,6 +278,49 @@ object PeopleController {
         return sb.toString().trimEnd()
     }
 
+    /**
+     * Contenu markdown COMPLET d'une fiche (frontmatter + titre + notes + coordonnées +
+     * historique + pièces jointes) — UNIQUE point de construction, partagé par saveContact,
+     * addVisit, addAttachment ET refreshAllContacts. Avant cette extraction, chacune de ces
+     * 4 fonctions reconstruisait ce même buildString séparément : elles avaient déjà été
+     * alignées à la main lors des derniers correctifs de richesse des fiches, mais rien
+     * n'empêchait qu'elles redivergent silencieusement au prochain changement fait dans une
+     * seule des 4 copies — cause plausible d'une partie de l'incohérence "les fiches ne se
+     * ressemblent pas entre elles" signalée en observant le vault directement dans Obsidian.
+     * Centraliser ici rend cette divergence structurellement impossible.
+     */
+    private fun renderContactMarkdown(
+        canonicalName: String, cat: String, nickname: String?, phone: String?, phonePro: String?,
+        email: String?, address: String?, addressPro: String?, birthday: String?, company: String?,
+        position: String?, latitude: Double?, longitude: Double?, installDate: String?,
+        notes: String, visits: List<String>, attachments: List<String>
+    ): String {
+        val frontmatterLines = buildFrontmatterLines(
+            cat, nickname, phone, phonePro, email, address, addressPro, birthday, company,
+            position, latitude, longitude, installDate
+        )
+        return buildString {
+            append("---\n")
+            append(frontmatterLines.joinToString("\n"))
+            append("\n---\n\n")
+            append("# 🪪 $canonicalName\n\n")
+            if (notes.isNotBlank()) append(notes) else append("_Aucune note._")
+            append("\n\n")
+            append(buildCoordsSection(
+                cat, nickname, phone, phonePro, email, address, addressPro, birthday, company,
+                position, latitude, longitude, installDate
+            ))
+            if (visits.isNotEmpty()) {
+                append("\n\n$VISITS_MARKER\n")
+                visits.forEach { append("- $it\n") }
+            }
+            if (attachments.isNotEmpty()) {
+                append("\n\n$ATTACHMENTS_MARKER\n")
+                attachments.forEach { append("- $it\n") }
+            }
+        }
+    }
+
     /** Version publique légère (pour l'export KML notamment), sans les détails internes de parsing. */
     data class ContactSummary(
         val name: String,
@@ -400,31 +443,11 @@ object PeopleController {
             val finalVisits = existing?.visits ?: emptyList()
             val finalAttachments = existing?.attachments ?: emptyList()
 
-            val frontmatterLines = buildFrontmatterLines(
-                cat, finalNickname, finalPhone, finalPhonePro, finalEmail, finalAddress,
-                finalAddressPro, finalBirthday, finalCompany, finalPosition, finalLat, finalLng, finalInstallDate
+            val content = renderContactMarkdown(
+                canonicalName, cat, finalNickname, finalPhone, finalPhonePro, finalEmail, finalAddress,
+                finalAddressPro, finalBirthday, finalCompany, finalPosition, finalLat, finalLng, finalInstallDate,
+                finalNotes, finalVisits, finalAttachments
             )
-
-            val content = buildString {
-                append("---\n")
-                append(frontmatterLines.joinToString("\n"))
-                append("\n---\n\n")
-                append("# 🪪 $canonicalName\n\n")
-                if (finalNotes.isNotBlank()) append(finalNotes) else append("_Aucune note._")
-                append("\n\n")
-                append(buildCoordsSection(
-                    cat, finalNickname, finalPhone, finalPhonePro, finalEmail, finalAddress,
-                    finalAddressPro, finalBirthday, finalCompany, finalPosition, finalLat, finalLng, finalInstallDate
-                ))
-                if (finalVisits.isNotEmpty()) {
-                    append("\n\n$VISITS_MARKER\n")
-                    finalVisits.forEach { append("- $it\n") }
-                }
-                if (finalAttachments.isNotEmpty()) {
-                    append("\n\n$ATTACHMENTS_MARKER\n")
-                    finalAttachments.forEach { append("- $it\n") }
-                }
-            }
 
             file.writeText(content)
 
@@ -447,33 +470,12 @@ object PeopleController {
             val targetName = contact?.name ?: name
             val file = File(folder, "${safeFileName(targetName)}.md")
 
-            val frontmatterLines = buildFrontmatterLines(
-                category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
+            val content = renderContactMarkdown(
+                targetName, category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
                 contact?.address, contact?.addressPro, contact?.birthday, contact?.company,
-                contact?.position, contact?.latitude, contact?.longitude, contact?.installDate
+                contact?.position, contact?.latitude, contact?.longitude, contact?.installDate,
+                contact?.notes ?: "", updatedVisits, contact?.attachments ?: emptyList()
             )
-
-            val content = buildString {
-                append("---\n")
-                append(frontmatterLines.joinToString("\n"))
-                append("\n---\n\n")
-                append("# 🪪 $targetName\n\n")
-                val notesText = contact?.notes?.takeIf { it.isNotBlank() } ?: "_Aucune note._"
-                append(notesText)
-                append("\n\n")
-                append(buildCoordsSection(
-                    category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
-                    contact?.address, contact?.addressPro, contact?.birthday, contact?.company,
-                    contact?.position, contact?.latitude, contact?.longitude, contact?.installDate
-                ))
-                append("\n\n$VISITS_MARKER\n")
-                updatedVisits.forEach { append("- $it\n") }
-                val existingAttachments = contact?.attachments ?: emptyList()
-                if (existingAttachments.isNotEmpty()) {
-                    append("\n\n$ATTACHMENTS_MARKER\n")
-                    existingAttachments.forEach { append("- $it\n") }
-                }
-            }
             file.writeText(content)
             "✅ Rendez-vous ajouté à l'historique de **$targetName**."
         } catch (e: Exception) {
@@ -505,33 +507,12 @@ object PeopleController {
             val file = File(contactsFolder(context), "${safeFileName(targetName)}.md")
             val updatedAttachments = (contact?.attachments ?: emptyList()) + destFile.absolutePath
 
-            val frontmatterLines = buildFrontmatterLines(
-                category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
+            val content = renderContactMarkdown(
+                targetName, category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
                 contact?.address, contact?.addressPro, contact?.birthday, contact?.company,
-                contact?.position, contact?.latitude, contact?.longitude, contact?.installDate
+                contact?.position, contact?.latitude, contact?.longitude, contact?.installDate,
+                contact?.notes ?: "", contact?.visits ?: emptyList(), updatedAttachments
             )
-
-            val content = buildString {
-                append("---\n")
-                append(frontmatterLines.joinToString("\n"))
-                append("\n---\n\n")
-                append("# 🪪 $targetName\n\n")
-                val notesText = contact?.notes?.takeIf { it.isNotBlank() } ?: "_Aucune note._"
-                append(notesText)
-                append("\n\n")
-                append(buildCoordsSection(
-                    category, contact?.nickname, contact?.phone, contact?.phonePro, contact?.email,
-                    contact?.address, contact?.addressPro, contact?.birthday, contact?.company,
-                    contact?.position, contact?.latitude, contact?.longitude, contact?.installDate
-                ))
-                val visits = contact?.visits ?: emptyList()
-                if (visits.isNotEmpty()) {
-                    append("\n\n$VISITS_MARKER\n")
-                    visits.forEach { append("- $it\n") }
-                }
-                append("\n\n$ATTACHMENTS_MARKER\n")
-                updatedAttachments.forEach { append("- $it\n") }
-            }
             file.writeText(content)
             "📎 « $safeOriginalName » attaché à la fiche de **$targetName**."
         } catch (e: Exception) {
@@ -670,6 +651,62 @@ object PeopleController {
         val sb = StringBuilder("📇 **Contacts${if (!all) " — $cat" else ""}** :\n\n")
         contacts.forEach { appendSummary(sb, it) }
         return sb.toString().trim()
+    }
+
+    /**
+     * Réécrit TOUTES les fiches contact existantes avec le gabarit actuel (frontmatter +
+     * section ## 📇 Coordonnées enrichie), sans jamais changer les DONNÉES elles-mêmes —
+     * corrige l'incohérence réelle signalée en parcourant le vault directement dans
+     * l'application Obsidian : une fiche n'était réécrite au nouveau format QUE lorsqu'elle
+     * était retouchée (save_contact_profile/add_client_visit/attach_contact_file) ; toute
+     * fiche non retouchée depuis un précédent format restait figée dans son ancienne mise en
+     * forme, donnant des fiches visiblement différentes les unes des autres. Aucune donnée
+     * n'est perdue : tout texte présent AVANT le premier marqueur connu (## 📇 Coordonnées /
+     * ## Historique des rendez-vous / ## 📎 Pièces jointes) est conservé tel quel comme note
+     * libre (voir notesWithoutKnownSections) — y compris le corps entier d'une très vieille
+     * fiche qui n'aurait aucun de ces marqueurs. Ne réécrit sur le disque QUE les fiches dont
+     * la structure diffère réellement du gabarit actuel (la ligne "updated:" est ignorée dans
+     * cette comparaison, sinon toutes les fiches seraient marquées "modifiées" à chaque fois).
+     */
+    fun refreshAllContacts(context: Context): String {
+        if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
+        val folder = contactsFolder(context)
+        val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
+        if (files.isEmpty()) return "ℹ️ Aucune fiche contact dans le vault pour l'instant."
+
+        fun stripUpdatedLine(s: String) = s.lines().filterNot { it.trim().startsWith("updated:") }.joinToString("\n")
+
+        var updated = 0
+        var unchanged = 0
+        var failed = 0
+        files.forEach { file ->
+            try {
+                val contact = parseContactFile(file)
+                if (contact == null) {
+                    failed++
+                    return@forEach
+                }
+                val normalizedCat = normalizeCategories(contact.category).joinToString(", ")
+                val newContent = renderContactMarkdown(
+                    contact.name, normalizedCat, contact.nickname, contact.phone, contact.phonePro,
+                    contact.email, contact.address, contact.addressPro, contact.birthday, contact.company,
+                    contact.position, contact.latitude, contact.longitude, contact.installDate,
+                    contact.notes, contact.visits, contact.attachments
+                )
+                val oldContent = file.readText()
+                if (stripUpdatedLine(oldContent) == stripUpdatedLine(newContent)) {
+                    unchanged++
+                } else {
+                    file.writeText(newContent)
+                    updated++
+                }
+            } catch (e: Exception) {
+                failed++
+            }
+        }
+
+        val detail = if (failed > 0) " ($failed illisible(s), ignorée(s) sans y toucher)" else ""
+        return "✅ Fiches contact harmonisées : $updated mise(s) à jour vers le format actuel, $unchanged déjà à jour$detail."
     }
 
     fun deleteContact(context: Context, name: String): String {
