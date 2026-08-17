@@ -139,9 +139,11 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
      */
     fun setupAndLaunch(context: Context): Result {
         if (!isTermuxInstalled(context)) {
+            DiagnosticsLog.log(context, "TERMUX_SD", "setupAndLaunch refusé : Termux non installé.")
             return Result(false, "❌ Termux n'est pas installé.\n\n${setupInstructions()}")
         }
         if (!hasRunCommandPermission(context)) {
+            DiagnosticsLog.log(context, "TERMUX_SD", "setupAndLaunch refusé : permission RUN_COMMAND absente côté Android.")
             return Result(
                 false,
                 "❌ JARVIS n'a pas encore la permission « Exécuter des commandes » pour Termux.\n\n${setupInstructions()}"
@@ -161,14 +163,21 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
             } else {
                 context.startService(intent)
             }
+            DiagnosticsLog.log(context, "TERMUX_SD", "Commande d'installation envoyée à Termux (RUN_COMMAND accepté par Android, pas de garantie que Termux l'exécute réellement si allow-external-apps=false côté termux.properties).")
             Result(
                 true,
                 "✅ Installation lancée dans Termux (arrière-plan). Premier lancement : plusieurs " +
                     "minutes (téléchargement du modèle ~4 Go selon ta connexion). Utilise « Vérifier " +
-                    "le statut » pour savoir quand c'est prêt."
+                    "le statut » pour savoir quand c'est prêt. Si le statut reste « injoignable » après " +
+                    "plusieurs minutes, ouvre Termux toi-même : si aucune activité n'y apparaît (pas de " +
+                    "téléchargement en cours), la cause la plus probable est l'étape 2 non aboutie " +
+                    "(allow-external-apps=true jamais réellement écrit dans ~/.termux/termux.properties) " +
+                    "— relance la commande de l'étape 2 directement dans Termux et vérifie qu'aucune " +
+                    "erreur ne s'affiche avant de relancer la configuration ici."
             )
         } catch (e: Exception) {
-            Result(false, "❌ Échec de l'envoi de la commande à Termux : ${e.message}\n\n${setupInstructions()}")
+            DiagnosticsLog.log(context, "TERMUX_SD", "Échec de l'envoi RUN_COMMAND : ${e.javaClass.simpleName} — ${e.message}")
+            Result(false, "❌ Échec de l'envoi de la commande à Termux : ${e.javaClass.simpleName} — ${e.message}\n\n${setupInstructions()}")
         }
     }
 

@@ -552,11 +552,23 @@ class SettingsActivity : AppCompatActivity() {
      * actions réseau/RUN_COMMAND asynchrones (configurer, vérifier le statut).
      */
     private fun setupTermuxSdSection() {
+        val copyStep2Button = findViewById<TextView>(R.id.termuxCopyStep2Button)
         val toggleButton = findViewById<TextView>(R.id.toggleTermuxSdButton)
         val appSettingsButton = findViewById<TextView>(R.id.termuxAppSettingsButton)
         val setupButton = findViewById<TextView>(R.id.termuxSetupButton)
         val statusButton = findViewById<TextView>(R.id.termuxStatusButton)
         val statusText = findViewById<TextView>(R.id.termuxStatusText)
+
+        // Étape 2 taper une commande avec quotes + && à la main sur un clavier mobile est une
+        // source d'erreur fréquente (autocorrection des guillemets, && mal saisi...) — cause
+        // probable la plus concrète d'un signalement "j'ai tapé la commande mais ça ne marche
+        // toujours pas". Copier-coller élimine cette classe d'erreur entièrement.
+        copyStep2Button.setOnClickListener {
+            val command = "echo \"allow-external-apps=true\" >> ~/.termux/termux.properties && termux-reload-settings"
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Commande Termux", command))
+            Toast.makeText(this, "📋 Commande copiée — colle-la dans Termux (appui long > Coller) puis appuie sur Entrée", Toast.LENGTH_LONG).show()
+        }
 
         fun refreshToggleLabel() {
             toggleButton.text = if (Prefs.isTermuxSdEnabled(this)) {

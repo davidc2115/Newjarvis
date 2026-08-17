@@ -920,6 +920,17 @@
                 android:layout_marginBottom="12dp" />
 
             <TextView
+                android:id="@+id/termuxCopyStep2Button"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:text="📋 COPIER LA COMMANDE DE L'ÉTAPE 2 (à coller dans Termux, ne pas la taper à la main)"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
                 android:id="@+id/toggleTermuxSdButton"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
