@@ -23,10 +23,16 @@ enum class Provider(
     ),
 
     // ── Fournisseurs Cloud ────────────────────────────────────────────────────
+    // llama-3.3-70b-versatile déprécié par Groq le 16/08/2026 (avec llama-3.1-8b-instant) —
+    // requêtes en erreur "model does not exist" depuis cette date, confirmé par l'utilisateur.
+    // Remplacement officiellement recommandé par Groq (console.groq.com/docs/deprecations) :
+    // openai/gpt-oss-120b (l'autre option suggérée, qwen/qwen3.6-27b, est plus petite/rapide
+    // mais moins capable — gpt-oss-120b reste le choix par défaut le plus proche en capacité
+    // de l'ancien 70B, y compris pour le tool use dont JARVIS dépend pour JARVIS_CMD).
     GROQ(
         "Groq (gratuit, très rapide)",
         "https://api.groq.com/openai/v1/chat/completions",
-        "llama-3.3-70b-versatile"
+        "openai/gpt-oss-120b"
     ),
     OPENAI(
         "ChatGPT (OpenAI)",

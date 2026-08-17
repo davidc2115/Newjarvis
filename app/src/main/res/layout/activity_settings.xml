@@ -595,6 +595,139 @@
             android:orientation="vertical"
             android:visibility="gone">
 
+            <!-- IA locale RÉSEAU (Ollama sur PC/NAS/Freebox), à ne pas confondre avec les
+                 modèles EMBARQUÉS plus bas (exécutés directement sur le téléphone). BUG RÉEL
+                 CORRIGÉ : auparavant, seul le sélecteur générique Réglages → Cloud permettait
+                 de "configurer" Ollama, mais la valeur éditée n'était jamais réellement relue
+                 par ApiClient (toujours l'IP d'exemple codée en dur) — cette section dédiée,
+                 avec ses propres champs réellement utilisés, corrige ça et permet en plus
+                 l'essai automatique en mode "Automatique". -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🖥️ IA locale réseau (Ollama — PC, NAS, Freebox...)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Si tu fais tourner Ollama sur un ordinateur, un NAS ou ta Freebox (Docker), indique son adresse ici pour que JARVIS l'utilise — gratuit, illimité, et tes données restent sur ton réseau. Doit être sur le MÊME réseau Wi-Fi que ce téléphone."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
+
+                <EditText
+                    android:id="@+id/ollamaHostInput"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="3"
+                    android:background="@drawable/bg_input"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:textColor="@color/text_primary"
+                    android:hint="ex: mafreebox.freebox.fr ou 192.168.1.50"
+                    android:textColorHint="@color/text_secondary"
+                    android:inputType="textUri"
+                    android:layout_marginEnd="8dp" />
+
+                <EditText
+                    android:id="@+id/ollamaPortInput"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_input"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:textColor="@color/text_primary"
+                    android:hint="Port"
+                    android:textColorHint="@color/text_secondary"
+                    android:inputType="number"
+                    android:text="11434" />
+
+            </LinearLayout>
+
+            <EditText
+                android:id="@+id/ollamaModelInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="Modèle (ex: llama3.1)"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/toggleOllamaAutoButton"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:text="⬜ DÉSACTIVÉ dans le mode Automatique — appuie pour activer"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:id="@+id/saveOllamaButton"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:text="💾 ENREGISTRER"
+                    android:textColor="@color/cyan_accent"
+                    android:textSize="12sp"
+                    android:gravity="center"
+                    android:background="@drawable/bg_input"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/testOllamaButton"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:text="🔍 TESTER"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:gravity="center"
+                    android:background="@drawable/bg_input" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/ollamaStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_input"
+                android:padding="12dp"
+                android:text="Statut inconnu — appuie sur « Tester »"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:layout_marginBottom="16dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginBottom="16dp" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

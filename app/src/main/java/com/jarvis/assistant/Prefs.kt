@@ -823,6 +823,51 @@ object Prefs {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // OLLAMA RÉSEAU LOCAL (PC, NAS, Freebox Delta avec Docker...) — voir ApiClient
+    // ═════════════════════════════════════════════════════════════════════════
+    // BUG RÉEL CORRIGÉ : avant ces champs dédiés, Ollama n'était configurable QUE via le
+    // sélecteur générique Réglages -> Cloud (Provider.OLLAMA), dont le champ URL édité était
+    // enregistré dans KEY_BASE_URL/KEY_MODEL... mais sendOpenAiWithRotation (ApiClient) n'
+    // utilisait CES clés QUE pour Provider.CUSTOM : pour Provider.OLLAMA, il utilisait
+    // TOUJOURS Provider.OLLAMA.defaultBaseUrl (l'IP d'exemple codée en dur "192.168.1.50"),
+    // quoi que l'utilisateur ait tapé et "enregistré" dans le champ — d'où le signalement
+    // "impossible de configurer Ollama", qui était fondé : la sauvegarde n'avait tout
+    // simplement AUCUN EFFET réel sur l'appel envoyé. Champs dédiés + lecture dédiée dans
+    // ApiClient corrigent ça, et permettent en plus l'essai automatique en mode "Automatique"
+    // (jamais fait auparavant, Ollama n'était même pas dans AUTO_FALLBACK_ORDER).
+    fun getOllamaHost(context: Context): String =
+        prefs(context).getString("ollama_host", "") ?: ""
+
+    fun saveOllamaHost(context: Context, host: String) {
+        prefs(context).edit().putString("ollama_host", host.trim()).apply()
+    }
+
+    fun getOllamaPort(context: Context): String {
+        val raw = prefs(context).getString("ollama_port", "") ?: ""
+        return raw.ifBlank { "11434" }
+    }
+
+    fun saveOllamaPort(context: Context, port: String) {
+        prefs(context).edit().putString("ollama_port", port.trim()).apply()
+    }
+
+    fun getOllamaModel(context: Context): String {
+        val raw = prefs(context).getString("ollama_model", "") ?: ""
+        return raw.ifBlank { "llama3.1" }
+    }
+
+    fun saveOllamaModel(context: Context, model: String) {
+        prefs(context).edit().putString("ollama_model", model.trim()).apply()
+    }
+
+    fun isOllamaAutoEnabled(context: Context): Boolean =
+        prefs(context).getBoolean("ollama_auto_enabled", false)
+
+    fun setOllamaAutoEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("ollama_auto_enabled", enabled).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // BOX INTERNET UNIFIÉE (voir RouterController) — un seul système pour piloter
     // Freebox, Livebox (Orange), SFR Box ou Bbox (Bouygues) selon le fournisseur
     // choisi ici. La Freebox continue d'utiliser app_id/app_token ci-dessus

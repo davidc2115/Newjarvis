@@ -47,7 +47,7 @@ object JarvisCommandParser {
         "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "search_glifs", "run_glif",
-        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs"
+        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "ollama_status"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -423,6 +423,7 @@ object JarvisCommandParser {
             // consultable en conversation est la façon honnête de "voir les logs".
             "read_debug_logs" -> DiagnosticsLog.readRecent(context)
             "clear_debug_logs" -> DiagnosticsLog.clear(context)
+            "ollama_status" -> ApiClient.checkOllamaStatus(context)
 
             "delete_event" -> {
                 val eventId = json.optLong("eventId", -1)

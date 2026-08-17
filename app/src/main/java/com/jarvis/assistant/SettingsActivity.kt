@@ -422,6 +422,95 @@ class SettingsActivity : AppCompatActivity() {
 
         setupTermuxSdSection()
         setupDebugLogsButton()
+        setupOllamaSection()
+    }
+
+    /**
+     * Section "IA locale réseau (Ollama)" de l'onglet Local — champs dédiés (host/port/modèle)
+     * réellement lus par ApiClient.ollamaBaseUrl/Prefs.getOllamaModel, contrairement à l'ancien
+     * mécanisme générique du sélecteur Cloud dont l'édition n'avait aucun effet réel pour
+     * Provider.OLLAMA (voir le commentaire dans ApiClient.sendOpenAiWithRotation). Host prérempli
+     * avec l'hôte Freebox déjà connu si l'utilisateur n'a rien configuré — l'hostname
+     * mafreebox.freebox.fr se résout sur tout le réseau local d'une Freebox, pas seulement une
+     * fois appairée, donc c'est un point de départ raisonnable pour qui héberge Ollama dessus.
+     */
+    private fun setupOllamaSection() {
+        val hostInput = findViewById<EditText>(R.id.ollamaHostInput)
+        val portInput = findViewById<EditText>(R.id.ollamaPortInput)
+        val modelInputOllama = findViewById<EditText>(R.id.ollamaModelInput)
+        val toggleButton = findViewById<TextView>(R.id.toggleOllamaAutoButton)
+        val saveButtonOllama = findViewById<TextView>(R.id.saveOllamaButton)
+        val testButton = findViewById<TextView>(R.id.testOllamaButton)
+        val statusText = findViewById<TextView>(R.id.ollamaStatusText)
+
+        val savedHost = Prefs.getOllamaHost(this)
+        hostInput.setText(
+            savedHost.ifBlank {
+                Prefs.getFreeboxHost(this).removePrefix("https://").removePrefix("http://").trimEnd('/')
+            }
+        )
+        portInput.setText(Prefs.getOllamaPort(this))
+        modelInputOllama.setText(Prefs.getOllamaModel(this))
+
+        fun refreshToggleLabel() {
+            toggleButton.text = if (Prefs.isOllamaAutoEnabled(this)) {
+                "✅ ACTIVÉ dans le mode Automatique — essayé en premier, avant les IA cloud"
+            } else {
+                "⬜ DÉSACTIVÉ dans le mode Automatique — appuie pour activer"
+            }
+        }
+        refreshToggleLabel()
+
+        toggleButton.setOnClickListener {
+            Prefs.setOllamaAutoEnabled(this, !Prefs.isOllamaAutoEnabled(this))
+            refreshToggleLabel()
+        }
+
+        saveButtonOllama.setOnClickListener {
+            Prefs.saveOllamaHost(this, hostInput.text.toString())
+            Prefs.saveOllamaPort(this, portInput.text.toString())
+            Prefs.saveOllamaModel(this, modelInputOllama.text.toString())
+            Toast.makeText(this, "✅ Configuration Ollama enregistrée", Toast.LENGTH_SHORT).show()
+        }
+
+        testButton.setOnClickListener {
+            // Teste directement les valeurs des champs (pas besoin d'avoir déjà enregistré) —
+            // utilise l'endpoint natif Ollama /api/tags (liste des modèles installés), plus
+            // simple et plus rapide qu'un vrai appel de génération pour un simple ping.
+            val host = hostInput.text.toString().trim().removePrefix("https://").removePrefix("http://").trimEnd('/')
+            val port = portInput.text.toString().trim().ifBlank { "11434" }
+            if (host.isBlank()) {
+                statusText.text = "❌ Renseigne d'abord une adresse (IP ou nom d'hôte)."
+                return@setOnClickListener
+            }
+            testButton.isEnabled = false
+            statusText.text = "⏳ Test en cours…"
+            CoroutineScope(Dispatchers.Main).launch {
+                val result = withContext(Dispatchers.IO) {
+                    try {
+                        val client = okhttp3.OkHttpClient.Builder()
+                            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+                            .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+                            .build()
+                        val request = okhttp3.Request.Builder().url("http://$host:$port/api/tags").get().build()
+                        client.newCall(request).execute().use { response ->
+                            if (!response.isSuccessful) {
+                                "❌ Ollama a répondu mais avec une erreur (HTTP ${response.code}) — vérifie qu'il tourne bien sur ce port."
+                            } else {
+                                val body = response.body?.string() ?: "{}"
+                                val models = org.json.JSONObject(body).optJSONArray("models")
+                                val count = models?.length() ?: 0
+                                "✅ Ollama joignable à $host:$port — $count modèle(s) installé(s)."
+                            }
+                        }
+                    } catch (e: Exception) {
+                        "❌ Injoignable : ${e.javaClass.simpleName} — ${e.message}. Vérifie l'adresse, le port, et que ce téléphone est bien sur le même réseau."
+                    }
+                }
+                statusText.text = result
+                testButton.isEnabled = true
+            }
+        }
     }
 
     /**
