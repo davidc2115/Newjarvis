@@ -62,6 +62,18 @@ object ConversationStore {
         currentConversationId = null
     }
 
+    /**
+     * Supprime TOUTES les conversations sauvegardées (base + conversation en cours),
+     * et repart sur une conversation vide. Irréversible — l'appelant (chat ou Réglages)
+     * doit avoir confirmé auprès de l'utilisateur avant d'appeler cette fonction.
+     */
+    fun clearAll(context: Context) {
+        ConversationHistoryManager.deleteAll(context)
+        messages.clear()
+        history.clear()
+        currentConversationId = null
+    }
+
     /** Charge une conversation existante depuis la base et la rend active. */
     fun loadConversation(context: Context, conversationId: Long) {
         persist(context) // sauvegarde la précédente avant de basculer

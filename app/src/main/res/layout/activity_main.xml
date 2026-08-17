@@ -227,6 +227,17 @@
 
         </ScrollView>
 
+        <TextView
+            android:id="@+id/deleteAllConversationsButton"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:text="🗑️ Supprimer toutes les conversations"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:gravity="center"
+            android:background="@drawable/bg_input"
+            android:layout_marginTop="12dp" />
+
     </LinearLayout>
 
 </androidx.drawerlayout.widget.DrawerLayout>

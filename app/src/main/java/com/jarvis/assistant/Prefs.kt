@@ -1002,6 +1002,18 @@ object Prefs {
         writeGenerationHistory(context, getGenerationHistory(context).filter { it.id != id })
     }
 
+    /**
+     * Vide entièrement l'historique des générations (liste consultable dans l'onglet
+     * 🎨 Génération / list_generations). Ne supprime PAS les fichiers déjà créés sur le
+     * disque (images/vidéos/sites restent accessibles via l'explorateur de fichiers), ni
+     * les notes déjà écrites dans le vault Obsidian par logGenerationToVault — seule la
+     * liste elle-même (ce cache generation_history) est réinitialisée. Action irréversible
+     * côté historique, donc à confirmer avant d'appeler (voir clear_generation_history).
+     */
+    fun clearGenerationHistory(context: Context) {
+        writeGenerationHistory(context, emptyList())
+    }
+
     // Au-delà de ce délai, aucune génération ne travaille légitimement encore : la vidéo
     // est plafonnée à ~3min20 de sondage (MAX_POLL_ATTEMPTS côté VideoGenController), l'image
     // à 90s de délai réseau max, le site à la durée d'un simple appel de chat. Un enregistrement

@@ -166,4 +166,10 @@ object ConversationHistoryManager {
         val db = ConversationDatabase.get(context).writableDatabase
         db.delete("conversations", "id = ?", arrayOf(conversationId.toString()))
     }
+
+    /** Supprime TOUTES les conversations enregistrées (table entière vidée). Irréversible. */
+    fun deleteAll(context: Context) {
+        val db = ConversationDatabase.get(context).writableDatabase
+        db.delete("conversations", null, null)
+    }
 }

@@ -1227,6 +1227,14 @@ object JarvisCommandParser {
                     PrintController.printFile(context, pdfResult.filePath, json.optString("printer", "").ifBlank { null }).message
                 }
             }
+            "clear_all_conversations" -> {
+                ConversationStore.clearAll(context)
+                "✅ Toutes les conversations enregistrées ont été supprimées. Nouvelle conversation vide démarrée."
+            }
+            "clear_generation_history" -> {
+                Prefs.clearGenerationHistory(context)
+                "✅ Historique des générations vidé (les fichiers déjà créés restent sur le disque, seule la liste est réinitialisée)."
+            }
             "list_generations" -> {
                 val typeHint = json.optString("type", "")
                 val count = json.optInt("count", 10).coerceIn(1, 50)

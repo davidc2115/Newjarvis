@@ -136,6 +136,18 @@ class GenerationActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.btnRefreshHistory).setOnClickListener { refreshHistory() }
 
+        findViewById<TextView>(R.id.btnClearHistory).setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Vider l'historique des générations ?")
+                .setMessage("La liste des générations (images, vidéos, sites) sera vidée définitivement. Les fichiers déjà créés restent sur le disque, seul l'historique est réinitialisé.")
+                .setPositiveButton("Vider") { _, _ ->
+                    Prefs.clearGenerationHistory(this)
+                    refreshHistory()
+                }
+                .setNegativeButton("Annuler", null)
+                .show()
+        }
+
         findViewById<TextView>(R.id.btnViewLastImage).setOnClickListener {
             val path = lastSuccessfulRecordPath("image")
             if (path == null || !File(path).exists()) {

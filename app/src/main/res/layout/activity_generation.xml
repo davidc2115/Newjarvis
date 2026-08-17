@@ -287,6 +287,14 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/btnClearHistory"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🗑️"
+                android:textSize="16sp"
+                android:layout_marginEnd="12dp" />
+
+            <TextView
                 android:id="@+id/btnRefreshHistory"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

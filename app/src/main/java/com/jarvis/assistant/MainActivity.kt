@@ -192,6 +192,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             drawerLayout.closeDrawer(Gravity.START)
             addMessage("Nouvelle conversation démarrée. Que puis-je faire pour vous ?", isUser = false, speak = false)
         }
+
+        findViewById<TextView>(R.id.deleteAllConversationsButton).setOnClickListener {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Supprimer toutes les conversations ?")
+                .setMessage("Tout l'historique de conversations sera supprimé définitivement. Cette action est irréversible.")
+                .setPositiveButton("Supprimer tout") { _, _ ->
+                    ConversationStore.clearAll(this)
+                    adapter.notifyDataSetChanged()
+                    refreshConversationList()
+                    drawerLayout.closeDrawer(Gravity.START)
+                    addMessage("Toutes les conversations ont été supprimées. Nouvelle conversation démarrée.", isUser = false, speak = false)
+                }
+                .setNegativeButton("Annuler", null)
+                .show()
+        }
     }
 
     /** Reconstruit la liste des conversations passées dans le tiroir latéral. */
