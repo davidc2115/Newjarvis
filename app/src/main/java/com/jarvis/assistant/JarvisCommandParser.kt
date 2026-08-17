@@ -740,6 +740,13 @@ object JarvisCommandParser {
             "generate_image" -> {
                 val prompt = json.optString("prompt", "")
                 val count = json.optInt("count", 1)
+                // format : "carre" (défaut), "portrait" ou "paysage" — normalisé côté
+                // ImageGenController (accepte aussi les synonymes vertical/horizontal/...).
+                // AVANT ce paramètre, la question posée par l'IA ("portrait, paysage ou
+                // carré ?", voir SYSTEM_PROMPT) n'avait aucun effet réel : tous les
+                // fournisseurs généraient toujours en carré quoi qu'on réponde — cause
+                // directe du signalement "impossible de choisir le format de l'image".
+                val format = json.optString("format", "carre")
                 if (prompt.isBlank()) "❌ Aucune description d'image fournie."
                 else if (count > 1) {
                     // Plusieurs images à la suite (ex: "génère-moi 5 images de paysages") : toujours
@@ -747,7 +754,7 @@ object JarvisCommandParser {
                     // coroutine du chat serait inacceptable. Chaque image a sa propre entrée "pending"
                     // visible immédiatement dans la carte de progression de l'onglet 🎨 Génération,
                     // mises à jour une par une au fil de la génération (voir GenerationService).
-                    GenerationService.enqueue(context, "image", prompt, count = count)
+                    GenerationService.enqueue(context, "image", prompt, count = count, format = format)
                     "🎨 Génération de ${count.coerceIn(2, 20)} images lancée en arrière-plan, l'une après l'autre — suivable en direct dans l'onglet 🎨 Génération, avec une notification à la fin."
                 } else {
                     // On tente l'image en direct (cas rapide, quelques secondes via Gemini/OpenAI)
@@ -760,7 +767,7 @@ object JarvisCommandParser {
                     // progression). Si ce délai est dépassé, on abandonne proprement cette tentative et
                     // on relaie vers GenerationService, qui GARANTIT une notification de progression et
                     // un résultat final (succès ou échec), même app fermée.
-                    val fastResult = withTimeoutOrNull(25_000L) { ImageGenController.generateImage(context, prompt) }
+                    val fastResult = withTimeoutOrNull(25_000L) { ImageGenController.generateImage(context, prompt, format) }
                     if (fastResult != null) {
                         val recordId = "${System.currentTimeMillis()}_${(0..9999).random()}"
                         Prefs.addGenerationRecord(
@@ -779,7 +786,7 @@ object JarvisCommandParser {
                         pendingImageMime = fastResult.mime
                         fastResult.message
                     } else {
-                        GenerationService.enqueue(context, "image", prompt)
+                        GenerationService.enqueue(context, "image", prompt, format = format)
                         "🎨 La génération prend plus de temps que prévu (au-delà de 25s) — elle continue en arrière-plan " +
                             "avec une notification de progression. Tu seras prévenu dès que l'image sera prête (ou en cas d'échec), " +
                             "visible aussi dans l'onglet 🎨 Génération."

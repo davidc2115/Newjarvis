@@ -85,10 +85,66 @@ object ImageGenController {
             "malformed hands, poorly drawn face, ugly, duplicate, watermark, signature, text, " +
             "cropped, abstract blob, noise"
 
-    suspend fun generateImage(context: Context, prompt: String): Result {
+    /** Normalise les synonymes FR/EN vers l'une des 3 valeurs canoniques utilisées ci-dessous. */
+    private fun normalizeFormat(raw: String): String {
+        val f = raw.lowercase().trim()
+        return when {
+            f.contains("portrait") || f.contains("vertical") || f.contains("story") || f.contains("9:16") || f.contains("3:4") -> "portrait"
+            f.contains("paysage") || f.contains("landscape") || f.contains("horizontal") || f.contains("16:9") || f.contains("4:3") -> "paysage"
+            else -> "carre"
+        }
+    }
+
+    /** Gemini : ratio "l:h" — 1:1/3:4/4:3 confirmés supportés par gemini-3.1-flash-image. */
+    private fun geminiAspectRatio(format: String): String = when (format) {
+        "portrait" -> "3:4"
+        "paysage" -> "4:3"
+        else -> "1:1"
+    }
+
+    /** OpenAI gpt-image-1 : seules tailles acceptées par l'API — pas de valeurs arbitraires. */
+    private fun openAiSize(format: String): String = when (format) {
+        "portrait" -> "1024x1536"
+        "paysage" -> "1536x1024"
+        else -> "1024x1024"
+    }
+
+    /** Hugging Face SDXL : résolutions natives ~1MP, multiples de 64 (recommandation SDXL). */
+    private fun hfDims(format: String): Pair<Int, Int> = when (format) {
+        "portrait" -> 832 to 1216
+        "paysage" -> 1216 to 832
+        else -> 1024 to 1024
+    }
+
+    /** Stable Diffusion embarqué (CPU mobile) : dimensions modestes, multiples de 64. */
+    private fun localSdDims(format: String): Pair<Int, Int> = when (format) {
+        "portrait" -> 448 to 640
+        "paysage" -> 640 to 448
+        else -> 512 to 512
+    }
+
+    /** AI Horde : dimensions multiples de 64 (contrainte de l'API). */
+    private fun aiHordeDims(format: String): Pair<Int, Int> = when (format) {
+        "portrait" -> 512 to 768
+        "paysage" -> 768 to 512
+        else -> 512 to 512
+    }
+
+    /**
+     * [format] choisit l'orientation de l'image parmi "carre" (défaut), "portrait" ou
+     * "paysage" — accepte aussi des synonymes courants (vertical/horizontal/story/square...)
+     * via normalizeFormat(). Avant ce paramètre, TOUS les fournisseurs généraient
+     * uniquement en carré (512/1024x1024) quoi que l'utilisateur demande : le SYSTEM_PROMPT
+     * incitait déjà l'IA à demander "portrait, paysage ou carré ?" mais la réponse n'avait
+     * ensuite aucun effet réel — cause directe du signalement "impossible de choisir le
+     * format de l'image". Chaque fournisseur reçoit désormais des dimensions/aspectRatio
+     * dédiés, dans les limites qu'il accepte réellement.
+     */
+    suspend fun generateImage(context: Context, prompt: String, format: String = "carre"): Result {
         if (prompt.isBlank()) {
             return Result("❌ Aucune description d'image fournie.", null, null)
         }
+        val fmt = normalizeFormat(format)
 
         // Diagnostic collecté au fil des tentatives — auparavant, un échec HTTP sur un
         // provider CONFIGURÉ (mauvaise clé, quota, erreur serveur...) était avalé
@@ -98,22 +154,22 @@ object ImageGenController {
         val diagnostics = mutableListOf<String>()
 
         // 1. Google Gemini, si une clé est configurée.
-        tryGemini(context, prompt, diagnostics)?.let { return it }
+        tryGemini(context, prompt, fmt, diagnostics)?.let { return it }
 
         // 2. OpenAI DALL-E 3, si une clé est configurée.
-        tryOpenAI(context, prompt, diagnostics)?.let { return it }
+        tryOpenAI(context, prompt, fmt, diagnostics)?.let { return it }
 
         // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
-        tryHuggingFace(context, prompt, diagnostics)?.let { return it }
+        tryHuggingFace(context, prompt, fmt, diagnostics)?.let { return it }
 
         // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé.
-        tryOnDeviceStableDiffusion(context, prompt, diagnostics)?.let { return it }
+        tryOnDeviceStableDiffusion(context, prompt, fmt, diagnostics)?.let { return it }
 
         // 5. AI Horde (gratuit, sans clé — accès anonyme officiel) — en tout dernier
         // recours seulement : c'est un cluster communautaire, les requêtes anonymes
         // passent en dernière priorité et peuvent prendre plusieurs minutes selon la
         // charge. Remplace Pollinations (qualité jugée insuffisante par l'utilisateur).
-        tryAiHorde(context, prompt, diagnostics)?.let { return it }
+        tryAiHorde(context, prompt, fmt, diagnostics)?.let { return it }
 
         val detail = if (diagnostics.isNotEmpty()) {
             "\n\nDétail des échecs :\n" + diagnostics.joinToString("\n") { "• $it" }
@@ -130,7 +186,7 @@ object ImageGenController {
 
     // ─── 4. Stable Diffusion EMBARQUÉ (stable-diffusion.cpp natif) ─────────────
 
-    private fun tryOnDeviceStableDiffusion(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
+    private fun tryOnDeviceStableDiffusion(context: Context, prompt: String, format: String, diagnostics: MutableList<String>): Result? {
         val modelPath = Prefs.getLocalSdModelPath(context)
         if (modelPath.isBlank()) return null
 
@@ -155,9 +211,9 @@ object ImageGenController {
 
             // Résolution modeste pour rester dans un temps raisonnable sur CPU mobile ; steps
             // relevé de 20 à 26 (compromis qualité/temps — le prompt négatif est géré côté
-            // natif dans jarvis_sd_jni.cpp, voir ce fichier pour le détail).
-            val width = 512
-            val height = 512
+            // natif dans jarvis_sd_jni.cpp, voir ce fichier pour le détail). Dimensions selon
+            // le format demandé (voir localSdDims) au lieu d'un carré fixe.
+            val (width, height) = localSdDims(format)
             val steps = 26
 
             val rgbBytes = NativeStableDiffusion.generate(prompt, width, height, steps)
@@ -197,7 +253,7 @@ object ImageGenController {
     // Documentation officielle : https://aihorde.net/api (endpoints generate/async,
     // generate/check/{id}, generate/status/{id}), vérifiée disponible et fonctionnelle.
 
-    private suspend fun tryAiHorde(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
+    private suspend fun tryAiHorde(context: Context, prompt: String, format: String, diagnostics: MutableList<String>): Result? {
         return try {
             // Convention officielle AI Horde pour le prompt négatif : concaténé au prompt
             // positif via le séparateur " ### " (pas un champ JSON séparé — confirmé contre
@@ -209,8 +265,8 @@ object ImageGenController {
                 .put(
                     "params",
                     JSONObject()
-                        .put("width", 512)
-                        .put("height", 512)
+                        .put("width", aiHordeDims(format).first)
+                        .put("height", aiHordeDims(format).second)
                         .put("steps", 30)
                         .put("cfg_scale", 7)
                         .put("sampler_name", "k_euler_a")
@@ -327,7 +383,7 @@ object ImageGenController {
 
     // ─── 1. Google Gemini (Nano Banana) ────────────────────────────────────────
 
-    private fun tryGemini(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
+    private fun tryGemini(context: Context, prompt: String, format: String, diagnostics: MutableList<String>): Result? {
         val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
         if (keys.isEmpty()) return null
 
@@ -345,10 +401,15 @@ object ImageGenController {
                     )
                     .put(
                         "generationConfig",
-                        JSONObject().put(
-                            "responseModalities",
-                            org.json.JSONArray().put("TEXT").put("IMAGE")
-                        )
+                        JSONObject()
+                            .put(
+                                "responseModalities",
+                                org.json.JSONArray().put("TEXT").put("IMAGE")
+                            )
+                            .put(
+                                "imageConfig",
+                                JSONObject().put("aspectRatio", geminiAspectRatio(format))
+                            )
                     )
                     .toString()
                     .toRequestBody(JSON)
@@ -423,7 +484,7 @@ object ImageGenController {
     // reste supporté jusqu'à fin 2026 ; le paramètre response_format n'existe plus sur
     // ces modèles — ils renvoient TOUJOURS du base64 dans data[0].b64_json).
 
-    private fun tryOpenAI(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
+    private fun tryOpenAI(context: Context, prompt: String, format: String, diagnostics: MutableList<String>): Result? {
         val keys = Prefs.getApiKeysFor(context, Provider.OPENAI)
         if (keys.isEmpty()) return null
 
@@ -433,7 +494,7 @@ object ImageGenController {
                     .put("model", "gpt-image-1")
                     .put("prompt", prompt)
                     .put("n", 1)
-                    .put("size", "1024x1024")
+                    .put("size", openAiSize(format))
                     .toString()
                     .toRequestBody(JSON)
 
@@ -484,7 +545,7 @@ object ImageGenController {
     // leur passerelle "Inference Providers" sur router.huggingface.co. C'était la
     // deuxième cause réelle et vérifiée des échecs de génération d'image en cascade.
 
-    private fun tryHuggingFace(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
+    private fun tryHuggingFace(context: Context, prompt: String, format: String, diagnostics: MutableList<String>): Result? {
         val token = Prefs.getHfToken(context)
         if (token.isBlank()) return null
 
@@ -503,8 +564,8 @@ object ImageGenController {
                         .put("negative_prompt", NEGATIVE_PROMPT)
                         .put("num_inference_steps", 30)
                         .put("guidance_scale", 7.5)
-                        .put("width", 1024)
-                        .put("height", 1024)
+                        .put("width", hfDims(format).first)
+                        .put("height", hfDims(format).second)
                 )
                 .toString().toRequestBody(JSON)
             val request = Request.Builder()

@@ -32,6 +32,8 @@ class GenerationActivity : AppCompatActivity() {
     private lateinit var activeGenCard: View
     private lateinit var activeGenLabel: TextView
     private var lastWebsiteFile: File? = null
+    // "carre" (défaut) | "portrait" | "paysage" — voir la sélection formatCarreBtn/... dans onCreate.
+    private var selectedImageFormat: String = "carre"
 
     // Rafraîchit l'historique (et donc la barre de progression) toutes les 1,5s
     // pendant que cet écran est visible — indispensable pour voir en direct une
@@ -54,6 +56,30 @@ class GenerationActivity : AppCompatActivity() {
         imageOutput = findViewById(R.id.imageOutputText)
         imageView = findViewById(R.id.generatedImageView)
 
+        val formatCarreBtn = findViewById<TextView>(R.id.formatCarreBtn)
+        val formatPortraitBtn = findViewById<TextView>(R.id.formatPortraitBtn)
+        val formatPaysageBtn = findViewById<TextView>(R.id.formatPaysageBtn)
+        val formatButtons = mapOf("carre" to formatCarreBtn, "portrait" to formatPortraitBtn, "paysage" to formatPaysageBtn)
+
+        // Met en évidence le format actuellement sélectionné (fond doré + texte foncé) et
+        // grise les deux autres — même logique de bascule que toggleWakeWordButton ailleurs
+        // dans l'app, réutilisée ici pour rester cohérent visuellement.
+        fun refreshFormatButtons() {
+            formatButtons.forEach { (fmt, btn) ->
+                val active = fmt == selectedImageFormat
+                btn.setBackgroundResource(if (active) R.drawable.bg_mic_button else R.drawable.bg_input)
+                btn.setTextColor(getColor(if (active) R.color.background_dark else R.color.text_secondary))
+                btn.setTypeface(null, if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+            }
+        }
+        refreshFormatButtons()
+        formatButtons.forEach { (fmt, btn) ->
+            btn.setOnClickListener {
+                selectedImageFormat = fmt
+                refreshFormatButtons()
+            }
+        }
+
         val replicateTokenInput = findViewById<EditText>(R.id.replicateTokenInput)
         val videoPrompt = findViewById<EditText>(R.id.videoPromptInput)
         videoOutput = findViewById(R.id.videoOutputText)
@@ -75,7 +101,7 @@ class GenerationActivity : AppCompatActivity() {
             val prompt = imagePrompt.text.toString()
             if (prompt.isBlank()) { Toast.makeText(this, "Décris l'image souhaitée.", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
             imageView.visibility = View.GONE
-            GenerationService.enqueue(this, "image", prompt)
+            GenerationService.enqueue(this, "image", prompt, format = selectedImageFormat)
             imageOutput.text = "🎨 Génération lancée en arrière-plan — une notification t'avertira dès que c'est prêt."
             refreshHistory()
         }

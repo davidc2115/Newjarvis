@@ -37,6 +37,7 @@ class GenerationService : Service() {
     companion object {
         const val EXTRA_TYPE = "type"     // "image" | "image_batch" | "video" | "website" | "website_edit"
         const val EXTRA_PROMPT = "prompt"
+        const val EXTRA_FORMAT = "format" // "carre" (défaut) | "portrait" | "paysage" — uniquement type="image"/"image_batch"
         const val EXTRA_ID = "id"
         const val EXTRA_EXISTING_PATH = "existingPath"
         const val EXTRA_DURATION = "durationSeconds"
@@ -54,9 +55,9 @@ class GenerationService : Service() {
          * visible immédiatement dans la carte de progression (⏳ Image 1/5, ⏳ Image 2/5...),
          * puis mises à jour une par une au fil de la génération.
          */
-        fun enqueue(context: Context, type: String, prompt: String, existingPath: String? = null, durationSeconds: Int? = null, count: Int = 1, imagePaths: List<String>? = null): String {
+        fun enqueue(context: Context, type: String, prompt: String, existingPath: String? = null, durationSeconds: Int? = null, count: Int = 1, imagePaths: List<String>? = null, format: String = "carre"): String {
             if (type == "image" && count > 1) {
-                return enqueueImageBatch(context, prompt, count)
+                return enqueueImageBatch(context, prompt, count, format)
             }
             val id = "${System.currentTimeMillis()}_${(0..9999).random()}"
             Prefs.addGenerationRecord(
@@ -67,6 +68,7 @@ class GenerationService : Service() {
                 putExtra(EXTRA_TYPE, type)
                 putExtra(EXTRA_PROMPT, prompt)
                 putExtra(EXTRA_ID, id)
+                putExtra(EXTRA_FORMAT, format)
                 existingPath?.let { putExtra(EXTRA_EXISTING_PATH, it) }
                 durationSeconds?.let { putExtra(EXTRA_DURATION, it) }
                 imagePaths?.takeIf { it.isNotEmpty() }?.let { putExtra(EXTRA_IMAGE_PATHS, it.toTypedArray()) }
@@ -75,7 +77,7 @@ class GenerationService : Service() {
             return id
         }
 
-        private fun enqueueImageBatch(context: Context, prompt: String, count: Int): String {
+        private fun enqueueImageBatch(context: Context, prompt: String, count: Int, format: String = "carre"): String {
             val safeCount = count.coerceIn(2, 20) // borne raisonnable pour éviter un abus involontaire
             val ids = (1..safeCount).map { i ->
                 val id = "${System.currentTimeMillis()}_${(0..9999).random()}_$i"
@@ -93,6 +95,7 @@ class GenerationService : Service() {
                 putExtra(EXTRA_PROMPT, prompt)
                 putExtra(EXTRA_ID, ids.first())
                 putExtra(EXTRA_BATCH_IDS, ids.toTypedArray())
+                putExtra(EXTRA_FORMAT, format)
             }
             ContextCompat.startForegroundService(context, intent)
             return "lot de $safeCount images"
@@ -122,6 +125,7 @@ class GenerationService : Service() {
         val durationSeconds = if (intent?.hasExtra(EXTRA_DURATION) == true) intent.getIntExtra(EXTRA_DURATION, VideoGenController.DEFAULT_DURATION_S) else null
         val batchIds = intent?.getStringArrayExtra(EXTRA_BATCH_IDS)
         val imagePaths = intent?.getStringArrayExtra(EXTRA_IMAGE_PATHS)?.toList()
+        val format = intent?.getStringExtra(EXTRA_FORMAT) ?: "carre"
 
         if (type == null || prompt == null || id == null) {
             stopIfIdle()
@@ -133,9 +137,9 @@ class GenerationService : Service() {
 
         scope.launch {
             if (type == "image_batch" && batchIds != null) {
-                runImageBatchJob(prompt, batchIds.toList())
+                runImageBatchJob(prompt, batchIds.toList(), format)
             } else {
-                runJob(id, type, prompt, existingPath, durationSeconds, imagePaths)
+                runJob(id, type, prompt, existingPath, durationSeconds, imagePaths, format)
             }
             if (activeJobs.decrementAndGet() <= 0) {
                 stopIfIdle()
@@ -152,7 +156,7 @@ class GenerationService : Service() {
      * notification de progression rafraîchie à chaque étape (« Image 3/5... »), et un seul
      * résumé final plutôt qu'une notification par image (trop de bruit pour un lot).
      */
-    private suspend fun runImageBatchJob(basePrompt: String, ids: List<String>) {
+    private suspend fun runImageBatchJob(basePrompt: String, ids: List<String>, format: String = "carre") {
         val total = ids.size
         var successCount = 0
         val failures = mutableListOf<String>()
@@ -163,7 +167,7 @@ class GenerationService : Service() {
             var message = "❌ Erreur inattendue."
             var resultPath: String? = null
             try {
-                val r = ImageGenController.generateImage(applicationContext, basePrompt)
+                val r = ImageGenController.generateImage(applicationContext, basePrompt, format)
                 success = r.base64 != null
                 message = r.message
                 resultPath = r.savedPath
@@ -196,7 +200,7 @@ class GenerationService : Service() {
         }
     }
 
-    private suspend fun runJob(id: String, type: String, prompt: String, existingPath: String?, durationSeconds: Int? = null, imagePaths: List<String>? = null) {
+    private suspend fun runJob(id: String, type: String, prompt: String, existingPath: String?, durationSeconds: Int? = null, imagePaths: List<String>? = null, format: String = "carre") {
         var success = false
         var message = "❌ Type de génération inconnu."
         var resultPath: String? = null
@@ -204,7 +208,7 @@ class GenerationService : Service() {
         try {
             when (type) {
                 "image" -> {
-                    val r = ImageGenController.generateImage(applicationContext, prompt)
+                    val r = ImageGenController.generateImage(applicationContext, prompt, format)
                     success = r.base64 != null
                     message = r.message
                     resultPath = r.savedPath
