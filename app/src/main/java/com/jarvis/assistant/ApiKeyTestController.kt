@@ -47,6 +47,14 @@ object ApiKeyTestController {
         val replicateToken = Prefs.getReplicateToken(context)
         if (replicateToken.isNotBlank()) results.add(testReplicate(replicateToken))
 
+        val firecrawlKey = Prefs.getFirecrawlApiKey(context)
+        if (firecrawlKey.isNotBlank()) results.add(testFirecrawl(firecrawlKey))
+
+        val glifToken = Prefs.getGlifApiToken(context)
+        if (glifToken.isNotBlank()) results.add(testGlif(context, glifToken))
+
+        if (Prefs.getOllamaHost(context).isNotBlank()) results.add(testOllama(context))
+
         if (results.isEmpty()) {
             return@withContext "❌ Aucune clé API configurée à tester. Configure-en au moins une dans ⚙ → Clés API, ou un jeton Hugging Face/Replicate dans 🎨 Génération."
         }
@@ -136,6 +144,35 @@ object ApiKeyTestController {
         } catch (e: Exception) {
             KeyResult(label, mask(token), false, "Erreur réseau : ${e.message}")
         }
+    }
+
+    private fun testFirecrawl(apiKey: String): KeyResult {
+        val label = "Firecrawl (extraction de pages web)"
+        return try {
+            // /team/credit-usage : endpoint officiel dédié à la vérification de compte, ne
+            // consomme aucun crédit de scraping (contrairement à un vrai appel /scrape).
+            val request = Request.Builder()
+                .url("https://api.firecrawl.dev/v2/team/credit-usage")
+                .addHeader("Authorization", "Bearer $apiKey")
+                .get().build()
+            respondResult(label, apiKey, request)
+        } catch (e: Exception) {
+            KeyResult(label, mask(apiKey), false, "Erreur réseau : ${e.message}")
+        }
+    }
+
+    private suspend fun testGlif(context: Context, token: String): KeyResult {
+        val label = "Glif (workflows IA)"
+        val result = GlifController.testConnection(context)
+        return KeyResult(label, mask(token), result.success, result.message)
+    }
+
+    private suspend fun testOllama(context: Context): KeyResult {
+        val label = "Ollama (IA locale réseau)"
+        val hostPort = "${Prefs.getOllamaHost(context)}:${Prefs.getOllamaPort(context)}"
+        val status = ApiClient.checkOllamaStatus(context)
+        val ok = status.startsWith("✅")
+        return KeyResult(label, hostPort, ok, status.removePrefix("✅ ").removePrefix("❌ "))
     }
 
     private fun respondResult(label: String, key: String, request: Request): KeyResult {

@@ -57,6 +57,34 @@ object GlifController {
         callTool(context, "search_workflows", JSONObject().put("query", query))
     }
 
+    /**
+     * Vérifie qu'un jeton Glif est valide SANS appeler d'outil (donc sans consommer de crédit
+     * de workflow) : ne fait que la poignée de main "initialize" du protocole MCP, qui échoue
+     * déjà avec une erreur d'authentification si le jeton est invalide/révoqué. Utilisé par
+     * ApiKeyTestController pour couvrir Glif dans le test global des clés API.
+     */
+    suspend fun testConnection(context: Context): Result = withContext(Dispatchers.IO) {
+        val token = Prefs.getGlifApiToken(context)
+        if (token.isBlank()) return@withContext Result(false, "❌ Aucun jeton API Glif configuré.")
+        try {
+            val initResp = postJsonRpc(
+                token, id = 1, method = "initialize",
+                params = JSONObject()
+                    .put("protocolVersion", "2025-06-18")
+                    .put("capabilities", JSONObject())
+                    .put("clientInfo", JSONObject().put("name", "JARVIS Android").put("version", "1.0"))
+            ) ?: return@withContext Result(false, "❌ Glif : serveur MCP injoignable (glif.app/mcp).")
+
+            val error = initResp.body.optJSONObject("error")
+            if (error != null) {
+                return@withContext Result(false, "❌ jeton invalide ou refusé — ${error.optString("message", "sans détail")}")
+            }
+            Result(true, "jeton valide")
+        } catch (e: Exception) {
+            Result(false, "❌ Glif : exception réseau — ${e.message}")
+        }
+    }
+
     /** Poignée de main + appel d'outil MCP, factorisée pour run_workflow et search_workflows. */
     private fun callTool(context: Context, toolName: String, arguments: JSONObject): Result {
         val token = Prefs.getGlifApiToken(context)
