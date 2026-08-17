@@ -165,7 +165,19 @@ object FreeboxController {
         }
 
         if (outcome.token == null) {
-            return@withContext "❌ La Freebox a refusé la demande d'appairage (HTTP ${outcome.httpCode} — ${outcome.errorDetail}). " +
+            // Journalisé pour permettre un diagnostic précis via read_debug_logs si le
+            // signalement utilisateur ("erreur 404" etc.) ne suffit pas à lui seul : l'URL
+            // exacte tentée révèle immédiatement si le souci vient de la découverte d'API
+            // (version majeure erronée dans l'URL construite) plutôt que d'un vrai refus
+            // applicatif de la Freebox (nouvelle appli désactivée, demande déjà en attente...).
+            DiagnosticsLog.log(
+                context, "FREEBOX",
+                "Appairage refusé — URL: ${apiBase}login/authorize/ — HTTP ${outcome.httpCode} — ${outcome.errorDetail}"
+            )
+            val httpNote = if (outcome.httpCode == 404) {
+                " (404 = endpoint introuvable à cette adresse : $apiBase — vérifie qu'il s'agit bien de l'URL locale de ta Freebox, ex. http://mafreebox.freebox.fr ou l'IP locale, jamais une adresse distante/DDNS pour l'appairage initial)."
+            } else ""
+            return@withContext "❌ La Freebox a refusé la demande d'appairage (HTTP ${outcome.httpCode} — ${outcome.errorDetail})$httpNote " +
                 "Causes fréquentes : une demande d'appairage précédente est encore affichée sur l'écran de la Freebox (annule-la puis réessaie), " +
                 "ou l'ajout de nouvelles applications est désactivé (Freebox OS -> Paramètres -> Gestion des accès -> Applications)."
         }
