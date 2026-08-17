@@ -230,6 +230,15 @@ object PeopleController {
         address: String?, addressPro: String?, birthday: String?, company: String?,
         position: String?, latitude: Double?, longitude: Double?, installDate: String?
     ): String {
+        // COORDS_MARKER doit rester le TOUT PREMIER caractère de cette chaîne (aucun préfixe,
+        // même pas un simple saut de ligne supplémentaire) : notesWithoutKnownSections() coupe
+        // le texte au premier indexOf(COORDS_MARKER) et traite tout ce qui précède comme les
+        // notes libres de l'utilisateur. Un séparateur "---" ajouté AVANT le marqueur serait
+        // donc silencieusement absorbé dans les notes et RÉAPPARAÎTRAIT dupliqué à chaque
+        // sauvegarde suivante (c'est exactement le bug de duplication déjà corrigé ailleurs
+        // dans ce fichier, voir findExactNameMatch). Tout ce qui suit le marqueur, en revanche,
+        // est entièrement régénéré à chaque fois et jamais relu comme donnée — c'est là, et
+        // seulement là, qu'on peut se permettre des séparateurs "---" et des sous-titres ### .
         val sb = StringBuilder("$COORDS_MARKER\n\n")
         sb.append("🏷️ **Catégorie** : ${categoryLabel(cat)}\n")
 
@@ -246,15 +255,22 @@ object PeopleController {
         phonePro?.let { proLines.add("📱 Téléphone pro : $it") }
         addressPro?.let { proLines.add("📍 Adresse pro : $it") }
 
+        val hasGpsOrInstall = (latitude != null && longitude != null) || installDate != null
+
+        // ### (vrai sous-titre Markdown, rendu en gras + taille agrandie par Obsidian) au lieu
+        // d'un simple "🔹 **texte**" — se rapproche visuellement des vraies notes riches (ex:
+        // obsidian_create_note) plutôt que de rester une liste plate avec du gras isolé.
         if (personalLines.isNotEmpty()) {
-            sb.append("\n🔹 **PERSONNEL**\n")
+            sb.append("\n### 🔹 Personnel\n")
             personalLines.forEach { sb.append("$it\n") }
+            if (proLines.isNotEmpty() || hasGpsOrInstall) sb.append("\n---\n")
         }
         if (proLines.isNotEmpty()) {
-            sb.append("\n🔹 **PROFESSIONNEL**\n")
+            sb.append("\n### 🔹 Professionnel\n")
             proLines.forEach { sb.append("$it\n") }
+            if (hasGpsOrInstall) sb.append("\n---\n")
         }
-        if (latitude != null && longitude != null || installDate != null) {
+        if (hasGpsOrInstall) {
             sb.append("\n")
             if (latitude != null && longitude != null) sb.append("🌐 GPS : $latitude, $longitude\n")
             installDate?.let { sb.append("📆 Date d'installation : $it\n") }
@@ -393,7 +409,7 @@ object PeopleController {
                 append("---\n")
                 append(frontmatterLines.joinToString("\n"))
                 append("\n---\n\n")
-                append("# $canonicalName\n\n")
+                append("# 🪪 $canonicalName\n\n")
                 if (finalNotes.isNotBlank()) append(finalNotes) else append("_Aucune note._")
                 append("\n\n")
                 append(buildCoordsSection(
@@ -441,7 +457,7 @@ object PeopleController {
                 append("---\n")
                 append(frontmatterLines.joinToString("\n"))
                 append("\n---\n\n")
-                append("# $targetName\n\n")
+                append("# 🪪 $targetName\n\n")
                 val notesText = contact?.notes?.takeIf { it.isNotBlank() } ?: "_Aucune note._"
                 append(notesText)
                 append("\n\n")
@@ -499,7 +515,7 @@ object PeopleController {
                 append("---\n")
                 append(frontmatterLines.joinToString("\n"))
                 append("\n---\n\n")
-                append("# $targetName\n\n")
+                append("# 🪪 $targetName\n\n")
                 val notesText = contact?.notes?.takeIf { it.isNotBlank() } ?: "_Aucune note._"
                 append(notesText)
                 append("\n\n")
