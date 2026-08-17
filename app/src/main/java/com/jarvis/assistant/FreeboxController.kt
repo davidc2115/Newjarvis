@@ -99,6 +99,18 @@ object FreeboxController {
             return@withContext "ℹ️ La Freebox est déjà appairée. Si tu veux la ré-appairer (ex: après une réinitialisation de mot de passe admin), dis-le explicitement."
         }
 
+        // Une demande précédente est peut-être restée "en attente" (process JARVIS tué pendant
+        // l'attente de validation sur l'écran — voir tryResolvePendingPairing) : on la résout
+        // D'ABORD plutôt que d'en créer une nouvelle, qui échouerait de toute façon tant que
+        // l'ancienne est encore affichée sur l'écran de la Freebox (cf. message d'erreur
+        // "une demande d'appairage précédente est encore affichée" plus bas).
+        if (tryResolvePendingPairing(context)) {
+            return@withContext "✅ Freebox appairée avec succès (une demande déjà validée sur l'écran vient d'être détectée) — JARVIS peut maintenant la piloter (état, Wi-Fi, appareils, redémarrage)."
+        }
+        if (Prefs.getFreeboxPendingTrackId(context) >= 0) {
+            return@withContext "📟 Une demande d'appairage est déjà affichée sur l'écran de ta Freebox — valide-la directement dessus. Si l'écran n'affiche plus rien (délai dépassé), redemande simplement box_pair_freebox et j'enverrai une nouvelle demande."
+        }
+
         val host = Prefs.getFreeboxHost(context).trimEnd('/')
         val apiBase = try {
             getApiBase(context)
@@ -160,10 +172,61 @@ object FreeboxController {
 
         val appToken = outcome.token
         val trackId = outcome.trackId
+        Prefs.saveFreeboxPendingPairing(context, trackId, appToken)
         pairingScope.launch {
             pollPairing(context.applicationContext, apiBase, trackId, appToken)
         }
         "📟 Demande d'appairage envoyée à ta Freebox — regarde son écran (façade LCD) et valide la demande « $PAIRING_APP_NAME » dans les ~90 secondes. Je te préviens par notification dès que c'est fait."
+    }
+
+    /**
+     * Vérifie UNE FOIS (pas de nouvelle boucle d'attente) le statut d'un éventuel appairage
+     * resté en attente dans Prefs. Couvre le cas réel où le coroutine de pollPairing n'a jamais
+     * pu se terminer (processus JARVIS tué par Android pendant l'attente de validation sur
+     * l'écran — appli mise en arrière-plan, gestion de batterie agressive de certains
+     * constructeurs) : l'utilisateur valide bien la demande sur l'écran physique, mais sans
+     * cette vérification JARVIS n'aurait plus aucun moyen de le savoir et redemanderait un
+     * nouvel appairage à chaque fois — cause réelle du signalement "j'accepte sur l'écran mais
+     * elle dit toujours non appairée". Retourne true si l'appairage est maintenant finalisé.
+     */
+    private suspend fun tryResolvePendingPairing(context: Context): Boolean {
+        val trackId = Prefs.getFreeboxPendingTrackId(context)
+        val appToken = Prefs.getFreeboxPendingAppToken(context)
+        if (trackId < 0 || appToken.isBlank()) return false
+
+        val apiBase = try { getApiBase(context) } catch (e: Exception) { null } ?: return false
+
+        return try {
+            val trackReq = Request.Builder().url("${apiBase}login/authorize/$trackId/").get().build()
+            val status = client.newCall(trackReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@use "unknown"
+                val body = resp.body?.string() ?: return@use "unknown"
+                JSONObject(body).optJSONObject("result")?.optString("status", "unknown") ?: "unknown"
+            }
+            when (status) {
+                "granted" -> {
+                    Prefs.saveFreeboxAppId(context, PAIRING_APP_ID)
+                    Prefs.saveFreeboxAppToken(context, appToken)
+                    Prefs.clearFreeboxPendingPairing(context)
+                    true
+                }
+                "pending" -> {
+                    // Toujours en attente : relance le sondage en arrière-plan (au cas où le
+                    // process a effectivement été tué avant la fin), sans bloquer cette réponse
+                    // ni créer de nouvelle demande.
+                    pairingScope.launch { pollPairing(context.applicationContext, apiBase, trackId, appToken) }
+                    false
+                }
+                else -> {
+                    // denied / timeout / unknown : la demande en attente n'est plus valable,
+                    // on la nettoie pour qu'une prochaine tentative en crée une neuve.
+                    Prefs.clearFreeboxPendingPairing(context)
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private suspend fun pollPairing(appContext: Context, apiBase: String, trackId: Int, appToken: String) = withContext(Dispatchers.IO) {
@@ -187,14 +250,34 @@ object FreeboxController {
                 "granted" -> {
                     Prefs.saveFreeboxAppId(appContext, PAIRING_APP_ID)
                     Prefs.saveFreeboxAppToken(appContext, appToken)
+                    Prefs.clearFreeboxPendingPairing(appContext)
                     notifyPairingResult(appContext, true, "Freebox appairée avec succès — JARVIS peut maintenant la piloter (état, Wi-Fi, appareils, redémarrage).")
                 }
-                "denied" -> notifyPairingResult(appContext, false, "Demande d'appairage refusée sur l'écran de la Freebox.")
-                "timeout" -> notifyPairingResult(appContext, false, "Délai d'appairage dépassé (personne n'a validé sur l'écran de la Freebox à temps) — réessaie avec box_pair_freebox.")
-                "pending" -> notifyPairingResult(appContext, false, "Toujours en attente après 2 minutes (HTTP $lastHttpCode) — réessaie avec box_pair_freebox si l'écran de la Freebox n'affiche plus la demande.")
-                else -> notifyPairingResult(appContext, false, "Statut d'appairage inattendu : « $status » (HTTP $lastHttpCode).")
+                "denied" -> {
+                    Prefs.clearFreeboxPendingPairing(appContext)
+                    notifyPairingResult(appContext, false, "Demande d'appairage refusée sur l'écran de la Freebox.")
+                }
+                "timeout" -> {
+                    Prefs.clearFreeboxPendingPairing(appContext)
+                    notifyPairingResult(appContext, false, "Délai d'appairage dépassé (personne n'a validé sur l'écran de la Freebox à temps) — réessaie avec box_pair_freebox.")
+                }
+                "pending" -> {
+                    // NE PAS effacer freebox_pending_* ici : le suivi local (2 minutes) a atteint
+                    // sa limite, mais côté Freebox la demande peut rester affichée plus longtemps
+                    // — si le process JARVIS a justement été tué pendant cette attente (cause
+                    // réelle la plus fréquente de ce cas), c'est tryResolvePendingPairing, au
+                    // prochain box_pair_freebox ou box_status, qui pourra encore la détecter
+                    // "granted" a posteriori plutôt que de forcer l'utilisateur à tout refaire.
+                    notifyPairingResult(appContext, false, "Toujours en attente après 2 minutes (HTTP $lastHttpCode) — si tu as déjà validé sur l'écran, redemande simplement l'état à JARVIS. Sinon réessaie avec box_pair_freebox.")
+                }
+                else -> {
+                    Prefs.clearFreeboxPendingPairing(appContext)
+                    notifyPairingResult(appContext, false, "Statut d'appairage inattendu : « $status » (HTTP $lastHttpCode).")
+                }
             }
         } catch (e: Exception) {
+            // Erreur réseau ponctuelle : on NE nettoie PAS le pending ici non plus, pour la même
+            // raison que le cas "pending" ci-dessus — tryResolvePendingPairing pourra retenter.
             notifyPairingResult(appContext, false, "Erreur réseau pendant l'attente de validation : ${e.javaClass.simpleName} — ${e.message}")
         }
     }
@@ -343,7 +426,7 @@ object FreeboxController {
     // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun status(context: Context): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val (ok, json) = authedRequest(context, "GET", "connection/") ?: return "❌ Freebox injoignable (vérifie que le téléphone est bien connecté au réseau de la Freebox, ou l'adresse configurée dans ⚙)."
         if (!ok) return "❌ Erreur Freebox : ${json.optString("msg", json.optString("error_code", "inconnue"))}"
         val r = json.optJSONObject("result") ?: return "❌ Réponse Freebox inattendue."
@@ -360,7 +443,7 @@ object FreeboxController {
     // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun reboot(context: Context): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val (ok, json) = authedRequest(context, "POST", "system/reboot/") ?: return "❌ Freebox injoignable."
         return if (ok) "🔄 Redémarrage de la Freebox lancé — elle sera injoignable quelques minutes."
             else "❌ Erreur Freebox : ${json.optString("msg", "inconnue")}"
@@ -371,7 +454,7 @@ object FreeboxController {
     // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun storageInfo(context: Context): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val (ok, json) = authedRequest(context, "GET", "storage/disk/") ?: return "❌ Freebox injoignable."
         if (!ok) return "❌ Erreur Freebox : ${json.optString("msg", "inconnue")}"
         val disks = json.optJSONArray("result") ?: JSONArray()
@@ -402,7 +485,7 @@ object FreeboxController {
     // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun wifiStatus(context: Context): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val (ok, json) = authedRequest(context, "GET", "wifi/config/") ?: return "❌ Freebox injoignable."
         if (!ok) return "❌ Erreur Freebox : ${json.optString("msg", "inconnue")}"
         val enabled = json.optJSONObject("result")?.optBoolean("enabled", false) ?: false
@@ -410,7 +493,7 @@ object FreeboxController {
     }
 
     suspend fun wifiSet(context: Context, enable: Boolean): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val body = JSONObject().apply { put("enabled", enable) }
         val (ok, json) = authedRequest(context, "PUT", "wifi/config/", body) ?: return "❌ Freebox injoignable."
         if (!ok) return "❌ Erreur Freebox : ${json.optString("msg", "inconnue")}"
@@ -422,7 +505,7 @@ object FreeboxController {
     // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun listDevices(context: Context, filter: String = ""): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val (okIf, ifJson) = authedRequest(context, "GET", "lan/browser/interfaces/") ?: return "❌ Freebox injoignable."
         if (!okIf) return "❌ Erreur Freebox : ${ifJson.optString("msg", "inconnue")}"
         val interfaces = ifJson.optJSONArray("result") ?: JSONArray()
@@ -458,7 +541,7 @@ object FreeboxController {
     // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun homeDevices(context: Context, filter: String = ""): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val (ok, json) = authedRequest(context, "GET", "home/nodes/") ?: return "❌ Freebox injoignable."
         if (!ok) {
             val err = json.optString("error_code", "")
@@ -499,7 +582,7 @@ object FreeboxController {
      * numérique pour une position/intensité selon l'appareil.
      */
     suspend fun homeSet(context: Context, device: String, boolValue: Boolean? = null, numValue: Double? = null): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         if (device.isBlank()) return "❌ Précise le nom de l'appareil domotique à contrôler."
         val (ok, json) = authedRequest(context, "GET", "home/nodes/") ?: return "❌ Freebox injoignable."
         if (!ok) return "❌ Erreur Freebox : ${json.optString("msg", "inconnue")}"
@@ -567,7 +650,7 @@ object FreeboxController {
      * accessible depuis l'extérieur du réseau, pas seulement en Wi-Fi local.
      */
     suspend fun configurePortForward(context: Context, wanPort: Int, lanPort: Int, comment: String = "Site JARVIS"): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val lanIp = localIpAddress()
             ?: return "❌ Impossible de déterminer l'adresse IP locale du téléphone (es-tu bien connecté au Wi-Fi de cette Freebox ?)."
 
@@ -606,7 +689,7 @@ object FreeboxController {
 
     /** Supprime la redirection de port créée pour [wanPort], si elle existe. */
     suspend fun removePortForward(context: Context, wanPort: Int): String {
-        if (!isConfigured(context)) return notConfiguredMessage()
+        if (!isConfigured(context) && !tryResolvePendingPairing(context)) return notConfiguredMessage()
         val (okList, listJson) = authedRequest(context, "GET", "fw/redir/") ?: return "❌ Freebox injoignable."
         if (!okList) return "❌ Erreur Freebox : ${listJson.optString("msg", "inconnue")}"
         val existing = listJson.optJSONArray("result") ?: JSONArray()

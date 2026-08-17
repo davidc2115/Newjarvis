@@ -795,6 +795,33 @@ object Prefs {
         prefs(context).edit().putString("freebox_app_token", token.trim()).apply()
     }
 
+    // Appairage EN ATTENTE (track_id + app_token candidat, avant validation sur l'écran
+    // de la Freebox) — persisté ICI (pas seulement en mémoire) pour survivre à une éventuelle
+    // fermeture du processus JARVIS pendant les ~90s d'attente (appli mise en arrière-plan,
+    // gestion de batterie agressive...) : sans ça, l'utilisateur valide bien la demande sur
+    // l'écran physique mais JARVIS "oublie" le track_id et redemande un nouvel appairage à
+    // chaque fois, cause réelle du signalement "j'accepte sur l'écran mais elle dit toujours
+    // non appairée". Voir FreeboxController.tryResolvePendingPairing.
+    fun getFreeboxPendingTrackId(context: Context): Int =
+        prefs(context).getInt("freebox_pending_track_id", -1)
+
+    fun getFreeboxPendingAppToken(context: Context): String =
+        prefs(context).getString("freebox_pending_app_token", "") ?: ""
+
+    fun saveFreeboxPendingPairing(context: Context, trackId: Int, appToken: String) {
+        prefs(context).edit()
+            .putInt("freebox_pending_track_id", trackId)
+            .putString("freebox_pending_app_token", appToken)
+            .apply()
+    }
+
+    fun clearFreeboxPendingPairing(context: Context) {
+        prefs(context).edit()
+            .remove("freebox_pending_track_id")
+            .remove("freebox_pending_app_token")
+            .apply()
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // BOX INTERNET UNIFIÉE (voir RouterController) — un seul système pour piloter
     // Freebox, Livebox (Orange), SFR Box ou Bbox (Bouygues) selon le fournisseur
