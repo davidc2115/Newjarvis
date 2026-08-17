@@ -86,8 +86,25 @@ object TermuxController {
     // Script bash idempotent : réinstallable sans effet de bord si déjà en place. Le choix du
     // modèle (SD 1.5 pruned-emaonly, ~4 Go) est fixe et son nom de fichier vérifié par existence
     // plutôt qu'un pattern glob fragile, pour ne jamais retélécharger inutilement.
+    // Rendu résilient suite aux échecs réels signalés en session (verrou dpkg tenu par un
+    // apt bloqué, dpkg laissé "interrupted" après un force-stop, "l'installation démarre puis
+    // s'arrête" sans que le message d'erreur reste visible une fois le terminal fermé/scrollé) :
+    //   - dpkg --configure -a en tout premier : se répare seul si une install précédente a été
+    //     interrompue, au lieu d'exiger que l'utilisateur le fasse manuellement à chaque fois.
+    //   - toute la sortie est dupliquée vers ~/jarvis_sd_install.log (tee) : même si le
+    //     terminal se ferme ou scrolle, `cat ~/jarvis_sd_install.log` dans Termux retrouve
+    //     TOUJOURS le détail complet, y compris après le fait.
+    //   - trap ERR : imprime une ligne de résumé explicite (numéro de ligne + commande exacte
+    //     qui a échoué) juste avant que `set -e` n'arrête le script, plutôt que de laisser
+    //     l'utilisateur deviner où ça s'est arrêté.
+    //   - wget --tries=3 --continue : reprend un téléchargement interrompu du modèle (~4 Go)
+    //     au lieu de tout reperdre sur un simple accroc réseau.
     private const val SETUP_SCRIPT = """
 set -e
+exec > >(tee -a ~/jarvis_sd_install.log) 2>&1
+trap 'echo "=== ECHEC ligne $LINENO : $BASH_COMMAND — detail complet dans ~/jarvis_sd_install.log ==="' ERR
+echo "=== Debut installation : $(date) ==="
+dpkg --configure -a || true
 pkg update -y
 pkg install -y python git wget libjpeg-turbo
 cd ~
@@ -97,10 +114,12 @@ fi
 cd stable-diffusion-webui
 mkdir -p models/Stable-diffusion
 if [ ! -f models/Stable-diffusion/v1-5-pruned-emaonly.safetensors ]; then
-  wget -O models/Stable-diffusion/v1-5-pruned-emaonly.safetensors \
+  wget --tries=3 --continue -O models/Stable-diffusion/v1-5-pruned-emaonly.safetensors \
     https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors
 fi
+echo "=== Installation terminee, lancement du WebUI : $(date) ==="
 nohup python launch.py --api --listen --port 7860 --skip-torch-cuda-test --no-half --lowvram > ~/webui.log 2>&1 &
+echo "WebUI lance en arriere-plan (PID $!) — journal : ~/webui.log"
 """
 
     /** true si le paquet Termux (F-Droid) est installé sur l'appareil. */
@@ -185,7 +204,9 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
                     "Premier lancement : plusieurs minutes selon ta connexion. Utilise « Vérifier le " +
                     "statut » une fois l'installation terminée dans Termux (retour à l'invite de " +
                     "commande) pour confirmer que le WebUI a bien démarré. Si une erreur s'affiche " +
-                    "dans Termux avant la fin, c'est la cause exacte du souci — relis-la directement."
+                    "dans Termux avant la fin, c'est la cause exacte du souci — relis-la directement, ou " +
+                    "si le terminal s'est fermé/scrollé, tape « cat ~/jarvis_sd_install.log » dans " +
+                    "Termux pour retrouver le détail complet même après coup."
             )
         } catch (e: Exception) {
             DiagnosticsLog.log(context, "TERMUX_SD", "Échec de l'envoi RUN_COMMAND : ${e.javaClass.simpleName} — ${e.message}")
