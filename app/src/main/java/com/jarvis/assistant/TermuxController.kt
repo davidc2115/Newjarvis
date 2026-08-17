@@ -102,7 +102,7 @@ object TermuxController {
     private const val SETUP_SCRIPT = """
 set -e
 exec > >(tee -a ~/jarvis_sd_install.log) 2>&1
-trap 'echo "=== ECHEC ligne $LINENO : $BASH_COMMAND — detail complet dans ~/jarvis_sd_install.log ==="' ERR
+trap 'echo "=== ECHEC ligne ${'$'}LINENO : ${'$'}BASH_COMMAND — detail complet dans ~/jarvis_sd_install.log ==="' ERR
 echo "=== Debut installation : $(date) ==="
 dpkg --configure -a || true
 pkg update -y
