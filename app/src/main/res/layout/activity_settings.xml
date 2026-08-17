@@ -801,7 +801,7 @@
                 android:id="@+id/termuxAppSettingsButton"
                 android:layout_width="match_parent"
                 android:layout_height="44dp"
-                android:text="⚙️ OUVRIR LES PERMISSIONS ANDROID (étape 3)"
+                android:text="🔓 AUTORISER JARVIS À CONTRÔLER TERMUX (étape 3)"
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:gravity="center"

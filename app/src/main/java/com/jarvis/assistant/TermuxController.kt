@@ -56,7 +56,10 @@ object TermuxController {
     private const val EXTRA_COMMAND_ARGUMENTS = "com.termux.RUN_COMMAND_ARGUMENTS"
     private const val EXTRA_COMMAND_BACKGROUND = "com.termux.RUN_COMMAND_BACKGROUND"
     private const val EXTRA_COMMAND_SESSION_ACTION = "com.termux.RUN_COMMAND_SESSION_ACTION"
-    private const val RUN_COMMAND_PERMISSION = "com.termux.permission.RUN_COMMAND"
+    // internal (pas private) : SettingsActivity en a besoin pour déclencher la VRAIE demande
+    // de permission au runtime via ActivityResultContracts.RequestPermission() — voir le bug
+    // réel corrigé documenté sur termuxPermissionLauncher dans SettingsActivity.kt.
+    internal const val RUN_COMMAND_PERMISSION = "com.termux.permission.RUN_COMMAND"
 
     private const val WEBUI_BASE_URL = "http://127.0.0.1:7860"
     private const val NEGATIVE_PROMPT_DEFAULT =

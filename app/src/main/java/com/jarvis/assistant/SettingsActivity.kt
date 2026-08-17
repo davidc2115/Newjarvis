@@ -102,6 +102,25 @@ class SettingsActivity : AppCompatActivity() {
         updateWakeWordButtonLabel(findViewById(R.id.toggleWakeWordButton))
     }
 
+    // BUG RÉEL CORRIGÉ : TermuxController ne demandait JAMAIS la permission RUN_COMMAND au
+    // runtime (protectionLevel="dangerous" côté Termux, donc PAS auto-accordée à l'installation
+    // malgré la déclaration <uses-permission> dans le manifest) — seul openAppSettings() ouvrait
+    // l'écran générique "Infos sur l'application", où la permission n'apparaît dans
+    // "Autorisations supplémentaires" QUE si elle a déjà été demandée au moins une fois via
+    // l'API Android standard. Résultat concret signalé : l'utilisateur ne voyait AUCUNE
+    // autorisation "Exécuter des commandes" à accorder, quoi qu'il fasse. Ce launcher déclenche
+    // la vraie popup système.
+    private val termuxPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val statusText = findViewById<TextView>(R.id.termuxStatusText)
+        if (granted) {
+            statusText.text = "✅ Permission accordée. Appuie maintenant sur « Configurer Stable Diffusion (Termux) »."
+        } else {
+            statusText.text = "❌ Permission refusée. Sans elle, JARVIS ne peut pas envoyer de commande à Termux — réessaie, ou accorde-la manuellement dans Réglages Android → Apps → JARVIS → Autorisations."
+        }
+    }
+
     private fun startWakeWordServiceNow() {
         val serviceIntent = Intent(this, WakeWordService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
@@ -464,11 +483,26 @@ class SettingsActivity : AppCompatActivity() {
             refreshToggleLabel()
         }
 
+        // Demande la VRAIE permission au runtime (popup système) plutôt que de se contenter
+        // d'ouvrir l'écran générique "Infos sur l'application" en espérant que l'utilisateur
+        // la trouve lui-même — voir le commentaire sur termuxPermissionLauncher pour le bug
+        // réel que ça corrige (la permission n'apparaissait nulle part tant qu'elle n'avait
+        // jamais été demandée au moins une fois via cette API).
         appSettingsButton.setOnClickListener {
-            TermuxController.openAppSettings(this)
+            when {
+                !TermuxController.isTermuxInstalled(this) ->
+                    Toast.makeText(this, "Installe d'abord Termux (F-Droid) — voir les instructions ci-dessus", Toast.LENGTH_LONG).show()
+                TermuxController.hasRunCommandPermission(this) ->
+                    Toast.makeText(this, "✅ Permission déjà accordée", Toast.LENGTH_SHORT).show()
+                else -> termuxPermissionLauncher.launch(TermuxController.RUN_COMMAND_PERMISSION)
+            }
         }
 
         setupButton.setOnClickListener {
+            if (TermuxController.isTermuxInstalled(this) && !TermuxController.hasRunCommandPermission(this)) {
+                termuxPermissionLauncher.launch(TermuxController.RUN_COMMAND_PERMISSION)
+                return@setOnClickListener
+            }
             setupButton.isEnabled = false
             val result = TermuxController.setupAndLaunch(this)
             statusText.text = result.message
