@@ -144,18 +144,25 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (rmsdB > 6f && tts?.isSpeaking == true) {
                         stopSpeechAndTts()
                     }
+                    // Réutilise ce niveau RMS déjà fourni par SpeechRecognizer pour faire vibrer
+                    // le style d'orbe "Neural Core" en fonction du son réel — voir OrbView.audioLevel.
+                    // Pas de second flux micro ouvert exprès pour ça (rmsdB couvre grossièrement
+                    // -2..10 en pratique, normalisé ici sur une échelle 0..1).
+                    orbView.audioLevel = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
                 }
 
                 override fun onBufferReceived(buffer: ByteArray?) {}
 
                 override fun onEndOfSpeech() {
                     orbView.state = OrbView.OrbState.THINKING
+                    orbView.audioLevel = 0f // le micro n'écoute plus, retombe au repos plutôt que figé au dernier niveau
                     statusText.text = "JARVIS réfléchit…"
                 }
 
                 override fun onError(error: Int) {
                     isBusy = false
                     orbView.state = OrbView.OrbState.IDLE
+                    orbView.audioLevel = 0f
                     statusText.text = "Touchez l'orbe ou le micro pour parler."
                 }
 
