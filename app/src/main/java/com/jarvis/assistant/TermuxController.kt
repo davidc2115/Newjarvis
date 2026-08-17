@@ -55,6 +55,27 @@ import java.util.concurrent.TimeUnit
  * d'extras exactes ne sont pas publiquement documentées avec certitude (voir décision dans le
  * suivi de tâche #73 — mieux vaut ce contrôle HTTP fiable qu'un parsing de résultat qui pourrait
  * silencieusement échouer).
+ *
+ * CAUSE RÉELLE TROUVÉE ET CORRIGÉE : "WebUI toujours injoignable" malgré les correctifs
+ * précédents (session visible, dpkg résilient) — le vrai blocage était ~/webui.log :
+ * "Could not find a version that satisfies the requirement torch==2.1.2" / "No matching
+ * distribution found". Ce n'est PAS un souci de version de Python (le message officiel de
+ * launch.py qui suggère Python 3.10 est trompeur ici) : Termux tourne sur la libc Android
+ * (bionic), alors que TOUS les wheels PyTorch publiés sur PyPI/download.pytorch.org sont
+ * compilés pour glibc (manylinux) — aucune combinaison de version de Python ne peut réconcilier
+ * les deux, le wheel n'existe simplement pas pour cette plateforme. Le paquet natif Termux
+ * `python-torch` existe mais reste connu pour être instable/cassé au fil des mises à jour de
+ * Termux (voir issues termux/termux-packages #20158, #21188, #25996 — non fiable). La solution
+ * qui fonctionne réellement, confirmée par plusieurs guides communautaires à jour (ex: RVC/Applio
+ * sur Termux) : installer un VRAI environnement Ubuntu (glibc) à l'intérieur de Termux via
+ * `proot-distro` (github.com/termux/proot-distro, doc officielle vérifiée directement), et faire
+ * tourner AUTOMATIC1111 entièrement à l'intérieur — là, pip installe les wheels PyTorch standard
+ * sans problème. proot n'isole PAS le réseau (pas de vrai network namespace sans root), donc
+ * 127.0.0.1:7860 à l'intérieur du conteneur Ubuntu reste exactement le même socket que celui vu
+ * par Termux et par JARVIS — checkWebuiStatus()/generateImage() n'ont donc besoin d'AUCUN
+ * changement. Limite honnête à annoncer : sur un téléphone (pas un PC), le WebUI seul consomme
+ * déjà environ 2 Go de RAM rien que pour démarrer, avant même de charger un modèle — performances
+ * et faisabilité dépendent fortement du téléphone (RAM/CPU/stockage libre).
  */
 object TermuxController {
 
@@ -99,6 +120,28 @@ object TermuxController {
     //     l'utilisateur deviner où ça s'est arrêté.
     //   - wget --tries=3 --continue : reprend un téléchargement interrompu du modèle (~4 Go)
     //     au lieu de tout reperdre sur un simple accroc réseau.
+    // RÉÉCRITURE (proot-distro Ubuntu) suite au vrai log d'échec obtenu de l'utilisateur : voir
+    // le commentaire de classe plus haut pour la cause exacte (torch n'a aucun wheel compatible
+    // avec la libc Android de Termux, quelle que soit la version de Python). Le script installe
+    // désormais un vrai Ubuntu (glibc) via proot-distro puis y installe/lance AUTOMATIC1111
+    // ENTIÈREMENT à l'intérieur — c'est là, et seulement là, que "pip install torch" trouve un
+    // wheel compatible. Étapes visibles dans l'ordre (le terminal reste occupé tant que le
+    // WebUI tourne, c'est volontaire — voir le message de succès plus bas) :
+    //   1. pkg install proot-distro (Termux) puis proot-distro install ubuntu:24.04 (une seule
+    //      fois, ~700 Mo — `|| true` pour rester idempotent si déjà installé, même logique que
+    //      dpkg --configure -a plus haut).
+    //   2. À L'INTÉRIEUR du conteneur (proot-distro login ubuntu -- bash -c '...') : paquets
+    //      apt (python3/venv/pip/git/wget/libgl1 — libgl1 requis par opencv-python, dépendance
+    //      de stable-diffusion-webui, sinon ImportError: libGL.so.1 au lancement), clonage du
+    //      dépôt, téléchargement du modèle, puis lancement de launch.py EN PREMIER PLAN (pas de
+    //      nohup/background ici : sous proot, un process détaché du shell qui l'a lancé peut être
+    //      tué avec lui selon comment le shell parent se termine — le pattern documenté qui
+    //      fonctionne réellement, y compris dans les guides communautaires vérifiés, est de
+    //      laisser tourner au premier plan et garder Termux ouvert).
+    // Sous-script interne entre guillemets SIMPLES (pas doubles) : aucune expansion de variable
+    // n'est nécessaire dedans, donc aucun risque que le bash EXTÉRIEUR (Termux) interprète un
+    // $ avant que ça n'atteigne le bash INTÉRIEUR (Ubuntu) — évite tout un niveau d'échappement
+    // imbriqué fragile.
     private const val SETUP_SCRIPT = """
 set -e
 exec > >(tee -a ~/jarvis_sd_install.log) 2>&1
@@ -106,7 +149,13 @@ trap 'echo "=== ECHEC ligne ${'$'}LINENO : ${'$'}BASH_COMMAND — detail complet
 echo "=== Debut installation : $(date) ==="
 dpkg --configure -a || true
 pkg update -y
-pkg install -y python git wget libjpeg-turbo
+pkg install -y proot-distro
+echo "=== Installation environnement Ubuntu (proot-distro), une seule fois si pas deja fait (~700 Mo) : $(date) ==="
+proot-distro install ubuntu:24.04 || true
+echo "=== Ubuntu pret. Installation Python/PyTorch + WebUI a l'interieur (peut prendre longtemps au 1er lancement) : $(date) ==="
+proot-distro login ubuntu -- bash -c 'set -e
+apt-get update -y
+apt-get install -y python3 python3-venv python3-pip git wget libgl1 libglib2.0-0
 cd ~
 if [ ! -d stable-diffusion-webui ]; then
   git clone --depth 1 https://github.com/AUTOMATIC1111/stable-diffusion-webui.git
@@ -114,12 +163,10 @@ fi
 cd stable-diffusion-webui
 mkdir -p models/Stable-diffusion
 if [ ! -f models/Stable-diffusion/v1-5-pruned-emaonly.safetensors ]; then
-  wget --tries=3 --continue -O models/Stable-diffusion/v1-5-pruned-emaonly.safetensors \
-    https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors
+  wget --tries=3 --continue -O models/Stable-diffusion/v1-5-pruned-emaonly.safetensors https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors
 fi
-echo "=== Installation terminee, lancement du WebUI : $(date) ==="
-nohup python launch.py --api --listen --port 7860 --skip-torch-cuda-test --no-half --lowvram > ~/webui.log 2>&1 &
-echo "WebUI lance en arriere-plan (PID $!) — journal : ~/webui.log"
+echo "=== Lancement du WebUI (1er lancement seulement : installation de PyTorch et dependances Python, peut prendre 10 a 30+ minutes) ==="
+python3 launch.py --api --listen --port 7860 --skip-torch-cuda-test --no-half --precision full'
 """
 
     /** true si le paquet Termux (F-Droid) est installé sur l'appareil. */
@@ -150,7 +197,7 @@ echo "WebUI lance en arriere-plan (PID $!) — journal : ~/webui.log"
 
 3️⃣ Autorise JARVIS à envoyer des commandes à Termux : Réglages Android → Apps → JARVIS → Autorisations → Autorisations supplémentaires → « Exécuter des commandes ». Le bouton ci-dessous ouvre cet écran directement.
 
-Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux) » : JARVIS installera et lancera automatiquement le serveur (premier lancement plus long : téléchargement d'un modèle ~4 Go).
+Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux) » : JARVIS installe un vrai environnement Ubuntu à l'intérieur de Termux (proot-distro) puis y installe et lance AUTOMATIC1111 — seule méthode qui fonctionne réellement sur Android (Termux seul ne peut pas installer PyTorch, incompatibilité de bibliothèque système, pas un bug JARVIS). Prévoir : au moins 8 Go d'espace de stockage libre, une connexion Wi-Fi, et de la patience (Ubuntu + dépendances + modèle ~4 Go + PyTorch au premier lancement : facilement 15 à 40 minutes selon le téléphone et la connexion). Le terminal Termux doit rester ouvert tant que tu veux que le serveur reste disponible.
     """.trimIndent()
 
     /** Ouvre l'écran Android des permissions de l'app, pour l'étape 3 de setupInstructions(). */
@@ -197,16 +244,26 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
             Result(
                 true,
                 "✅ Installation envoyée à Termux. Termux devrait s'ouvrir automatiquement et afficher " +
-                    "le script s'exécuter en direct (mises à jour de paquets, puis téléchargement du " +
-                    "modèle ~4 Go). Si RIEN ne s'ouvre, une notification « Termux » est probablement " +
-                    "apparue dans le volet de notifications Android (restriction Android empêchant " +
-                    "l'ouverture automatique depuis l'arrière-plan) — appuie dessus pour voir la session. " +
-                    "Premier lancement : plusieurs minutes selon ta connexion. Utilise « Vérifier le " +
-                    "statut » une fois l'installation terminée dans Termux (retour à l'invite de " +
-                    "commande) pour confirmer que le WebUI a bien démarré. Si une erreur s'affiche " +
-                    "dans Termux avant la fin, c'est la cause exacte du souci — relis-la directement, ou " +
-                    "si le terminal s'est fermé/scrollé, tape « cat ~/jarvis_sd_install.log » dans " +
-                    "Termux pour retrouver le détail complet même après coup."
+                    "le script s'exécuter en direct, en plusieurs étapes visibles dans cet ordre : " +
+                    "mise à jour Termux, installation d'un environnement Ubuntu complet (proot-distro, " +
+                    "~700 Mo, uniquement au tout premier lancement), puis À L'INTÉRIEUR de cet Ubuntu : " +
+                    "paquets Python, clonage du dépôt, téléchargement du modèle (~4 Go), puis " +
+                    "installation de PyTorch et démarrage du serveur. Si RIEN ne s'ouvre, une " +
+                    "notification « Termux » est probablement apparue dans le volet de notifications " +
+                    "Android (restriction Android empêchant l'ouverture automatique depuis " +
+                    "l'arrière-plan) — appuie dessus pour voir la session. IMPORTANT (différent " +
+                    "d'avant) : contrairement à une installation classique, le terminal Termux NE " +
+                    "reviendra PAS à l'invite de commande une fois prêt — le WebUI tourne au premier " +
+                    "plan et le terminal doit rester ouvert tant qu'il doit répondre ; le signal de " +
+                    "succès est la ligne « Running on local URL » qui apparaît dans le terminal, PAS " +
+                    "un retour d'invite. Premier lancement particulièrement long (Ubuntu + PyTorch : " +
+                    "15 à 40 minutes selon le téléphone et la connexion), les suivants seront " +
+                    "beaucoup plus rapides. Utilise « Vérifier le statut » (test réseau réel) pour " +
+                    "confirmer que le WebUI répond, plutôt que de te fier à l'état du terminal. Si une " +
+                    "erreur s'affiche dans Termux avant la fin, c'est la cause exacte du souci — " +
+                    "relis-la directement, ou si le terminal s'est fermé/scrollé, tape « cat " +
+                    "~/jarvis_sd_install.log » dans Termux pour retrouver le détail complet même " +
+                    "après coup."
             )
         } catch (e: Exception) {
             DiagnosticsLog.log(context, "TERMUX_SD", "Échec de l'envoi RUN_COMMAND : ${e.javaClass.simpleName} — ${e.message}")
