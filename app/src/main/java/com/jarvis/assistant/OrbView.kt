@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
@@ -282,7 +283,8 @@ class OrbView @JvmOverloads constructor(
         val angle = pulsePhase * 2f * Math.PI.toFloat() * speedFactor
 
         drawPulsingCore(canvas, cx, cy, scale, level)
-        drawHudReticle(canvas, cx, cy, scale, angle)
+        drawRadiantRays(canvas, cx, cy, scale, angle, level)
+        drawHudReticle(canvas, cx, cy, scale)
 
         val cosA = cos(angle)
         val sinA = sin(angle)
@@ -350,51 +352,53 @@ class OrbView @JvmOverloads constructor(
         canvas.drawCircle(cx, cy, coreRadius * 2.4f, glowPaint)
     }
 
-    /** Anneaux pointillés + crochets d'angle façon viseur — l'accent "HUD sci-fi" demandé,
-     * en rotation lente indépendante du maillage de points pour un effet de profondeur. */
-    private fun drawHudReticle(canvas: Canvas, cx: Float, cy: Float, scale: Float, angle: Float) {
-        val hudPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.6f }
-
-        // Anneau 1 : pointillé, tourne dans le sens direct.
-        drawDashedRing(canvas, cx, cy, scale * 1.12f, angle * 0.4f, 28, hudPaint, alpha = 50)
-        // Anneau 2 : pointillé plus fin, tourne en sens inverse, légèrement plus grand.
-        drawDashedRing(canvas, cx, cy, scale * 1.26f, -angle * 0.25f, 40, hudPaint, alpha = 34)
-
-        // 4 crochets d'angle (façon viseur photo) autour du cadre.
-        val bracketLen = scale * 0.18f
-        val bracketR = scale * 1.38f
-        hudPaint.alpha = 70
-        hudPaint.color = accentColor
-        val corners = listOf(-135f, -45f, 45f, 135f)
-        for (deg in corners) {
-            val rad = Math.toRadians(deg.toDouble())
-            val px = cx + (cos(rad) * bracketR).toFloat()
-            val py = cy + (sin(rad) * bracketR).toFloat()
-            val perpX = -sin(rad).toFloat()
-            val perpY = cos(rad).toFloat()
-            val tanX = cos(rad).toFloat()
-            val tanY = sin(rad).toFloat()
-            canvas.drawLine(px, py, px - tanX * bracketLen, py - tanY * bracketLen, hudPaint)
-            canvas.drawLine(px, py, px + perpX * bracketLen, py + perpY * bracketLen, hudPaint)
+    /**
+     * Rayons lumineux qui partent du cœur et s'estompent vers leurs extrémités (dégradé par
+     * rayon, comme le sursaut d'étoile de l'image de référence) — l'élément le plus visible du
+     * rendu demandé. Réutilise rayAngles/rayLengths déjà définis pour NETWORK_SPHERE (mêmes
+     * positions de base, pas de nouveau tableau), mais en plus longs/plus lumineux et
+     * audio-réactifs (longueur et opacité augmentent avec le niveau sonore réel).
+     */
+    private fun drawRadiantRays(canvas: Canvas, cx: Float, cy: Float, scale: Float, angle: Float, level: Float) {
+        val rayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+        val rotation = angle * 0.3f
+        rayAngles.forEachIndexed { i, baseAngle ->
+            val a = baseAngle + rotation
+            val length = scale * rayLengths[i] * (1.35f + level * 0.5f)
+            val endX = cx + cos(a) * length
+            val endY = cy + sin(a) * length
+            val alpha = (150 + level * 105).toInt().coerceIn(0, 255)
+            rayPaint.strokeWidth = 1.1f + level * 1.2f
+            rayPaint.shader = LinearGradient(
+                cx, cy, endX, endY,
+                Color.argb(alpha, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor)),
+                Color.argb(0, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor)),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawLine(cx, cy, endX, endY, rayPaint)
         }
     }
 
-    private fun drawDashedRing(
-        canvas: Canvas, cx: Float, cy: Float, radius: Float, rotationOffset: Float,
-        dashCount: Int, paint: Paint, alpha: Int
-    ) {
-        paint.color = accentColor
-        paint.alpha = alpha
-        val dashLength = (2f * Math.PI.toFloat() * radius) / (dashCount * 2f)
-        for (i in 0 until dashCount) {
-            val a0 = rotationOffset + (i.toFloat() / dashCount) * 2f * Math.PI.toFloat()
-            val a1 = a0 + (dashLength / radius)
-            val x0 = cx + (cos(a0) * radius)
-            val y0 = cy + (sin(a0) * radius)
-            val x1 = cx + (cos(a1) * radius)
-            val y1 = cy + (sin(a1) * radius)
-            canvas.drawLine(x0, y0, x1, y1, paint)
-        }
+    /** Anneaux d'orbite fins et discrets autour du noyau — les arcs qui traversent l'image de
+     * référence en arrière-plan. Cercles pleins (pas pointillés) : à cette taille et cette
+     * opacité, un pointillé ne se distinguerait pas d'un trait plein, autant rester simple.
+     * Un des trois est aplati (ellipse) pour évoquer un anneau vu de biais plutôt que 3 cercles
+     * parfaitement concentriques, comme dans la référence. */
+    private fun drawHudReticle(canvas: Canvas, cx: Float, cy: Float, scale: Float) {
+        val ringPaint2 = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f }
+        ringPaint2.color = accentColor
+
+        ringPaint2.alpha = 35
+        canvas.drawCircle(cx, cy, scale * 1.15f, ringPaint2)
+        ringPaint2.alpha = 22
+        canvas.drawCircle(cx, cy, scale * 1.42f, ringPaint2)
+
+        ringPaint2.alpha = 28
+        canvas.save()
+        canvas.rotate(-18f, cx, cy)
+        canvas.scale(1f, 0.42f, cx, cy)
+        canvas.drawCircle(cx, cy, scale * 1.65f, ringPaint2)
+        canvas.restore()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
