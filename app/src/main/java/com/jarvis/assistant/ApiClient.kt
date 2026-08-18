@@ -64,6 +64,7 @@ object ApiClient {
             // Prend les derniers messages utilisateur (pas juste le dernier) pour que les
             // relances mi-conversation ("et son adresse ?") retrouvent aussi du contexte.
             val recentUserMessages = history.filter { it.role == "user" }.takeLast(3).map { it.text }
+            val lastUserMsg = recentUserMessages.lastOrNull() ?: ""
             val vaultContext = try {
                 ObsidianController.quickContextSearch(context, recentUserMessages)
             } catch (_: Exception) {
