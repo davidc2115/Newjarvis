@@ -845,6 +845,15 @@ object JarvisCommandParser {
                 else ObsidianController.moveNote(context, query, folder)
             }
 
+            "remember_fact" -> {
+                val fact = json.optString("fact", "")
+                ObsidianController.rememberFact(context, fact)
+            }
+            "forget_fact" -> {
+                val query = json.optString("query", "").ifBlank { json.optString("fact", "") }
+                ObsidianController.forgetFact(context, query)
+            }
+
             "generate_image" -> {
                 val prompt = json.optString("prompt", "")
                 val count = json.optInt("count", 1)

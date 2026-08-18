@@ -292,6 +292,51 @@ Ce vault est géré par **JARVIS Assistant**.
     // Create note
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Liens automatiques entre notes ("second brain" — voir aussi la mémoire durable
+    // plus bas) : contrairement à Obsidian lui-même (qui ne crée AUCUN lien tout seul,
+    // l'utilisateur tape manuellement [[Titre]]), JARVIS peut le faire automatiquement
+    // puisque C'EST LUI qui écrit le contenu — si le texte d'une nouvelle note/ajout
+    // mentionne le titre exact d'une autre note déjà existante, ce titre est entouré de
+    // [[...]]. Ensuite, c'est l'app Obsidian ELLE-MÊME (pas JARVIS) qui affiche
+    // automatiquement les backlinks et le graphe à partir de cette syntaxe standard —
+    // pas besoin de maintenir un index de liens séparé côté JARVIS, juste écrire le bon
+    // markdown. Volontairement PRUDENT : un seul lien par titre (pas de sur-liage d'un
+    // nom répété 10 fois dans la même note), uniquement en bordure de mot (jamais au
+    // milieu d'un autre mot), jamais si le lien existe déjà quelque part dans le texte.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun autoLinkContent(context: Context, content: String, excludeTitle: String? = null): String {
+        if (content.isBlank() || !hasStorageAccess()) return content
+        val root = getVaultRoot(context)
+        if (!root.exists() || !root.isDirectory) return content
+        val titles = try {
+            root.walkTopDown()
+                .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
+                .map { it.nameWithoutExtension }
+                .filter { it.length >= 3 && !it.equals(excludeTitle, ignoreCase = true) }
+                .distinct()
+                .sortedByDescending { it.length }
+                .toList()
+        } catch (_: Exception) {
+            return content
+        }
+
+        var result = content
+        for (title in titles) {
+            if (result.contains("[[$title]]", ignoreCase = true)) continue
+            val idx = result.indexOf(title, ignoreCase = true)
+            if (idx < 0) continue
+            val before = if (idx > 0) result[idx - 1] else ' '
+            val afterIdx = idx + title.length
+            val after = if (afterIdx < result.length) result[afterIdx] else ' '
+            val isWordBoundary = !before.isLetterOrDigit() && !after.isLetterOrDigit()
+            if (!isWordBoundary) continue
+            result = result.substring(0, idx) + "[[" + result.substring(idx, afterIdx) + "]]" + result.substring(afterIdx)
+        }
+        return result
+    }
+
     fun createNote(
         context: Context,
         title: String,
@@ -307,6 +352,7 @@ Ce vault est géré par **JARVIS Assistant**.
             val file     = File(dir, "$safeTitle.md")
             val now      = Date()
             val tagsStr  = tags.joinToString(", ") { "\"$it\"" }
+            val linkedContent = autoLinkContent(context, content, excludeTitle = safeTitle)
 
             val body = """
 ---
@@ -317,7 +363,7 @@ source: JARVIS Assistant
 
 # $title
 
-$content
+$linkedContent
 
 ---
 *Créé par JARVIS le ${displayFormat.format(now)} à ${timeFormat.format(now)}*
@@ -344,11 +390,12 @@ $content
         val file      = File(dir, "$today.md")
 
         return try {
+            val linkedContent = if (content.isNotBlank()) autoLinkContent(context, content, excludeTitle = today) else content
             if (file.exists()) {
                 // Append to existing
-                if (content.isNotBlank()) {
-                    file.appendText("\n\n${timeFormat.format(Date())} — $content")
-                    "📅 Ajouté à la note du jour ($todayDisp) :\n\"$content\""
+                if (linkedContent.isNotBlank()) {
+                    file.appendText("\n\n${timeFormat.format(Date())} — $linkedContent")
+                    "📅 Ajouté à la note du jour ($todayDisp) :\n\"$linkedContent\""
                 } else {
                     "📅 Note du jour ($todayDisp) existe déjà.\n\n${file.readText().take(500)}…"
                 }
@@ -362,7 +409,7 @@ source: JARVIS Assistant
 
 # Journal du $todayDisp
 
-${if (content.isNotBlank()) content else "— Notes du jour —"}
+${if (linkedContent.isNotBlank()) linkedContent else "— Notes du jour —"}
 
 ---
 *Créé par JARVIS*
@@ -481,20 +528,30 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
      * (évite d'injecter du bruit pour "salut ça va" par exemple). Coût borné : s'arrête dès
      * que [maxNotes] correspondances suffisantes sont trouvées, pas besoin de lire tout le vault.
      */
-    fun quickContextSearch(context: Context, userMessage: String, maxNotes: Int = 3): String? {
+    // BUG RÉEL CORRIGÉ : ne se basait QUE sur le tout dernier message utilisateur, et
+    // s'arrêtait au TOUT PREMIER mot-clé trouvé (score binaire, pas de classement) — une
+    // relance mi-conversation ("et son adresse ?", "et pour l'autre ?") qui ne répète pas
+    // le mot-clé initial ne retrouvait plus rien, donnant l'impression que JARVIS "oubliait"
+    // en cours de route. Prend maintenant les derniers messages utilisateur (pas juste le
+    // dernier) pour construire les mots-clés, et classe les notes par NOMBRE de mots-clés
+    // trouvés (titre pondéré plus fort que contenu) au lieu de s'arrêter au premier match —
+    // les notes les plus pertinentes remontent en premier même quand plusieurs notes
+    // matchent partiellement.
+    fun quickContextSearch(context: Context, recentUserMessages: List<String>, maxNotes: Int = 5): String? {
         if (!hasStorageAccess()) return null
         val root = getVaultRoot(context)
         if (!root.exists() || !root.isDirectory) return null
 
-        val words = userMessage.lowercase()
+        val words = recentUserMessages.joinToString(" ")
+            .lowercase()
             .replace(Regex("[^a-zà-ÿ0-9 ]"), " ")
             .split(" ")
             .filter { it.length >= 4 && it !in CONTEXT_STOPWORDS_FR }
             .distinct()
-        // Message trop générique pour en tirer un mot-clé (ex: "yo", "ça va ?") : plutôt que de
-        // ne rien injecter du tout, on signale quand même l'existence et les titres des notes
-        // les plus récentes — un aperçu léger, sans le contenu complet — pour que JARVIS ait
-        // conscience du vault dès le début d'une conversation même sans mot-clé à chercher.
+        // Message(s) trop génériques pour en tirer un mot-clé (ex: "yo", "ça va ?") : plutôt
+        // que de ne rien injecter du tout, on signale quand même l'existence et les titres
+        // des notes les plus récentes — un aperçu léger, sans le contenu complet — pour que
+        // JARVIS ait conscience du vault dès le début d'une conversation même sans mot-clé.
         if (words.isEmpty()) {
             val recent = root.walkTopDown()
                 .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
@@ -505,37 +562,143 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
             return recent.joinToString("\n") { "### ${it.nameWithoutExtension} (récent)" }
         }
 
-        val matches = mutableListOf<Pair<File, String>>()
+        data class Hit(val file: File, val score: Int, val excerpt: String)
+        val hits = mutableListOf<Hit>()
         for (file in root.walkTopDown()) {
-            if (matches.size >= maxNotes) break
             if (!file.isFile || file.extension != "md" || file.path.contains(".obsidian")) continue
-            val nameLower = file.nameWithoutExtension.lowercase()
-            val titleHit = words.any { nameLower.contains(it) }
             try {
-                if (titleHit) {
-                    matches.add(file to file.readText().take(400))
+                val text = file.readText()
+                val textLower = text.lowercase()
+                val nameLower = file.nameWithoutExtension.lowercase()
+                val titleMatches = words.count { nameLower.contains(it) }
+                val contentMatches = words.count { textLower.contains(it) }
+                val score = titleMatches * 3 + contentMatches
+                if (score == 0) continue
+                val hitWord = words.firstOrNull { textLower.contains(it) }
+                val excerpt = if (hitWord != null) {
+                    val idx = textLower.indexOf(hitWord)
+                    val start = maxOf(0, idx - 80)
+                    val end = minOf(text.length, idx + hitWord.length + 220)
+                    text.substring(start, end).replace("\n", " ")
                 } else {
-                    val text = file.readText()
-                    val textLower = text.lowercase()
-                    val hitWord = words.firstOrNull { textLower.contains(it) }
-                    if (hitWord != null) {
-                        val idx = textLower.indexOf(hitWord)
-                        val start = maxOf(0, idx - 60)
-                        val end = minOf(text.length, idx + hitWord.length + 150)
-                        matches.add(file to text.substring(start, end).replace("\n", " "))
-                    }
+                    text.take(220).replace("\n", " ")
                 }
+                hits.add(Hit(file, score, excerpt))
             } catch (_: Exception) {
                 // note illisible — on l'ignore simplement, pas bloquant pour les autres
             }
         }
 
-        if (matches.isEmpty()) return null
+        if (hits.isEmpty()) return null
+        val top = hits.sortedByDescending { it.score }.take(maxNotes)
         val sb = StringBuilder()
-        matches.forEach { (file, excerpt) ->
-            sb.append("### ${file.nameWithoutExtension}\n…${excerpt.trim()}…\n\n")
+        top.forEach { hit ->
+            sb.append("### ${hit.file.nameWithoutExtension}\n…${hit.excerpt.trim()}…\n\n")
         }
         return sb.toString().trim()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Mémoire durable ("second brain") : contrairement à quickContextSearch ci-dessus
+    // (qui ne renvoie que des extraits liés au(x) dernier(s) message(s), différents à
+    // chaque fois), cette note spéciale est relue EN ENTIER et injectée SYSTÉMATIQUEMENT
+    // à CHAQUE message, sans condition de mot-clé (voir ApiClient.sendChat) — c'est ce
+    // qui règle le symptôme "on repart de zéro à chaque conversation/redémarrage" : les
+    // faits qui y sont notés (via remember_fact, ou directement demandés par
+    // l'utilisateur : "retiens que...") restent connus de JARVIS en permanence, pas
+    // seulement quand leurs mots-clés apparaissent par hasard dans le message en cours.
+    // Bornée en taille (MAX_MEMORY_CHARS) : au-delà, les entrées les plus ANCIENNES sont
+    // retirées en premier (FIFO), jamais les plus récentes — même logique que
+    // MAX_GENERATION_HISTORY/MAX_HISTORY_MESSAGES ailleurs dans le projet, pour ne jamais
+    // laisser grossir indéfiniment ce qui est envoyé à chaque appel IA.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const val MEMORY_NOTE_TITLE = "Mémoire JARVIS"
+    private const val MAX_MEMORY_CHARS = 4000
+
+    private fun memoryNoteHeader(): String = """
+---
+tags: ["memoire", "jarvis"]
+source: JARVIS Assistant
+---
+
+# 🧠 Mémoire JARVIS
+
+Faits durables retenus par JARVIS au fil des conversations — relue EN ENTIER et prise en
+compte à CHAQUE message, contrairement aux autres notes (qui ne remontent que si leurs
+mots-clés correspondent à la conversation en cours). Modifiable librement ici même, ou en
+disant à JARVIS « retiens que... » / « oublie que... ».
+""".trimIndent()
+
+    private fun trimMemoryIfNeeded(fullText: String): String {
+        if (fullText.length <= MAX_MEMORY_CHARS) return fullText
+        val lines = fullText.lines()
+        val bulletStartIdx = lines.indexOfFirst { it.trim().startsWith("- [") }
+        if (bulletStartIdx < 0) return fullText.takeLast(MAX_MEMORY_CHARS)
+        val header = lines.subList(0, bulletStartIdx)
+        var bullets = lines.subList(bulletStartIdx, lines.size).filter { it.isNotBlank() }
+        while (bullets.isNotEmpty() &&
+            (header.joinToString("\n").length + bullets.joinToString("\n").length) > MAX_MEMORY_CHARS
+        ) {
+            bullets = bullets.drop(1) // retire l'entrée la plus ANCIENNE en premier
+        }
+        return (header + bullets).joinToString("\n")
+    }
+
+    /** Ajoute un fait durable à la mémoire (crée la note si besoin). */
+    fun rememberFact(context: Context, fact: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        val trimmedFact = fact.trim()
+        if (trimmedFact.isBlank()) return "❌ Rien à retenir : le fait est vide."
+        return try {
+            val root = getVaultRoot(context)
+            val file = File(root, "$MEMORY_NOTE_TITLE.md")
+            val line = "- [${displayFormat.format(Date())}] $trimmedFact"
+            val updated = if (!file.exists()) {
+                memoryNoteHeader() + "\n" + line
+            } else {
+                trimMemoryIfNeeded(file.readText().trimEnd() + "\n" + line)
+            }
+            file.writeText(updated)
+            "✅ Retenu durablement : \"$trimmedFact\""
+        } catch (e: Exception) {
+            "❌ Erreur mémoire : ${e.message}"
+        }
+    }
+
+    /** Retire les entrées de mémoire contenant [query] (recherche simple, insensible à la casse). */
+    fun forgetFact(context: Context, query: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        val trimmedQuery = query.trim()
+        if (trimmedQuery.isBlank()) return "❌ Précise ce qu'il faut oublier."
+        val root = getVaultRoot(context)
+        val file = File(root, "$MEMORY_NOTE_TITLE.md")
+        if (!file.exists()) return "ℹ️ Aucune mémoire enregistrée pour l'instant."
+        return try {
+            val queryLower = trimmedQuery.lowercase()
+            val lines = file.readText().lines()
+            val kept = lines.filter { !(it.trim().startsWith("- [") && it.lowercase().contains(queryLower)) }
+            val removed = lines.size - kept.size
+            if (removed == 0) return "ℹ️ Rien trouvé dans la mémoire correspondant à \"$trimmedQuery\"."
+            file.writeText(kept.joinToString("\n"))
+            "✅ $removed élément(s) oublié(s) correspondant à \"$trimmedQuery\"."
+        } catch (e: Exception) {
+            "❌ Erreur mémoire : ${e.message}"
+        }
+    }
+
+    /** Contenu brut (uniquement les entrées, sans l'en-tête) pour injection systématique dans le system prompt. */
+    fun getMemoryContext(context: Context): String? {
+        if (!hasStorageAccess()) return null
+        val root = getVaultRoot(context)
+        val file = File(root, "$MEMORY_NOTE_TITLE.md")
+        if (!file.exists()) return null
+        return try {
+            val bullets = file.readText().lines().filter { it.trim().startsWith("- [") }
+            if (bullets.isEmpty()) null else bullets.joinToString("\n")
+        } catch (_: Exception) {
+            null
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -547,8 +710,9 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
         val file = findNote(context, query)
             ?: return "❌ Note \"$query\" introuvable. Créez-la d'abord."
         return try {
-            file.appendText("\n\n${timeFormat.format(Date())} — $text")
-            "✅ Ajouté à **${file.nameWithoutExtension}** :\n\"$text\""
+            val linkedText = autoLinkContent(context, text, excludeTitle = file.nameWithoutExtension)
+            file.appendText("\n\n${timeFormat.format(Date())} — $linkedText")
+            "✅ Ajouté à **${file.nameWithoutExtension}** :\n\"$linkedText\""
         } catch (e: Exception) {
             "❌ Erreur : ${e.message}"
         }
