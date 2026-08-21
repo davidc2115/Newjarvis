@@ -104,7 +104,10 @@ class OrbView @JvmOverloads constructor(
             OrbState.IDLE -> 3200L
             OrbState.LISTENING -> 1100L
             OrbState.THINKING -> 650L
-            OrbState.SPEAKING -> 900L
+            // Volontairement le plus LENT de tous les etats (avant : 900L, plus rapide
+            // que IDLE) -- demande explicite : l'orb doit ralentir et devenir contemplative
+            // pendant que JARVIS parle, pas s'agiter comme pendant l'ecoute/la reflexion.
+            OrbState.SPEAKING -> 4200L
         }
     }
 
@@ -502,10 +505,85 @@ class OrbView @JvmOverloads constructor(
         textSize = 22f
     }
 
+    // ── Habillage "cosmos / univers" du style Toile Obsidian ────────────────────────────
+    // Champ d'etoiles decoratif : positions FIXES (seed deterministe, pas de nouveau tirage
+    // a chaque frame ni a chaque recomposition -- couteux et inutile), totalement independant
+    // du graphe reel du vault. Pur habillage visuel demande explicitement ("plus facon
+    // univers, cosmos") pour donner une impression de fond spatial/nebuleuse derriere les
+    // noeuds/liens qui restent, eux, les vraies donnees du vault.
+    private data class StarDot(val rx: Float, val ry: Float, val size: Float, val phase: Float, val baseAlpha: Int)
+
+    private val starField: List<StarDot> by lazy { generateStarField(90) }
+
+    private fun generateStarField(count: Int): List<StarDot> {
+        val rng = kotlin.random.Random(42)
+        return List(count) {
+            StarDot(
+                rx = rng.nextFloat() * 2.6f - 1.3f,
+                ry = rng.nextFloat() * 2.6f - 1.3f,
+                size = 1f + rng.nextFloat() * 2.3f,
+                phase = rng.nextFloat() * 2f * Math.PI.toFloat(),
+                baseAlpha = 35 + rng.nextInt(90)
+            )
+        }
+    }
+
+    /** Scintillement lent et desynchronise, volontairement independant de l'etat (IDLE/
+     * LISTENING/THINKING/SPEAKING) -- le fond etoile doit rester un decor discret et stable,
+     * ce sont les noeuds/liens du vault qui portent l'animation liee a l'activite de JARVIS. */
+    private fun drawStarfield(canvas: Canvas, cx: Float, cy: Float, scale: Float) {
+        val cosmicT = pulsePhase * 2f * Math.PI.toFloat() * 0.3f
+        starField.forEach { s ->
+            val twinkle = 0.5f + 0.5f * sin(cosmicT + s.phase)
+            dotPaint.shader = null
+            dotPaint.color = Color.WHITE
+            dotPaint.alpha = (s.baseAlpha * (0.4f + 0.6f * twinkle)).toInt().coerceIn(12, 200)
+            canvas.drawCircle(cx + s.rx * scale, cy + s.ry * scale, s.size, dotPaint)
+        }
+    }
+
+    /** Deux nappes de "poussiere cosmique" en tres faible opacite (nebuleuse) -- assez pour
+     * suggerer un fond spatial sans jamais nuire a la lisibilite du chat au-dessus (l'orb
+     * entiere est deja affichee en alpha reduit via android:alpha dans activity_main.xml). */
+    private fun drawNebulaGlow(canvas: Canvas, cx: Float, cy: Float, scale: Float) {
+        dotPaint.shader = RadialGradient(
+            cx - scale * 0.3f, cy - scale * 0.25f, scale * 0.95f,
+            intArrayOf(adjustAlpha(accentColor, 0.16f), Color.TRANSPARENT),
+            null, Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx - scale * 0.3f, cy - scale * 0.25f, scale * 0.95f, dotPaint)
+        dotPaint.shader = RadialGradient(
+            cx + scale * 0.35f, cy + scale * 0.3f, scale * 0.75f,
+            intArrayOf(adjustAlpha(Color.WHITE, 0.07f), Color.TRANSPARENT),
+            null, Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx + scale * 0.35f, cy + scale * 0.3f, scale * 0.75f, dotPaint)
+        dotPaint.shader = null
+    }
+
+    /** Anneaux orbitaux discrets autour du hub (note la plus connectee), effet
+     * "systeme solaire" cense renforcer le theme cosmos sans surcharger le graphe reel. */
+    private fun drawOrbitRings(canvas: Canvas, cx: Float, cy: Float, scale: Float) {
+        ringPaint.style = Paint.Style.STROKE
+        ringPaint.color = accentColor
+        ringPaint.strokeWidth = 1f
+        listOf(0.32f, 0.58f, 0.85f).forEach { r ->
+            ringPaint.alpha = 20
+            canvas.drawCircle(cx, cy, scale * r, ringPaint)
+        }
+    }
+
     private fun drawObsidianWeb(canvas: Canvas) {
         val cx = width / 2f
         val cy = height / 2f
         val scale = minOf(width, height) / 2f * 0.9f
+
+        // Habillage cosmos : fond etoile + nebuleuse + anneaux orbitaux, dessines AVANT le
+        // graphe reel pour rester en arriere-plan (le graphe et ses libelles restent lisibles
+        // au-dessus). Voir drawStarfield/drawNebulaGlow/drawOrbitRings ci-dessus.
+        drawNebulaGlow(canvas, cx, cy, scale)
+        drawStarfield(canvas, cx, cy, scale)
+        drawOrbitRings(canvas, cx, cy, scale)
 
         // Amplitude de dérive des nœuds : nulle en IDLE (positions strictement fixes,
         // comme demandé), puis croissante selon l'activité — réflexion = le plus vif.
@@ -513,13 +591,16 @@ class OrbView @JvmOverloads constructor(
             OrbState.IDLE -> 0f
             OrbState.LISTENING -> 0.05f
             OrbState.THINKING -> 0.11f
-            OrbState.SPEAKING -> 0.08f
+            // Ralenti nettement (etait 0.08f, quasi au niveau de THINKING) : demande
+            // explicite pour un effet plus lent/contemplatif pendant que JARVIS parle.
+            OrbState.SPEAKING -> 0.03f
         }
         val pulseSpeed = when (state) {
             OrbState.IDLE -> 0f
             OrbState.LISTENING -> 1f
             OrbState.THINKING -> 1.8f
-            OrbState.SPEAKING -> 1.3f
+            // Idem (etait 1.3f) : scintillement des noeuds/liens ralenti pendant la parole.
+            OrbState.SPEAKING -> 0.4f
         }
         val t = pulsePhase * 2f * Math.PI.toFloat() * pulseSpeed
 

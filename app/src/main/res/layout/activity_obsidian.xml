@@ -270,6 +270,21 @@
             android:textSize="13sp"
             android:layout_marginBottom="20dp" />
 
+        <!-- Exploration interactive du graphe reel du vault (pan/zoom, tap sur un point) :
+             demande explicitement par l'utilisateur en plus du petit orb en arriere-plan
+             du chat, voir VaultGraphActivity. -->
+        <TextView
+            android:id="@+id/btnVaultGraph"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center"
+            android:text="🌌 Explorer la Toile Obsidian"
+            android:textColor="@color/cyan_accent"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="20dp" />
+
         <!-- ══════════════════════════════════════════════════════════════════ -->
         <!-- ZONE RÉSULTAT                                                     -->
         <!-- ══════════════════════════════════════════════════════════════════ -->

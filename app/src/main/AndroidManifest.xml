@@ -204,6 +204,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".VaultGraphActivity"
+            android:exported="false"
+            android:label="🌌 Toile Obsidian — exploration"
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
             android:name=".SmartHomeActivity"
             android:exported="false"
             android:label="☰ Menu JARVIS"

@@ -888,7 +888,12 @@ disant à JARVIS « retiens que... » / « oublie que... ».
     // labelCutoff dans OrbView.layoutFromGraph) — utilisé ci-dessous pour les faits de mémoire
     // et les générations, dont le contenu textuel EST tout l'intérêt (demande utilisateur :
     // "mettre les détails de la mémoire" au lieu d'un seul nœud générique "Mémoire JARVIS").
-    data class VaultGraphNode(val title: String, val degree: Int, val forceLabel: Boolean = false)
+    // filePath : chemin absolu de la note source quand le noeud correspond a un vrai
+    // fichier .md du vault (permet a l'ecran d'exploration interactive d'ouvrir le
+    // contenu complet au tap) -- null pour les noeuds synthetiques (faits de Memoire
+    // JARVIS), qui n'ont pas de fichier dedie et affichent deja tout leur contenu utile
+    // dans le titre.
+    data class VaultGraphNode(val title: String, val degree: Int, val forceLabel: Boolean = false, val filePath: String? = null)
     data class VaultGraph(val nodes: List<VaultGraphNode>, val edges: List<Pair<Int, Int>>)
 
     fun buildVaultGraph(context: Context, maxNodes: Int = 26): VaultGraph? {
@@ -937,7 +942,7 @@ disant à JARVIS « retiens que... » / « oublie que... ».
             val keptSet = keptIndices.toSet()
             val indexRemap = keptIndices.withIndex().associate { (newIdx, oldIdx) -> oldIdx to newIdx }
 
-            val nodes = keptIndices.map { VaultGraphNode(files[it].nameWithoutExtension, degrees[it] ?: 0) }.toMutableList()
+            val nodes = keptIndices.map { VaultGraphNode(files[it].nameWithoutExtension, degrees[it] ?: 0, filePath = files[it].path) }.toMutableList()
             val edgesSet = mutableSetOf<Pair<Int, Int>>()
             keptIndices.forEach { oldI ->
                 adjacency[oldI]?.forEach { oldJ ->

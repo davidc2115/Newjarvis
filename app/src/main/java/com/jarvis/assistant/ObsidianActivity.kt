@@ -173,6 +173,11 @@ class ObsidianActivity : AppCompatActivity() {
             runAsync { ObsidianController.listNotes(this) }
         }
 
+        // ── Exploration interactive de la Toile Obsidian (pan/zoom, tap sur un point) ───────
+        findViewById<TextView>(R.id.btnVaultGraph).setOnClickListener {
+            startActivity(Intent(this, VaultGraphActivity::class.java))
+        }
+
         // ── Ouvrir dans Obsidian ────────────────────────────────────────────
         findViewById<TextView>(R.id.btnOpenObsidian).setOnClickListener {
             runAsync { ObsidianController.openInObsidian(this, "") }

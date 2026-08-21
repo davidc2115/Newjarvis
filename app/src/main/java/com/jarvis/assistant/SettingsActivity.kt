@@ -276,8 +276,18 @@ class SettingsActivity : AppCompatActivity() {
                 setTextColor(getColor(R.color.text_primary))
                 setHintTextColor(getColor(R.color.text_secondary))
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-                hint = "Clé API ${provider.displayName}..."
-                setText(Prefs.getApiKeyFor(this@SettingsActivity, provider))
+                // BUG RÉEL CORRIGÉ (signalement utilisateur : "j'ai 3 clés Groq mais une seule
+                // est affichée") : ce champ n'affichait QUE Prefs.getApiKeyFor() (1ère clé de
+                // la liste), alors que Prefs stocke bien les 3 clés (multi-clés + rotation
+                // round-robin déjà correcte côté ApiClient.sendOpenAiWithRotation). Conséquence
+                // concrète bien plus grave qu'un simple affichage incomplet : le bouton
+                // ENREGISTRER de cet onglet resauvegarde le contenu de CE champ tel quel via
+                // Prefs.saveApiKeys (qui écrase la liste complète) — donc rouvrir Réglages puis
+                // cliquer ENREGISTRER sans y prendre garde effaçait silencieusement les 2 clés
+                // non affichées. Toutes les clés sont maintenant listées, séparées par virgule
+                // (Prefs.saveApiKeys sait déjà découper sur "," "\n" ";").
+                hint = "Clé(s) API ${provider.displayName} — sépare par une virgule si plusieurs"
+                setText(Prefs.getApiKeysFor(this@SettingsActivity, provider).joinToString(", "))
             }
             apiKeysContainer.addView(field)
             apiKeyFields[provider] = field
