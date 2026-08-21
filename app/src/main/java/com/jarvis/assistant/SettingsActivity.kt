@@ -464,6 +464,7 @@ class SettingsActivity : AppCompatActivity() {
         val portInput = findViewById<EditText>(R.id.ollamaPortInput)
         val modelInputOllama = findViewById<EditText>(R.id.ollamaModelInput)
         val fallbackModelsInput = findViewById<EditText>(R.id.ollamaFallbackModelsInput)
+        val remoteHostInput = findViewById<EditText>(R.id.ollamaRemoteHostInput)
         val toggleButton = findViewById<TextView>(R.id.toggleOllamaAutoButton)
         val saveButtonOllama = findViewById<TextView>(R.id.saveOllamaButton)
         val testButton = findViewById<TextView>(R.id.testOllamaButton)
@@ -478,6 +479,7 @@ class SettingsActivity : AppCompatActivity() {
         portInput.setText(Prefs.getOllamaPort(this))
         modelInputOllama.setText(Prefs.getOllamaModel(this))
         fallbackModelsInput.setText(Prefs.getOllamaFallbackModels(this).joinToString(", "))
+        remoteHostInput.setText(Prefs.getOllamaRemoteHost(this))
 
         fun refreshToggleLabel() {
             toggleButton.text = if (Prefs.isOllamaAutoEnabled(this)) {
@@ -498,6 +500,7 @@ class SettingsActivity : AppCompatActivity() {
             Prefs.saveOllamaPort(this, portInput.text.toString())
             Prefs.saveOllamaModel(this, modelInputOllama.text.toString())
             Prefs.saveOllamaFallbackModels(this, fallbackModelsInput.text.toString())
+            Prefs.saveOllamaRemoteHost(this, remoteHostInput.text.toString())
             Toast.makeText(this, "✅ Configuration Ollama enregistrée", Toast.LENGTH_SHORT).show()
         }
 

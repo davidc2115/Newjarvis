@@ -605,7 +605,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Si tu fais tourner Ollama sur un ordinateur, un NAS ou ta Freebox (Docker), indique son adresse ici pour que JARVIS l'utilise — gratuit, illimité, et tes données restent sur ton réseau. Doit être sur le MÊME réseau Wi-Fi que ce téléphone."
+                android:text="Si tu fais tourner Ollama sur un ordinateur, un NAS ou ta Freebox (Docker), indique son adresse ici pour que JARVIS l'utilise — gratuit, illimité, et tes données restent sur ton réseau. Fonctionne quand ce téléphone est sur le MÊME Wi-Fi ; pour un accès aussi hors de ce Wi-Fi, renseigne en plus l'hôte distant plus bas."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp"
@@ -669,6 +669,28 @@
                 android:textColor="@color/text_primary"
                 android:hint="Modèles de secours, séparés par virgule (rotation si le principal échoue)"
                 android:textColorHint="@color/text_secondary"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Optionnel — hôte distant (adresse publique/DDNS de ta box) : essayé si l'hôte ci-dessus (local) ne répond pas, ex: quand le téléphone est en 4G/5G hors de ce Wi-Fi. Nécessite une redirection de port sur ta box vers le port Ollama."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="4dp" />
+
+            <EditText
+                android:id="@+id/ollamaRemoteHostInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="ex: monddns.freeboxos.fr (laisser vide si non utilisé)"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textUri"
                 android:layout_marginBottom="8dp" />
 
             <TextView

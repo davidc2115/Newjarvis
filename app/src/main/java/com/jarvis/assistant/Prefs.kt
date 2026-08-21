@@ -859,6 +859,27 @@ object Prefs {
         prefs(context).edit().putBoolean("ollama_auto_enabled", enabled).apply()
     }
 
+    // BUG RÉEL PROBABLE CORRIGÉ (signalement utilisateur récurrent : "toutes les IA ont échoué
+    // malgré Ollama illimité sur la Freebox") : getOllamaHost ci-dessus n'a jamais été qu'UNE
+    // seule adresse — typiquement une IP locale (192.168.x.x) de la Freebox, qui n'est
+    // joignable que quand le téléphone est SUR LE MÊME Wi-Fi. Dès que le téléphone est en 4G/5G
+    // ou sur un autre réseau, cette IP devient injoignable, Ollama échoue silencieusement, et
+    // le mode Automatique retombe sur le cloud (qui échoue à son tour si aucune clé n'est
+    // configurée) — un comportement RÉGULIER et intermittent (dépendant du réseau du moment),
+    // exactement ce qui était signalé, alors qu'aucun vrai bug de code n'était en cause : Ollama
+    // n'a simplement jamais eu de moyen d'être joint depuis l'extérieur du réseau local, tout
+    // comme les autres appareils réseau de l'app (voir set_remote_access pour network_ping/
+    // wake_on_lan/network_open_web, même principe ici). Champ optionnel, vide par défaut (aucun
+    // changement de comportement tant qu'il n'est pas rempli) : adresse publique/DDNS à utiliser
+    // en repli si l'hôte local ne répond pas, nécessite une redirection de port sur la Freebox
+    // vers le port Ollama (11434 par défaut) — voir sendOpenAiWithRotation (ApiClient.kt).
+    fun getOllamaRemoteHost(context: Context): String =
+        prefs(context).getString("ollama_remote_host", "") ?: ""
+
+    fun saveOllamaRemoteHost(context: Context, host: String) {
+        prefs(context).edit().putString("ollama_remote_host", host.trim()).apply()
+    }
+
     /** Modèles de SECOURS Ollama (rotation) : si le modèle principal (getOllamaModel) échoue ou
      *  prend trop de temps, ApiClient.sendOpenAiWithRotation essaie ceux-ci un par un dans
      *  l'ordre, avant de retomber sur le cloud — même logique que la rotation multi-clés déjà

@@ -1,6 +1,8 @@
 package com.jarvis.assistant
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -62,6 +64,21 @@ object ApiClient {
         "Tu reformules un texte déjà obtenu en réponse orale naturelle et concise, en français, sans markdown. " +
             "Règle absolue : ne change, n'ajoute, ne devine et n'omets aucun fait — reprends noms, dates, heures, " +
             "numéros, adresses et montants strictement à l'identique du texte fourni."
+
+    /** Vraie connectivité internet (pas juste "Wi-Fi connecté" — un Wi-Fi sans accès internet
+     *  réel, box en panne, compte comme hors-ligne ici via NET_CAPABILITY_VALIDATED). Utilisé
+     *  pour éviter d'attendre un timeout web pour rien quand JARVIS est clairement hors-ligne
+     *  (voir le rebond vault-vide dans sendChat) — n'affecte PAS Ollama en LAN local, qui reste
+     *  tenté séparément dans sendAuto indépendamment de cette vérification. */
+    private fun hasInternetConnection(context: Context): Boolean = try {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val network = cm?.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(network) ?: return false
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    } catch (_: Exception) {
+        true // en cas de doute (permission/API manquante), ne bloque jamais le rebond par excès de prudence
+    }
 
     suspend fun sendChat(context: Context, fullHistory: List<HistoryEntry>): ChatResult =
         withContext(Dispatchers.IO) {
@@ -138,24 +155,45 @@ object ApiClient {
                 if (isVaultLookup && notFound) r else null
             }
             if (vaultMiss != null) {
-                val followUpPrompt = effectiveSystemPrompt +
-                    "\n\nLe vault Obsidian ne contient RIEN sur la dernière question de l'utilisateur " +
-                    "(${vaultMiss.action} a renvoyé : \"${vaultMiss.outputMessage}\"). N'appelle PLUS " +
-                    "obsidian_search ni obsidian_read pour cette même question : réponds-y MAINTENANT avec tes " +
-                    "connaissances générales, ou avec web_search{query} si c'est une info qui change dans le " +
-                    "temps (actualité, prix, horaires, disponibilité...). Si tu obtiens une réponse factuelle " +
-                    "utile, ajoute AUSSI un appel remember_fact{fact} (fait court et durable) ou " +
-                    "obsidian_create_note{title,content} (pour un contenu plus long) dans la MÊME réponse, pour " +
-                    "ne plus avoir à la re-chercher la prochaine fois. Si tu ne sais vraiment pas et qu'aucune " +
-                    "recherche web ne peut aider, dis-le honnêtement plutôt que d'inventer."
-                val followUpResponse = try {
-                    dispatchToProvider(context, provider, history, followUpPrompt)
-                } catch (e: Exception) {
-                    null
-                }
-                if (followUpResponse != null) {
-                    commandResult = JarvisCommandParser.parseAndExecute(context, followUpResponse)
-                    cleanText = JarvisCommandParser.cleanResponse(followUpResponse)
+                val canReachAnyAi = hasInternetConnection(context) || Prefs.isOllamaAutoEnabled(context)
+                if (!canReachAnyAi) {
+                    // Hors-ligne (ni internet, ni IA locale Ollama configurée) : inutile de tenter
+                    // un second appel IA qui échouerait/timeout de toute façon — message honnête
+                    // immédiat plutôt qu'une attente pour rien (demande utilisateur : "integrer un
+                    // systeme de recherche dans le vault si aucune connexion" — la recherche vault
+                    // a déjà eu lieu ci-dessus via obsidian_search/obsidian_read, c'est bien ce
+                    // résultat, déjà exhaustif sur le vault, qui est relayé ici).
+                    commandResult = JarvisCommandParser.CommandResult.Executed(
+                        "🔌 Pas de connexion internet, et rien trouvé dans le vault pour cette question. " +
+                            "Réessaie une fois connecté (Wi-Fi/données), ou configure Ollama en local " +
+                            "(⚙ → Local) pour une IA disponible même hors-ligne.",
+                        vaultMiss.action,
+                        isInformational = false
+                    )
+                    cleanText = ""
+                } else {
+                    val followUpPrompt = effectiveSystemPrompt +
+                        "\n\nLe vault Obsidian ne contient RIEN sur la dernière question de l'utilisateur " +
+                        "(${vaultMiss.action} a renvoyé : \"${vaultMiss.outputMessage}\"). N'appelle PLUS " +
+                        "obsidian_search ni obsidian_read pour cette même question : réponds-y MAINTENANT avec " +
+                        "tes connaissances générales, ou avec web_search{query} si c'est une info qui change " +
+                        "dans le temps (actualité, prix, horaires, disponibilité...). Si le sujet a PLUSIEURS " +
+                        "FACETTES distinctes (ex: pour \"les dauphins\" — intelligence, taille, vitesse, " +
+                        "records sont des facettes séparées), utilise wiki_page{type:\"concept\",title,content} " +
+                        "UNE FOIS PAR FACETTE (jamais tout dans une seule note fourre-tout) — voir le pattern " +
+                        "Wiki plus haut dans tes instructions. Pour un fait court et isolé sans facettes " +
+                        "multiples, remember_fact{fact} ou obsidian_create_note{title,content} suffit à la " +
+                        "place. Si tu ne sais vraiment pas et qu'aucune recherche web ne peut aider, dis-le " +
+                        "honnêtement plutôt que d'inventer."
+                    val followUpResponse = try {
+                        dispatchToProvider(context, provider, history, followUpPrompt)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (followUpResponse != null) {
+                        commandResult = JarvisCommandParser.parseAndExecute(context, followUpResponse)
+                        cleanText = JarvisCommandParser.cleanResponse(followUpResponse)
+                    }
                 }
             }
 
@@ -511,12 +549,13 @@ object ApiClient {
     /** URL "chat/completions" compatible OpenAI construite à partir des champs dédiés Ollama
      *  (Réglages → Local), au lieu de l'ancien mécanisme générique cassé — voir le commentaire
      *  détaillé sur baseUrl dans sendOpenAiWithRotation ci-dessous. */
-    private fun ollamaBaseUrl(context: Context): String {
-        val host = Prefs.getOllamaHost(context).trim()
-            .removePrefix("https://").removePrefix("http://").trimEnd('/')
-        val port = Prefs.getOllamaPort(context).trim()
+    private fun ollamaBaseUrlFor(hostRaw: String, port: String): String {
+        val host = hostRaw.trim().removePrefix("https://").removePrefix("http://").trimEnd('/')
         return "http://$host:$port/v1/chat/completions"
     }
+
+    private fun ollamaBaseUrl(context: Context): String =
+        ollamaBaseUrlFor(Prefs.getOllamaHost(context), Prefs.getOllamaPort(context).trim())
 
     /** Ping conversationnel (action ollama_status) — même vérification que le bouton "Tester"
      *  des réglages, mais utilisable directement en discussion sans ouvrir l'app. */
@@ -681,24 +720,41 @@ object ApiClient {
         // l'ordre — même esprit que la rotation multi-clés ci-dessous, appliquée aux modèles.
         if (provider == Provider.OLLAMA) {
             val modelsToTry = listOf(model) + Prefs.getOllamaFallbackModels(context).filter { it != model }
+            // RÉPARTI SUR PLUSIEURS HÔTES (signalement utilisateur récurrent : "toutes les IA
+            // ont échoué malgré Ollama illimité sur la Freebox") : un hôte Ollama local
+            // (192.168.x.x typiquement) n'est joignable QUE quand le téléphone est sur le même
+            // Wi-Fi que la Freebox — dès qu'il est en 4G/5G ou ailleurs, l'hôte local devient
+            // injoignable et Ollama échouait entièrement, sans repli, malgré une configuration
+            // par ailleurs correcte. Un hôte distant optionnel (Réglages -> Local -> Ollama,
+            // voir Prefs.getOllamaRemoteHost) est maintenant tenté en second, APRÈS avoir
+            // épuisé tous les modèles sur l'hôte local — nécessite une redirection de port sur
+            // la Freebox vers le port Ollama pour fonctionner.
+            val port = Prefs.getOllamaPort(context).trim().ifBlank { "11434" }
+            val hostCandidates = buildList {
+                add("local" to ollamaBaseUrlFor(Prefs.getOllamaHost(context), port))
+                val remoteHost = Prefs.getOllamaRemoteHost(context)
+                if (remoteHost.isNotBlank()) add("distant" to ollamaBaseUrlFor(remoteHost, port))
+            }
             var lastOllamaErr = ""
-            for (m in modelsToTry) {
-                val result = sendOpenAiCompatible(baseUrl, m, "", history, provider, systemPrompt)
-                if (!result.startsWith("Erreur") &&
-                    !result.startsWith("Connexion impossible") &&
-                    !result.startsWith("Format de réponse inattendu")
-                ) {
-                    return result
+            for ((hostLabel, candidateBaseUrl) in hostCandidates) {
+                for (m in modelsToTry) {
+                    val result = sendOpenAiCompatible(candidateBaseUrl, m, "", history, provider, systemPrompt)
+                    if (!result.startsWith("Erreur") &&
+                        !result.startsWith("Connexion impossible") &&
+                        !result.startsWith("Format de réponse inattendu")
+                    ) {
+                        return result
+                    }
+                    // BUG RÉEL CORRIGÉ (signalement utilisateur : "à chaque demande ça me dit llama3
+                    // erreur API 404 model not found") : l'ancien format "[$m] $result" ne commençait
+                    // PAS par un préfixe reconnu comme échec ("Erreur"/"Connexion impossible"/...) —
+                    // sendAuto() plus bas traitait donc ce message d'ÉCHEC (ex: modèle mal nommé,
+                    // 404 côté Ollama) comme une VRAIE réponse réussie de l'IA, et l'affichait tel
+                    // quel dans le chat au lieu de basculer sur le cloud. Le préfixe "Erreur" doit
+                    // rester en tout premier pour que la détection d'échec fonctionne partout.
+                    lastOllamaErr = "Erreur Ollama (hôte $hostLabel, modèle « $m ») : $result"
+                    DiagnosticsLog.log(context, "OLLAMA-ROTATION", "Hôte $hostLabel / modèle « $m » indisponible, essai suivant : $result")
                 }
-                // BUG RÉEL CORRIGÉ (signalement utilisateur : "à chaque demande ça me dit llama3
-                // erreur API 404 model not found") : l'ancien format "[$m] $result" ne commençait
-                // PAS par un préfixe reconnu comme échec ("Erreur"/"Connexion impossible"/...) —
-                // sendAuto() plus bas traitait donc ce message d'ÉCHEC (ex: modèle mal nommé,
-                // 404 côté Ollama) comme une VRAIE réponse réussie de l'IA, et l'affichait tel
-                // quel dans le chat au lieu de basculer sur le cloud. Le préfixe "Erreur" doit
-                // rester en tout premier pour que la détection d'échec fonctionne partout.
-                lastOllamaErr = "Erreur Ollama (modèle « $m ») : $result"
-                DiagnosticsLog.log(context, "OLLAMA-ROTATION", "Modèle « $m » indisponible, essai suivant : $result")
             }
             return lastOllamaErr
         }
