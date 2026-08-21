@@ -556,6 +556,7 @@ class SettingsActivity : AppCompatActivity() {
         val toggleButton = findViewById<TextView>(R.id.toggleOllamaAutoButton)
         val saveButtonOllama = findViewById<TextView>(R.id.saveOllamaButton)
         val testButton = findViewById<TextView>(R.id.testOllamaButton)
+        val installDolphinButton = findViewById<TextView>(R.id.installDolphinButton)
         val statusText = findViewById<TextView>(R.id.ollamaStatusText)
 
         val savedHost = Prefs.getOllamaHost(this)
@@ -628,6 +629,24 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 statusText.text = result
                 testButton.isEnabled = true
+            }
+        }
+
+        // Déclenche l'installation de Dolphin (non censuré) directement depuis Réglages --
+        // signalement utilisateur : "ajoute Dolphin uncensored sur la Freebox dans Ollama" --
+        // indépendant d'une conversation IA fonctionnelle, contrairement à demander à JARVIS
+        // de le faire via ollama_pull_model (inutile si c'est justement la cascade IA qui est
+        // en panne). Enregistre d'abord les champs affichés (pullOllamaModel lit host/port
+        // depuis Prefs, pas depuis les EditText) pour ne jamais viser un serveur périmé.
+        installDolphinButton.setOnClickListener {
+            Prefs.saveOllamaHost(this, hostInput.text.toString())
+            Prefs.saveOllamaPort(this, portInput.text.toString())
+            installDolphinButton.isEnabled = false
+            statusText.text = "⏳ Téléchargement de dolphin-mixtral lancé sur le serveur Ollama… peut prendre plusieurs minutes."
+            CoroutineScope(Dispatchers.Main).launch {
+                val result = ApiClient.pullOllamaModel(this@SettingsActivity, "dolphin-mixtral")
+                statusText.text = result
+                installDolphinButton.isEnabled = true
             }
         }
     }

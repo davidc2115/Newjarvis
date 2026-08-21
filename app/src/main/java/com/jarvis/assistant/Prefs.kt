@@ -886,8 +886,21 @@ object Prefs {
      *  utilisée pour les fournisseurs cloud (Prefs.getNextApiKey), appliquée ici aux MODÈLES
      *  plutôt qu'aux clés puisque Ollama n'en a pas. Stockés comme une simple liste séparée par
      *  des virgules, saisie utilisateur dans Réglages -> Local -> Ollama. */
+    // Liste par défaut si l'utilisateur n'a JAMAIS rien saisi -- signalement utilisateur :
+    // "configure automatiquement TOUS les modèles de secours" (avant, ce champ restait vide
+    // tant que rien n'était tapé à la main, donc AUCUNE rotation de modèle ne se produisait
+    // par défaut). Mélange volontaire de tailles/familles pour maximiser les chances qu'AU
+    // MOINS un modèle soit déjà installé sur le serveur Ollama de l'utilisateur (un modèle non
+    // installé échoue juste silencieusement, ApiClient passe au suivant) ; dolphin-mixtral
+    // inclus car demandé explicitement (modèle non censuré). N'a AUCUN effet tant que
+    // l'utilisateur n'a pas activé Ollama en mode Automatique (isOllamaAutoEnabled).
+    private val DEFAULT_OLLAMA_FALLBACK_MODELS = listOf(
+        "llama3.1:8b", "qwen2.5:7b", "mistral", "dolphin-mixtral"
+    )
+
     fun getOllamaFallbackModels(context: Context): List<String> {
         val raw = prefs(context).getString("ollama_fallback_models", "") ?: ""
+        if (raw.isBlank()) return DEFAULT_OLLAMA_FALLBACK_MODELS
         return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
     }
 

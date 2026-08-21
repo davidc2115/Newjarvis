@@ -145,6 +145,27 @@ object ApiClient {
             var commandResult = JarvisCommandParser.parseAndExecute(context, rawResponse)
             var cleanText = JarvisCommandParser.cleanResponse(rawResponse)
 
+            // DERNIER RECOURS 100% LOCAL (signalement utilisateur répété : "toutes les IA ont
+            // échoué malgré Ollama configuré", "toujours aucun système en local pour utiliser
+            // seulement le vault ou les fonctions du téléphone : réveil, minuteur, flash") : si
+            // la cascade complète (cloud + Ollama local/distant) a échoué EN ENTIER, on tente
+            // une commande locale sans réseau ni IA (LocalCommandController) avant d'afficher
+            // le message d'échec brut -- lampe torche, réveil, minuteur, recherche vault
+            // restent utilisables même hors-ligne total.
+            val aiTotallyFailed = rawResponse.startsWith("Toutes les IA configurées ont échoué") ||
+                rawResponse.startsWith("Connexion impossible")
+            if (aiTotallyFailed) {
+                val localResult = try {
+                    LocalCommandController.tryHandle(context, lastUserMsg)
+                } catch (_: Exception) {
+                    null
+                }
+                if (localResult != null) {
+                    commandResult = JarvisCommandParser.CommandResult.Executed(localResult, "local_offline", isInformational = false)
+                    cleanText = localResult
+                }
+            }
+
             // REBOND BORNÉ (signalement utilisateur : "il me dit introuvable dans le vault,
             // mais ne recherche pas sur internet ou dans les IA pour avoir l'info puis la
             // conserver") : l'architecture ne fait normalement QU'UN appel IA par tour — si ce

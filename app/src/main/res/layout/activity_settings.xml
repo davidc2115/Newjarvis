@@ -667,7 +667,7 @@
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp"
                 android:textColor="@color/text_primary"
-                android:hint="Modèles de secours, séparés par virgule (rotation si le principal échoue)"
+                android:hint="Modèles de secours (vide = par défaut : llama3.1:8b, qwen2.5:7b, mistral, dolphin-mixtral)"
                 android:textColorHint="@color/text_secondary"
                 android:layout_marginBottom="8dp" />
 
@@ -734,6 +734,22 @@
                     android:background="@drawable/bg_input" />
 
             </LinearLayout>
+
+            <!-- Déclenche directement le téléchargement de Dolphin (non censuré) sur le
+                 serveur Ollama configuré ci-dessus : indépendant d'une conversation IA
+                 fonctionnelle (contrairement à demander à JARVIS de le faire), utile
+                 justement quand la cascade IA échoue et qu'on veut un modèle de secours
+                 supplémentaire déjà installé. -->
+            <TextView
+                android:id="@+id/installDolphinButton"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:text="🐬 Installer Dolphin (non censuré) sur ce serveur Ollama"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:id="@+id/ollamaStatusText"
