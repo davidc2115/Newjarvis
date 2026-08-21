@@ -653,7 +653,14 @@ object ApiClient {
                 ) {
                     return result
                 }
-                lastOllamaErr = "[$m] $result"
+                // BUG RÉEL CORRIGÉ (signalement utilisateur : "à chaque demande ça me dit llama3
+                // erreur API 404 model not found") : l'ancien format "[$m] $result" ne commençait
+                // PAS par un préfixe reconnu comme échec ("Erreur"/"Connexion impossible"/...) —
+                // sendAuto() plus bas traitait donc ce message d'ÉCHEC (ex: modèle mal nommé,
+                // 404 côté Ollama) comme une VRAIE réponse réussie de l'IA, et l'affichait tel
+                // quel dans le chat au lieu de basculer sur le cloud. Le préfixe "Erreur" doit
+                // rester en tout premier pour que la détection d'échec fonctionne partout.
+                lastOllamaErr = "Erreur Ollama (modèle « $m ») : $result"
                 DiagnosticsLog.log(context, "OLLAMA-ROTATION", "Modèle « $m » indisponible, essai suivant : $result")
             }
             return lastOllamaErr
