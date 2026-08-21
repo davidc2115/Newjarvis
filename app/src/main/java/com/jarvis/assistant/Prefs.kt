@@ -1243,6 +1243,55 @@ object Prefs {
         prefs(context).edit().putString("contact_templates", arr.toString()).apply()
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // ESTIMATION DE CONSOMMATION DE TOKENS (demande utilisateur : "regarde ça par réponse")
+    // ═════════════════════════════════════════════════════════════════════════
+    // Pas d'API officielle de comptage de tokens disponible côté client (nécessiterait le
+    // tokenizer EXACT de chaque fournisseur, différent selon le modèle) : estimation standard
+    // ~4 caractères = 1 token (approximation communément admise pour le français/anglais,
+    // suffisante pour repérer un prompt anormalement gros plutôt qu'un chiffre exact facturé).
+    // Enregistré à CHAQUE appel IA (voir ApiClient.sendChat) : dernière requête + cumul depuis
+    // l'installation, consultable en conversation via l'action token_usage.
+
+    fun recordTokenUsage(context: Context, promptChars: Int, responseChars: Int) {
+        val promptTokens = promptChars / 4
+        val responseTokens = responseChars / 4
+        val totalRequests = prefs(context).getLong("token_usage_requests", 0L) + 1
+        val totalTokens = prefs(context).getLong("token_usage_total", 0L) + promptTokens + responseTokens
+        prefs(context).edit()
+            .putInt("token_usage_last_prompt", promptTokens)
+            .putInt("token_usage_last_response", responseTokens)
+            .putLong("token_usage_requests", totalRequests)
+            .putLong("token_usage_total", totalTokens)
+            .apply()
+    }
+
+    fun getTokenUsageReport(context: Context): String {
+        val lastPrompt = prefs(context).getInt("token_usage_last_prompt", 0)
+        val lastResponse = prefs(context).getInt("token_usage_last_response", 0)
+        val requests = prefs(context).getLong("token_usage_requests", 0L)
+        val total = prefs(context).getLong("token_usage_total", 0L)
+        if (requests == 0L) return "📊 Aucun appel IA enregistré pour l'instant."
+        val avg = if (requests > 0) total / requests else 0L
+        return "📊 Estimation de tokens (≈4 caractères = 1 token, approximatif — pas de compteur " +
+            "officiel côté téléphone) :
+" +
+            "• Dernière requête : ~$lastPrompt tokens envoyés (prompt système + mémoire + contexte " +
+            "vault + historique), ~$lastResponse tokens reçus
+" +
+            "• Depuis l'installation : $requests appel(s) IA, ~$total tokens au total (~$avg/appel " +
+            "en moyenne)"
+    }
+
+    fun clearTokenUsage(context: Context) {
+        prefs(context).edit()
+            .remove("token_usage_last_prompt")
+            .remove("token_usage_last_response")
+            .remove("token_usage_requests")
+            .remove("token_usage_total")
+            .apply()
+    }
+
     // ─── Interne ──────────────────────────────────────────────────────────────
 
     private fun prefs(context: Context) =

@@ -545,7 +545,13 @@ ${if (linkedContent.isNotBlank()) linkedContent else "— Notes du jour —"}
     // trouvés (titre pondéré plus fort que contenu) au lieu de s'arrêter au premier match —
     // les notes les plus pertinentes remontent en premier même quand plusieurs notes
     // matchent partiellement.
-    fun quickContextSearch(context: Context, recentUserMessages: List<String>, maxNotes: Int = 5): String? {
+    // maxNotes reduit de 5 a 3 et fenetre d'extrait reduite plus bas (300->170 caracteres) --
+    // demande explicite : reduire le nombre de tokens envoyes a CHAQUE message (ce contexte
+    // vault est injecte AUTOMATIQUEMENT, avant meme que l'IA ait pu juger de sa pertinence,
+    // donc son cout est paye sur CHAQUE requete meme quand la question n'a rien a voir avec
+    // le vault). 3 notes de ~170 caracteres restent largement suffisantes pour que l'IA juge
+    // si un extrait repond a la question, sans gonfler inutilement le prompt.
+    fun quickContextSearch(context: Context, recentUserMessages: List<String>, maxNotes: Int = 3): String? {
         if (!hasStorageAccess()) return null
         val root = getVaultRoot(context)
         if (!root.exists() || !root.isDirectory) return null
@@ -605,11 +611,11 @@ ${if (linkedContent.isNotBlank()) linkedContent else "— Notes du jour —"}
                 val hitWord = words.firstOrNull { textLower.contains(it) }
                 val excerpt = if (hitWord != null) {
                     val idx = textLower.indexOf(hitWord)
-                    val start = maxOf(0, idx - 80)
-                    val end = minOf(text.length, idx + hitWord.length + 220)
+                    val start = maxOf(0, idx - 50)
+                    val end = minOf(text.length, idx + hitWord.length + 120)
                     text.substring(start, end).replace("\n", " ")
                 } else {
-                    text.take(220).replace("\n", " ")
+                    text.take(120).replace("\n", " ")
                 }
                 hits.add(Hit(file, score, excerpt))
             } catch (_: Exception) {
