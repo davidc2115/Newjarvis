@@ -99,6 +99,18 @@ import java.util.concurrent.TimeUnit
  * ne s'exécutait jamais, sans qu'aucun message utile n'apparaisse (la redirection elle-même est ce
  * qui échoue). Le script supprime désormais ce fichier avant de rediriger dessus, repartant à
  * chaque installation d'un fichier neuf appartenant forcément au bon processus.
+ *
+ * QUATRIÈME CAUSE RÉELLE TROUVÉE ET CORRIGÉE (signalement utilisateur, log : "error:
+ * externally-managed-environment ... Couldn't install torch") : Ubuntu 24.04 (utilisé dans
+ * proot-distro) embarque Python 3.12, qui applique par défaut la politique PEP 668 — pip refuse
+ * tout install système (pip install torch...) tant qu'un venv n'est pas utilisé OU que
+ * --break-system-packages n'est pas passé explicitement. launch.py de stable-diffusion-webui
+ * installe torch via pip system-wide en interne (pas de venv actif dans ce trace), donc bloqué
+ * immédiatement, avant même de tenter le téléchargement de PyTorch. Le script exporte désormais
+ * PIP_BREAK_SYSTEM_PACKAGES=1 avant de lancer launch.py — pip reconnaît cette variable
+ * d'environnement comme équivalent exact de --break-system-packages pour TOUS ses appels internes
+ * (y compris ceux faits par launch.py lui-même, qu'on ne peut pas modifier directement), sans
+ * effet sur les systèmes où PEP 668 n'est pas appliqué (no-op inoffensif).
  */
 object TermuxController {
 
@@ -181,6 +193,7 @@ echo "=== Ubuntu pret. Installation Python/PyTorch + WebUI a l'interieur (peut p
 proot-distro login ubuntu -- bash -c 'set -e
 apt-get update -y
 apt-get install -y python3 python3-venv python3-pip git wget libgl1 libglib2.0-0
+export PIP_BREAK_SYSTEM_PACKAGES=1
 cd ~
 if [ ! -d stable-diffusion-webui ]; then
   git clone --depth 1 https://github.com/AUTOMATIC1111/stable-diffusion-webui.git
