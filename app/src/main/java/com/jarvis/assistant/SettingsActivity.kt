@@ -70,7 +70,12 @@ class SettingsActivity : AppCompatActivity() {
     private var selectedOrbStyle: String = "PULSE"
     private var isDownloading = false
 
-    private val apiKeyFields = mutableMapOf<Provider, EditText>()
+    // Une liste de champs EditText PAR provider (pas un seul) -- necessaire pour
+    // le bouton "+" (signalement utilisateur : "un bouton + a cote de chaque champ
+    // cles API afin de pouvoir en creer une deuxieme, puis troisieme... sans
+    // supprimer les autres") : chaque clé a maintenant son propre champ, ajoute/
+    // retire dynamiquement sans jamais toucher aux autres champs deja remplis.
+    private val apiKeyFields = mutableMapOf<Provider, MutableList<EditText>>()
 
     private val pickModelLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -258,39 +263,106 @@ class SettingsActivity : AppCompatActivity() {
         apiKeyFields.clear()
 
         for (provider in Provider.CLOUD_KEY_PROVIDERS) {
+            // Ligne de titre + bouton "+" (signalement utilisateur : pouvoir ajouter une 2e,
+            // 3e... clé pour un même provider SANS jamais écraser celles déjà saisies -- avant,
+            // un seul champ existait par provider, forçant à tout retaper séparé par virgule).
+            val titleRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
             val label = TextView(this).apply {
                 text = "🔑 ${provider.displayName}"
                 setTextColor(getColor(R.color.text_secondary))
                 textSize = 12f
                 setPadding(0, 16, 0, 4)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-            apiKeysContainer.addView(label)
+            titleRow.addView(label)
 
-            val field = EditText(this).apply {
+            // Conteneur des champs de CE provider (une ligne par clé) -- rempli plus bas avec
+            // une ligne par clé déjà enregistrée, ou une ligne vide si aucune.
+            val fieldsContainer = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    resources.getDimensionPixelSize(R.dimen.input_height)
-                ).also { it.bottomMargin = 4 }
-                background = getDrawable(R.drawable.bg_input)
-                setPadding(40, 0, 40, 0)
-                setTextColor(getColor(R.color.text_primary))
-                setHintTextColor(getColor(R.color.text_secondary))
-                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-                // BUG RÉEL CORRIGÉ (signalement utilisateur : "j'ai 3 clés Groq mais une seule
-                // est affichée") : ce champ n'affichait QUE Prefs.getApiKeyFor() (1ère clé de
-                // la liste), alors que Prefs stocke bien les 3 clés (multi-clés + rotation
-                // round-robin déjà correcte côté ApiClient.sendOpenAiWithRotation). Conséquence
-                // concrète bien plus grave qu'un simple affichage incomplet : le bouton
-                // ENREGISTRER de cet onglet resauvegarde le contenu de CE champ tel quel via
-                // Prefs.saveApiKeys (qui écrase la liste complète) — donc rouvrir Réglages puis
-                // cliquer ENREGISTRER sans y prendre garde effaçait silencieusement les 2 clés
-                // non affichées. Toutes les clés sont maintenant listées, séparées par virgule
-                // (Prefs.saveApiKeys sait déjà découper sur "," "\n" ";").
-                hint = "Clé(s) API ${provider.displayName} — sépare par une virgule si plusieurs"
-                setText(Prefs.getApiKeysFor(this@SettingsActivity, provider).joinToString(", "))
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
             }
-            apiKeysContainer.addView(field)
-            apiKeyFields[provider] = field
+            apiKeyFields[provider] = mutableListOf()
+
+            fun addKeyRow(initialValue: String) {
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).also { it.bottomMargin = 4 }
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                }
+                val field = EditText(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        resources.getDimensionPixelSize(R.dimen.input_height),
+                        1f
+                    ).also { it.marginEnd = 8 }
+                    background = getDrawable(R.drawable.bg_input)
+                    setPadding(40, 0, 40, 0)
+                    setTextColor(getColor(R.color.text_primary))
+                    setHintTextColor(getColor(R.color.text_secondary))
+                    inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                    hint = "Clé API ${provider.displayName}…"
+                    setText(initialValue)
+                }
+                val removeButton = TextView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(36, 36).also {
+                        it.width = (36 * resources.displayMetrics.density).toInt()
+                        it.height = (36 * resources.displayMetrics.density).toInt()
+                    }
+                    text = "✕"
+                    textSize = 14f
+                    gravity = android.view.Gravity.CENTER
+                    setTextColor(getColor(R.color.text_secondary))
+                    background = getDrawable(R.drawable.bg_icon_button)
+                    setOnClickListener {
+                        fieldsContainer.removeView(row)
+                        apiKeyFields[provider]?.remove(field)
+                    }
+                }
+                row.addView(field)
+                row.addView(removeButton)
+                fieldsContainer.addView(row)
+                apiKeyFields.getValue(provider).add(field)
+            }
+
+            val addButton = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(36, 36).also {
+                    it.width = (36 * resources.displayMetrics.density).toInt()
+                    it.height = (36 * resources.displayMetrics.density).toInt()
+                }
+                text = "+"
+                textSize = 18f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+                setTextColor(getColor(R.color.cyan_accent))
+                background = getDrawable(R.drawable.bg_icon_button)
+                // Ajoute toujours une ligne VIDE en plus -- ne touche jamais aux champs déjà
+                // remplis (donc jamais de perte de clé existante en cliquant sur +).
+                setOnClickListener { addKeyRow("") }
+            }
+            titleRow.addView(addButton)
+            apiKeysContainer.addView(titleRow)
+            apiKeysContainer.addView(fieldsContainer)
+
+            val existingKeys = Prefs.getApiKeysFor(this@SettingsActivity, provider)
+            if (existingKeys.isEmpty()) {
+                addKeyRow("")
+            } else {
+                existingKeys.forEach { addKeyRow(it) }
+            }
         }
     }
 
@@ -394,8 +466,14 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         saveApiKeysButton.setOnClickListener {
-            val keys = apiKeyFields.mapValues { (_, field) -> field.text.toString().trim() }
-            Prefs.saveApiKeys(this, keys)
+            // Une liste de clés PAR provider (une par champ, dans l'ordre affiché) --
+            // Prefs.saveAllApiKeys écrase la liste de CE provider avec exactement ce qui est
+            // affiché, ce qui est maintenant sûr : tous les champs (existants + ajoutés via
+            // "+") sont bien présents à l'écran, plus besoin de découpage par virgule.
+            val keysMap = apiKeyFields.mapValues { (_, fields) ->
+                fields.map { it.text.toString().trim() }.filter { it.isNotBlank() }
+            }
+            Prefs.saveAllApiKeys(this, keysMap)
             Prefs.saveFirecrawlApiKey(this, firecrawlKeyInput.text.toString().trim())
             Prefs.saveGlifApiToken(this, glifTokenInput.text.toString().trim())
             Toast.makeText(this, "✅ Toutes les clés API enregistrées", Toast.LENGTH_SHORT).show()
