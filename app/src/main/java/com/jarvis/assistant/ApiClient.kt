@@ -545,17 +545,11 @@ object ApiClient {
                 val current = Prefs.getOllamaModel(context)
                 val fallbacks = Prefs.getOllamaFallbackModels(context)
                 val rotationNote = if (fallbacks.isNotEmpty()) {
-                    "
-
-Rotation configurée : $current en priorité, puis ${fallbacks.joinToString(" → ")} en secours si le premier échoue/timeout."
+                    "\n\nRotation configurée : $current en priorité, puis ${fallbacks.joinToString(" → ")} en secours si le premier échoue/timeout."
                 } else {
-                    "
-
-Modèle actif : $current (aucun modèle de secours configuré — voir Réglages → Local → Ollama)."
+                    "\n\nModèle actif : $current (aucun modèle de secours configuré — voir Réglages → Local → Ollama)."
                 }
-                "📦 ${models.length()} modèle(s) installé(s) sur $host:$port :
-" + lines.joinToString("
-") + rotationNote
+                "📦 ${models.length()} modèle(s) installé(s) sur $host:$port :\n" + lines.joinToString("\n") + rotationNote
             }
         } catch (e: Exception) {
             "❌ Injoignable à $host:$port : ${e.javaClass.simpleName} — ${e.message}."
