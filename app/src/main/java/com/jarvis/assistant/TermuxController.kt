@@ -111,6 +111,14 @@ import java.util.concurrent.TimeUnit
  * d'environnement comme équivalent exact de --break-system-packages pour TOUS ses appels internes
  * (y compris ceux faits par launch.py lui-même, qu'on ne peut pas modifier directement), sans
  * effet sur les systèmes où PEP 668 n'est pas appliqué (no-op inoffensif).
+ *
+ * OPTIMISATION RAM (signalement utilisateur : maximiser la RAM disponible, limite matérielle
+ * déjà identifiée comme cause probable des OOM/code 137) : ajout du flag officiel
+ * --lowvram à launch.py. Malgré son nom pensé pour les GPU à VRAM limitée, ce flag change aussi
+ * la gestion mémoire côté CPU-only (le cas ici, --skip-torch-cuda-test) : au lieu de garder tout
+ * le modèle chargé en mémoire en permanence, seules les couches activement utilisées à un
+ * instant donné sont conservées, le reste étant libéré — réduit nettement le pic de RAM au prix
+ * d'une génération plus lente, compromis approprié sur un téléphone plutôt qu'un GPU dédié.
  */
 object TermuxController {
 
@@ -205,7 +213,7 @@ if [ ! -f models/Stable-diffusion/v1-5-pruned-emaonly.safetensors ]; then
 fi
 echo "=== Lancement du WebUI (1er lancement seulement : installation de PyTorch et dependances Python, peut prendre 10 a 30+ minutes) ==="
 set +e
-python3 launch.py --api --nowebui --listen --port 7860 --skip-torch-cuda-test --no-half --precision full
+python3 launch.py --api --nowebui --listen --port 7860 --skip-torch-cuda-test --no-half --precision full --lowvram
 CODE=${'$'}?
 if [ ${'$'}CODE -ne 0 ]; then
   echo "=== ARRET DU WEBUI (code sortie ${'$'}CODE), le terminal va revenir a l invite. ==="

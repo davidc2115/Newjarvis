@@ -83,6 +83,7 @@ class WakeWordService : Service() {
     // dédié, voir startKeywordSpotting() ────────────────────────────────────────────────────────
     private var speechRecognizer: SpeechRecognizer? = null
     private var keywordSpottingActive = false
+    private var keywordSpottingKeyword: String = ""
 
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
@@ -340,11 +341,23 @@ class WakeWordService : Service() {
             return
         }
         keywordSpottingActive = true
+        keywordSpottingKeyword = requestedKeyword
         updateNotification("mode reconnaissance vocale — écoute « $requestedKeyword » (mot-clé libre)")
-        handler.post { startKeywordSpottingSession(requestedKeyword) }
+        handler.post { initKeywordSpottingRecognizer() }
     }
 
-    private fun startKeywordSpottingSession(keyword: String) {
+    // BUG RÉEL CORRIGÉ (signalement utilisateur : "la detection de mot-cle fonctionne mais
+    // consomme enormement de RAM et ralentit le telephone") : la version précédente appelait
+    // destroy() PUIS createSpeechRecognizer() à CHAQUE cycle (résultat, erreur, timeout — donc
+    // potentiellement plusieurs fois par minute en silence), ce qui force Android à relier/
+    // rebinder le service système de reconnaissance vocale à chaque fois — l'opération la plus
+    // coûteuse de tout le cycle, en RAM comme en CPU. La MÊME instance de SpeechRecognizer est
+    // désormais créée UNE SEULE FOIS, puis simplement relancée via startListening() à chaque
+    // nouveau cycle (cancel() avant, pour repartir d'un état propre sans tout redétruire) — un
+    // vrai destroy()/recreate() ne se produit plus qu'en dernier recours, si startListening()
+    // échoue explicitement (état interne corrompu). Délai de relance aussi allongé (350ms →
+    // 900ms) pour réduire encore la fréquence des cycles en silence prolongé.
+    private fun initKeywordSpottingRecognizer() {
         if (!keywordSpottingActive) return
         try {
             speechRecognizer?.destroy()
@@ -352,15 +365,6 @@ class WakeWordService : Service() {
 
         val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
         speechRecognizer = recognizer
-
-        val recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-        }
-
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
@@ -370,26 +374,42 @@ class WakeWordService : Service() {
             override fun onEvent(eventType: Int, params: Bundle?) {}
 
             // Silence, timeout, pas de correspondance, service occupé... quelle que soit la
-            // cause, on relance une nouvelle session -- c'est ce qui simule l'écoute continue.
+            // cause, on relance une nouvelle session sur la MÊME instance -- c'est ce qui
+            // simule l'écoute continue sans recréer le service à chaque fois.
             override fun onError(error: Int) {
-                restartKeywordSpotting(keyword)
+                scheduleKeywordSpottingRestart()
             }
 
             override fun onResults(results: Bundle?) {
-                checkForKeyword(results, keyword)
-                restartKeywordSpotting(keyword)
+                checkForKeyword(results, keywordSpottingKeyword)
+                scheduleKeywordSpottingRestart()
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
-                checkForKeyword(partialResults, keyword)
+                checkForKeyword(partialResults, keywordSpottingKeyword)
             }
         })
 
+        startKeywordSpottingListening()
+    }
+
+    private fun buildKeywordSpottingIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+    }
+
+    private fun startKeywordSpottingListening() {
+        if (!keywordSpottingActive) return
         try {
-            recognizer.startListening(recognizerIntent)
+            speechRecognizer?.cancel()
+            speechRecognizer?.startListening(buildKeywordSpottingIntent())
         } catch (e: Exception) {
+            // État interne corrompu (rare) : seul cas où une VRAIE recréation reste nécessaire.
             updateNotification("❌ échec du démarrage de la reconnaissance vocale : ${e.message}")
-            restartKeywordSpotting(keyword)
+            handler.postDelayed({ initKeywordSpottingRecognizer() }, 900L)
         }
     }
 
@@ -404,9 +424,9 @@ class WakeWordService : Service() {
         }
     }
 
-    private fun restartKeywordSpotting(keyword: String) {
+    private fun scheduleKeywordSpottingRestart() {
         if (!keywordSpottingActive) return
-        handler.postDelayed({ startKeywordSpottingSession(keyword) }, 350L)
+        handler.postDelayed({ startKeywordSpottingListening() }, 900L)
     }
 
     private fun stopKeywordSpottingSession() {
