@@ -70,14 +70,20 @@ object ApiClient {
      *  pour éviter d'attendre un timeout web pour rien quand JARVIS est clairement hors-ligne
      *  (voir le rebond vault-vide dans sendChat) — n'affecte PAS Ollama en LAN local, qui reste
      *  tenté séparément dans sendAuto indépendamment de cette vérification. */
-    private fun hasInternetConnection(context: Context): Boolean = try {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        val network = cm?.activeNetwork ?: return false
-        val capabilities = cm.getNetworkCapabilities(network) ?: return false
-        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-    } catch (_: Exception) {
-        true // en cas de doute (permission/API manquante), ne bloque jamais le rebond par excès de prudence
+    private fun hasInternetConnection(context: Context): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val network = cm?.activeNetwork
+            val capabilities = if (network != null) cm.getNetworkCapabilities(network) else null
+            if (capabilities == null) {
+                false
+            } else {
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            }
+        } catch (_: Exception) {
+            true // en cas de doute (permission/API manquante), ne bloque jamais le rebond par excès de prudence
+        }
     }
 
     suspend fun sendChat(context: Context, fullHistory: List<HistoryEntry>): ChatResult =
