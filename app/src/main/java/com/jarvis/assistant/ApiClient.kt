@@ -856,6 +856,22 @@ object ApiClient {
             .put("messages", messagesArray)
             .put("temperature", 0.7)
 
+        // BUG RÉEL PROBABLE CORRIGÉ (signalement utilisateur répété : "toutes les IA échouent,
+        // même Ollama") : Ollama tronque silencieusement le contexte à num_ctx=2048 tokens par
+        // DÉFAUT pour la quasi-totalité des modèles (llama3.1 inclus), quelle que soit la
+        // fenêtre de contexte réelle du modèle, SAUF si la requête précise explicitement
+        // options.num_ctx — ce qui n'était jamais fait ici. Le seul SYSTEM_PROMPT de JARVIS
+        // dépasse déjà 2048 tokens à lui seul (documentation complète de toutes les actions
+        // JARVIS_CMD) : sans ce correctif, Ollama coupait donc une partie du prompt système à
+        // CHAQUE requête, avec des réponses cassées/incohérentes voire des erreurs selon le
+        // modèle — jamais un vrai "échec réseau", mais un contexte insuffisant invisible côté
+        // téléphone. 8192 est un compromis raisonnable (couvre largement le system prompt +
+        // historique récent) pour la plupart des modèles 7B-13B tournant sur CPU/Freebox ;
+        // n'a AUCUN effet sur les fournisseurs cloud (ignoré, seul Ollama lit ce paramètre).
+        if (provider == Provider.OLLAMA) {
+            bodyObj.put("options", JSONObject().put("num_ctx", 8192))
+        }
+
         val requestBuilder = Request.Builder()
             .url(baseUrl)
             .post(bodyObj.toString().toRequestBody(JSON))
