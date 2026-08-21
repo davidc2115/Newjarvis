@@ -76,6 +76,20 @@ import java.util.concurrent.TimeUnit
  * changement. Limite honnête à annoncer : sur un téléphone (pas un PC), le WebUI seul consomme
  * déjà environ 2 Go de RAM rien que pour démarrer, avant même de charger un modèle — performances
  * et faisabilité dépendent fortement du téléphone (RAM/CPU/stockage libre).
+ *
+ * DEUXIÈME CAUSE RÉELLE TROUVÉE ET CORRIGÉE (signalement utilisateur : installation Termux/Ubuntu
+ * terminée sans erreur visible, mais WebUI toujours injoignable, "Failed to connect to
+ * /127.0.0.1:7860") : le script précédent laissait `python3 launch.py` comme toute dernière
+ * commande sous `set -e` — quand le processus était tué par l'OOM killer d'Android pendant le
+ * chargement du modèle (précision complète = 4 à 8 Go de RAM, très facile à dépasser sur
+ * téléphone), le trap ERR imprimait juste une ligne générique "ECHEC ligne N" avant que le script
+ * ne se termine, indiscernable pour l'utilisateur d'une vraie erreur d'installation — d'où
+ * l'impression que "tout s'est bien passé" alors que le serveur n'avait en réalité jamais fini de
+ * démarrer. Le script capture désormais explicitement le code de sortie de launch.py et, en cas
+ * de code 137 (SIGKILL — signature typique d'un OOM kill), imprime un diagnostic explicite et
+ * actionnable au lieu du message générique. Ajout aussi de `--nowebui` (API REST uniquement, pas
+ * d'interface Gradio) : JARVIS n'appelle jamais l'UI HTML, seulement `/sdapi/v1/...`, donc ce
+ * flag réduit la mémoire/temps de démarrage sans rien retirer d'utile.
  */
 object TermuxController {
 
@@ -166,7 +180,18 @@ if [ ! -f models/Stable-diffusion/v1-5-pruned-emaonly.safetensors ]; then
   wget --tries=3 --continue -O models/Stable-diffusion/v1-5-pruned-emaonly.safetensors https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors
 fi
 echo "=== Lancement du WebUI (1er lancement seulement : installation de PyTorch et dependances Python, peut prendre 10 a 30+ minutes) ==="
-python3 launch.py --api --listen --port 7860 --skip-torch-cuda-test --no-half --precision full'
+set +e
+python3 launch.py --api --nowebui --listen --port 7860 --skip-torch-cuda-test --no-half --precision full
+CODE=${'$'}?
+if [ ${'$'}CODE -ne 0 ]; then
+  echo "=== ARRET DU WEBUI (code sortie ${'$'}CODE), le terminal va revenir a l invite. ==="
+  if [ ${'$'}CODE -eq 137 ]; then
+    echo "=== CAUSE PROBABLE : memoire insuffisante (OOM), le systeme Android a tue le processus pendant le chargement du modele. Limite materielle du telephone, pas un bug JARVIS : precision complete = 4 a 8 Go de RAM necessaires. A essayer : fermer toutes les autres applications avant de relancer, redemarrer le telephone pour liberer de la RAM, ou utiliser un appareil avec plus de RAM (8 Go recommandes). ==="
+  else
+    echo "=== Voir le detail complet dans ~/jarvis_sd_install.log (dernieres lignes avant cet arret) pour la cause exacte. ==="
+  fi
+fi
+exit ${'$'}CODE'
 """
 
     /** true si le paquet Termux (F-Droid) est installé sur l'appareil. */
@@ -288,7 +313,16 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
                 }
             }
         } catch (e: Exception) {
-            Result(false, "⏳ WebUI injoignable (${e.message}). Vérifie qu'il a été lancé via « Configurer Stable Diffusion » et attends la fin du premier démarrage.")
+            Result(
+                false,
+                "⏳ WebUI injoignable (${e.message}). Vérifie qu'il a été lancé via « Configurer Stable Diffusion » " +
+                    "et attends la fin du premier démarrage. Si le terminal Termux est revenu à l'invite de " +
+                    "commande ($) au lieu de rester bloqué sur le serveur en cours d'exécution, le processus " +
+                    "s'est arrêté — cause la plus fréquente sur téléphone : mémoire insuffisante (OOM) pendant " +
+                    "le chargement du modèle. Tape « cat ~/jarvis_sd_install.log » dans Termux et regarde les " +
+                    "toutes dernières lignes : si tu vois « ARRET DU WEBUI » avec un diagnostic OOM, ferme " +
+                    "toutes les autres applications puis relance l'installation."
+            )
         }
     }
 
