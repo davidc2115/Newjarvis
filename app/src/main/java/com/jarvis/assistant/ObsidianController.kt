@@ -879,7 +879,7 @@ disant à JARVIS « retiens que... » / « oublie que... ».
             val titleByLowercase = HashMap<String, Int>()
             files.forEachIndexed { i, f -> titleByLowercase[f.nameWithoutExtension.lowercase()] = i }
 
-            val wikilinkRegex = Regex("\[\[([^\]|#]+)")
+            val wikilinkRegex = Regex("\\[\\[([^\\]|#]+)")
             val adjacency = HashMap<Int, MutableSet<Int>>()
             files.forEachIndexed { i, f ->
                 val fileContent = runCatching { f.readText() }.getOrDefault("")
