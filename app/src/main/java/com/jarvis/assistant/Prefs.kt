@@ -1274,11 +1274,9 @@ object Prefs {
         if (requests == 0L) return "📊 Aucun appel IA enregistré pour l'instant."
         val avg = if (requests > 0) total / requests else 0L
         return "📊 Estimation de tokens (≈4 caractères = 1 token, approximatif — pas de compteur " +
-            "officiel côté téléphone) :
-" +
+            "officiel côté téléphone) :\n" +
             "• Dernière requête : ~$lastPrompt tokens envoyés (prompt système + mémoire + contexte " +
-            "vault + historique), ~$lastResponse tokens reçus
-" +
+            "vault + historique), ~$lastResponse tokens reçus\n" +
             "• Depuis l'installation : $requests appel(s) IA, ~$total tokens au total (~$avg/appel " +
             "en moyenne)"
     }
