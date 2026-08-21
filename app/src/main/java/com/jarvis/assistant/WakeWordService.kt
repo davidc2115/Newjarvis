@@ -1,8 +1,5 @@
 package com.jarvis.assistant
 
-import ai.picovoice.porcupine.Porcupine
-import ai.picovoice.porcupine.PorcupineManager
-import ai.picovoice.porcupine.PorcupineManagerCallback
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -26,42 +23,40 @@ import kotlinx.coroutines.launch
  * Service qui écoute en permanence en arrière-plan et déclenche le mode
  * vocal dès que le mot-clé configuré est prononcé.
  *
- * Deux moteurs possibles, choisis automatiquement, TOUS DEUX 100% hors-ligne
- * et basse consommation (aucun des deux n'utilise la reconnaissance vocale
- * continue en ligne — c'est justement ce qu'on cherchait à éviter) :
+ * Moteur : openWakeWord — 100% GRATUIT, SANS CLÉ NI COMPTE, hors-ligne et basse
+ * consommation. Trois petits modèles ONNX (quelques Mo au total) exécutés
+ * localement via onnxruntime-android : un modèle de spectrogramme, un modèle
+ * d'embedding audio, et un classifieur spécifique au mot-clé. Consommation
+ * batterie très faible car ce n'est PAS de la reconnaissance vocale généraliste,
+ * juste un petit réseau de neurones qui écoute en boucle un motif précis.
+ * Aucune donnée audio ne quitte jamais le téléphone. Projet open-source
+ * (Apache-2.0) : https://github.com/dscripka/openWakeWord
  *
- * 1. Porcupine (ai.picovoice) — moteur dédié Picovoice, utilisé UNIQUEMENT si
- *    une clé d'accès est configurée (⚙ → Réglages) ET que le mot-clé choisi
- *    fait partie des mots-clés intégrés Porcupine. Optionnel.
- *
- * 2. openWakeWord — moteur GRATUIT et SANS CLÉ, utilisé par défaut. Trois
- *    petits modèles ONNX (quelques Mo au total) exécutés localement via
- *    onnxruntime-android : un modèle de spectrogramme, un modèle d'embedding
- *    audio, et un classifieur spécifique au mot-clé. Consommation batterie
- *    très faible car ce n'est PAS de la reconnaissance vocale généraliste,
- *    juste un petit réseau de neurones qui écoute en boucle un motif précis.
- *    Aucune donnée audio ne quitte jamais le téléphone. Projet open-source
- *    (Apache-2.0) : https://github.com/dscripka/openWakeWord
+ * Picovoice/Porcupine (moteur alternatif nécessitant un compte/une clé
+ * d'accès) retiré à la demande explicite de l'utilisateur — plus aucune
+ * dépendance à un service tiers payant/à compte pour l'écoute permanente.
  *
  * ⚠️ LIMITE HONNÊTE À CONNAÎTRE : contrairement à l'ancien moteur de repli
  * (reconnaissance vocale standard Android, retiré à la demande explicite de
- * l'utilisateur car trop gourmand en batterie et dépendant d'internet), ces
- * deux moteurs sont des détecteurs PRÉ-ENTRAÎNÉS sur un nombre limité de
- * mots-clés fixes (voir BUILT_IN_KEYWORDS / OWW_KEYWORDS ci-dessous) — pas un
- * mot totalement arbitraire tapé par l'utilisateur. Si le mot-clé choisi dans
- * les réglages ne correspond à aucun des deux, le service écoute automatiquement
+ * l'utilisateur car trop gourmand en batterie et dépendant d'internet),
+ * openWakeWord est un détecteur PRÉ-ENTRAÎNÉ sur un nombre limité de
+ * mots-clés fixes (voir OWW_KEYWORDS ci-dessous) — pas un mot totalement
+ * arbitraire tapé par l'utilisateur. Si le mot-clé choisi dans les réglages
+ * ne correspond à aucun de ceux supportés, le service écoute automatiquement
  * « Jarvis » à la place et le signale clairement dans sa notification
  * permanente, plutôt que de laisser croire qu'un mot non supporté fonctionne.
  *
- * Modèles openWakeWord téléchargés au moment du build (pas commités dans git) —
- * voir la tâche downloadWakeWordModels dans app/build.gradle.
+ * Modèles téléchargés au moment du build (pas commités dans git, ~qq Mo) —
+ * voir la tâche downloadWakeWordModels dans app/build.gradle, qui FAIT
+ * ÉCHOUER le build si le téléchargement échoue (signalement utilisateur :
+ * l'ancien comportement silencieux permettait à un build CI de réussir sans
+ * ces fichiers, livrant une écoute permanente cassée sans que personne ne le
+ * sache). wakeword_status (voir statusReport ci-dessous) permet de
+ * diagnostiquer en conversation si ce cas se reproduit malgré tout.
  */
 class WakeWordService : Service() {
 
-    // ── Moteur 1 : Porcupine (Picovoice, optionnel) ─────────────────────────────
-    private var porcupineManager: PorcupineManager? = null
-
-    // ── Moteur 2 : openWakeWord (gratuit, sans clé, basse consommation) ────────
+    // ── openWakeWord (gratuit, sans clé, basse consommation) — seul moteur ─────
     private var owwEngine: WakeWordEngine? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -81,7 +76,7 @@ class WakeWordService : Service() {
          * déclenché par le bouton micro OU par le mot-clé) : libère temporairement le
          * micro tenu par l'écoute permanente en arrière-plan. Android ne permet qu'UNE
          * seule capture audio active à la fois — sans cette mise en pause, l'écoute
-         * permanente (Porcupine ou openWakeWord) continue de monopoliser le micro et
+         * permanente (openWakeWord) continue de monopoliser le micro et
          * aucune autre fonctionnalité vocale (chat, mode vocal) ne reçoit plus le
          * moindre son, même en parlant normalement.
          */
@@ -96,22 +91,7 @@ class WakeWordService : Service() {
             context.startService(Intent(context, WakeWordService::class.java).apply { action = ACTION_RESUME })
         }
 
-        /** Mots-clés intégrés Porcupine (moteur 1 — nécessite une clé Picovoice). */
-        private val BUILT_IN_KEYWORDS = mapOf(
-            "jarvis" to Porcupine.BuiltInKeyword.JARVIS,
-            "alexa" to Porcupine.BuiltInKeyword.ALEXA,
-            "computer" to Porcupine.BuiltInKeyword.COMPUTER,
-            "ordinateur" to Porcupine.BuiltInKeyword.COMPUTER,
-            "picovoice" to Porcupine.BuiltInKeyword.PICOVOICE,
-            "porcupine" to Porcupine.BuiltInKeyword.PORCUPINE,
-            "terminator" to Porcupine.BuiltInKeyword.TERMINATOR,
-            "blueberry" to Porcupine.BuiltInKeyword.BLUEBERRY,
-            "bumblebee" to Porcupine.BuiltInKeyword.BUMBLEBEE,
-            "grapefruit" to Porcupine.BuiltInKeyword.GRAPEFRUIT,
-            "grasshopper" to Porcupine.BuiltInKeyword.GRASSHOPPER
-        )
-
-        /** Modèles ONNX intégrés openWakeWord (moteur 2 — gratuit, sans clé).
+        /** Modèles ONNX intégrés openWakeWord (moteur unique — gratuit, sans clé).
          *  Paire (nom de fichier dans assets/, libellé affiché). */
         private val OWW_KEYWORDS = mapOf(
             "jarvis" to ("hey_jarvis.onnx" to "Hey Jarvis"),
@@ -124,6 +104,42 @@ class WakeWordService : Service() {
         private const val OWW_DEFAULT_LABEL = "Hey Jarvis"
         private const val OWW_THRESHOLD = 0.5f
         private const val ANTI_DOUBLON_MS = 1500L
+
+        @Volatile private var lastStatusText: String = ""
+
+        /**
+         * Diagnostic conversationnel (voir wakeword_status dans JarvisCommandParser) : jusqu'ici,
+         * la seule façon de savoir pourquoi l'écoute permanente ne se déclenchait pas était de
+         * lire la notification permanente — beaucoup moins découvrable qu'une simple question à
+         * JARVIS. Fonctionne même si le service n'est pas démarré (lit directement les assets
+         * et les préférences, pas besoin d'un bind au service).
+         */
+        fun statusReport(context: Context): String {
+            if (!Prefs.isWakeWordEnabled(context)) {
+                return "🔇 Écoute permanente désactivée (⚙ → Réglages → Mot-clé d'activation)."
+            }
+            val keyword = Prefs.getWakeWord(context).lowercase().trim().ifBlank { "jarvis" }
+            val requiredAssets = listOf("melspectrogram.onnx", "embedding_model.onnx", OWW_DEFAULT_FILE)
+            val missing = requiredAssets.filterNot { name ->
+                try { context.assets.open(name).use { true } } catch (e: Exception) { false }
+            }
+            val sb = StringBuilder("🎙️ Mot-clé configuré : « $keyword ».\n")
+            if (missing.isNotEmpty()) {
+                sb.append(
+                    "❌ Modèles openWakeWord manquants dans l'app (${missing.joinToString(", ")}) — " +
+                        "le téléchargement a échoué au moment du build CI. Ce n'est PAS réparable " +
+                        "depuis le téléphone : il faut relancer un build (voir GitHub Actions) avec " +
+                        "une connexion internet capable d'atteindre github.com."
+                )
+            } else {
+                sb.append("✅ Modèles présents dans l'app.\n")
+                sb.append(
+                    if (lastStatusText.isNotBlank()) "Dernier statut connu du service : $lastStatusText"
+                    else "Le service ne s'est pas encore lancé depuis le dernier démarrage de l'app — ouvre/ferme l'app une fois, ou vérifie que la permission microphone est accordée."
+                )
+            }
+            return sb.toString()
+        }
     }
 
     override fun onCreate() {
@@ -143,7 +159,6 @@ class WakeWordService : Service() {
                 // startForeground rapidement après un startService — on le fait même ici,
                 // en mode pause, pour rester valide vis-à-vis d'Android.
                 startForeground(NOTIFICATION_ID, buildNotification("⏸ en pause — micro utilisé ailleurs (chat/mode vocal)"))
-                stopPorcupine()
                 stopOpenWakeWord()
                 return START_STICKY
             }
@@ -169,47 +184,11 @@ class WakeWordService : Service() {
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun startBestAvailableEngine() {
-        val accessKey = Prefs.getPicovoiceKey(this)
         val keyword = Prefs.getWakeWord(this).lowercase().trim().ifBlank { "jarvis" }
-        val builtIn = BUILT_IN_KEYWORDS[keyword]
-
-        if (accessKey.isNotBlank() && builtIn != null) {
-            if (startPorcupine(accessKey, builtIn)) {
-                updateNotification("moteur Porcupine (Picovoice) — très faible consommation")
-                return
-            }
-        }
-
         startOpenWakeWord(keyword)
     }
 
-    private fun startPorcupine(accessKey: String, keyword: Porcupine.BuiltInKeyword): Boolean {
-        return try {
-            val callback = PorcupineManagerCallback {
-                triggerVoiceMode()
-            }
-            porcupineManager = PorcupineManager.Builder()
-                .setAccessKey(accessKey)
-                .setKeyword(keyword)
-                .build(applicationContext, callback)
-            porcupineManager?.start()
-            true
-        } catch (e: Exception) {
-            // Clé invalide, quota dépassé, appareil non supporté... on bascule sur openWakeWord.
-            porcupineManager = null
-            false
-        }
-    }
-
-    private fun stopPorcupine() {
-        try {
-            porcupineManager?.stop()
-            porcupineManager?.delete()
-        } catch (_: Exception) { }
-        porcupineManager = null
-    }
-
-    // ── Moteur 2 : openWakeWord (gratuit, sans clé, basse consommation) ────────
+    // ── openWakeWord (gratuit, sans clé, basse consommation) ───────────────────
 
     private fun startOpenWakeWord(requestedKeyword: String) {
         val match = OWW_KEYWORDS[requestedKeyword]
@@ -268,7 +247,6 @@ class WakeWordService : Service() {
     private fun stopListening() {
         isRunning = false
         handler.removeCallbacksAndMessages(null)
-        stopPorcupine()
         stopOpenWakeWord()
     }
 
@@ -282,7 +260,7 @@ class WakeWordService : Service() {
             putExtra(VoiceModeActivity.EXTRA_TRIGGERED_BY_WAKEWORD, true)
         }
         startActivity(intent)
-        // Porcupine et openWakeWord tournent en continu tout seuls après une détection —
+        // openWakeWord tourne en continu tout seul après une détection —
         // contrairement à l'ancien moteur de repli, il n'y a rien à relancer manuellement.
     }
 
@@ -321,6 +299,7 @@ class WakeWordService : Service() {
     }
 
     private fun updateNotification(status: String) {
+        lastStatusText = status
         val manager = getSystemService(NotificationManager::class.java)
         manager?.notify(NOTIFICATION_ID, buildNotification(status))
     }

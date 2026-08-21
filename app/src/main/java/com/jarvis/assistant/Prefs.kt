@@ -525,14 +525,6 @@ object Prefs {
         prefs(context).edit().putBoolean("wake_word_enabled", enabled).apply()
     }
 
-    /** Clé d'accès gratuite Picovoice (console.picovoice.ai) pour le moteur de détection dédié. */
-    fun getPicovoiceKey(context: Context): String =
-        prefs(context).getString("picovoice_key", "") ?: ""
-
-    fun savePicovoiceKey(context: Context, key: String) {
-        prefs(context).edit().putString("picovoice_key", key.trim()).apply()
-    }
-
     // ─── Surnoms de calendriers (pour distinguer plusieurs agendas similaires) ──
 
     fun getCalendarNickname(context: Context, calendarId: Long): String =

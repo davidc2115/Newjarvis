@@ -85,7 +85,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
 
         // Le mode vocal a besoin du micro en exclusivité — l'écoute permanente en
-        // arrière-plan (Porcupine/openWakeWord) est mise en pause tant que cet écran
+        // arrière-plan (openWakeWord) est mise en pause tant que cet écran
         // est ouvert, sinon les deux se disputent le même flux audio et aucune parole
         // n'est plus captée nulle part (chat, mode vocal, écoute permanente incluse).
         WakeWordService.pauseListening(this)

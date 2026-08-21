@@ -441,30 +441,9 @@
                 android:layout_marginBottom="12dp" />
 
             <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Clé d'accès Picovoice (optionnelle — voir openWakeWord ci-dessous)"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-
-            <EditText
-                android:id="@+id/picovoiceKeyInput"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="@drawable/bg_input"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:textColor="@color/text_primary"
-                android:hint="clé AccessKey Picovoice"
-                android:textColorHint="@color/text_secondary"
-                android:inputType="textPassword"
-                android:layout_marginTop="4dp"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="💡 Laisse ce champ vide si tu veux : sans clé Picovoice, JARVIS utilise automatiquement openWakeWord — un moteur 100% GRATUIT, SANS CLÉ, hors-ligne et à très faible consommation batterie (aucune reconnaissance vocale continue, juste un petit modèle qui reconnaît un mot précis). Avec une clé Picovoice (gratuite sur console.picovoice.ai → AccessKey), JARVIS utilise ce moteur à la place, encore un peu plus économe. \n\n⚠️ Important : ces DEUX moteurs ne reconnaissent que des mots-clés prédéfinis, pas un mot totalement inventé — openWakeWord : « jarvis », « alexa », « mycroft » ; Picovoice : « jarvis », « computer », « alexa », « picovoice », « porcupine », « terminator », « blueberry », « bumblebee », « grapefruit », « grasshopper ». Si tu tapes un autre mot, JARVIS écoutera « Jarvis » à la place et te le signalera dans la notification — c'est le compromis nécessaire pour une écoute permanente qui ne vide pas la batterie."
+                android:text="💡 Écoute permanente 100% GRATUITE, SANS CLÉ NI COMPTE : moteur openWakeWord, hors-ligne, à très faible consommation batterie (aucune reconnaissance vocale continue, juste un petit modèle qui reconnaît un mot précis). \n\n⚠️ Important : ce moteur ne reconnaît que des mots-clés prédéfinis, pas un mot totalement inventé — « jarvis », « alexa », « mycroft ». Si tu tapes un autre mot, JARVIS écoutera « Jarvis » à la place et te le signalera dans la notification — c'est le compromis nécessaire pour une écoute permanente qui ne vide pas la batterie."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp"

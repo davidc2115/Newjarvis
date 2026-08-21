@@ -303,10 +303,8 @@ class SettingsActivity : AppCompatActivity() {
         val modelCardsContainer  = findViewById<LinearLayout>(R.id.modelCardsContainer)
         val wakeWordInput        = findViewById<EditText>(R.id.wakeWordInput)
         val toggleWakeWordButton = findViewById<TextView>(R.id.toggleWakeWordButton)
-        val picovoiceKeyInput    = findViewById<EditText>(R.id.picovoiceKeyInput)
 
         wakeWordInput.setText(Prefs.getWakeWord(this))
-        picovoiceKeyInput.setText(Prefs.getPicovoiceKey(this))
         updateWakeWordButtonLabel(toggleWakeWordButton)
 
         // ── Box internet (voir RouterController). Pour la Freebox : appairage direct
@@ -394,7 +392,6 @@ class SettingsActivity : AppCompatActivity() {
 
         toggleWakeWordButton.setOnClickListener {
             Prefs.saveWakeWord(this, wakeWordInput.text.toString().trim())
-            Prefs.savePicovoiceKey(this, picovoiceKeyInput.text.toString().trim())
             val nowEnabled = !Prefs.isWakeWordEnabled(this)
             Prefs.saveWakeWordEnabled(this, nowEnabled)
 

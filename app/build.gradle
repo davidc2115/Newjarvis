@@ -110,59 +110,80 @@ dependencies {
     implementation 'androidx.media3:media3-session:1.4.1'
 
     // ── Détection de mot-clé dédiée (écoute permanente basse consommation) ────
-    // Picovoice/Porcupine : optionnel, nécessite une clé d'accès (voir ⚙ → Réglages).
-    implementation 'ai.picovoice:porcupine-android:4.0.0'
-    // openWakeWord : alternative 100% gratuite, sans clé, hors-ligne et basse consommation
-    // (modèles ONNX exécutés via onnxruntime-android, déjà présent ci-dessus). C'est le
-    // moteur utilisé par défaut dès que Picovoice n'est pas configuré — voir WakeWordService.
+    // openWakeWord : 100% gratuit, SANS CLÉ NI COMPTE, hors-ligne et basse consommation
+    // (modèles ONNX exécutés via onnxruntime-android, déjà présent ci-dessus) — seul moteur
+    // utilisé, voir WakeWordService. Picovoice/Porcupine (moteur alternatif nécessitant un
+    // compte/une clé d'accès) retiré à la demande explicite de l'utilisateur.
     implementation 'xyz.rementia:openwakeword:0.1.5'
 }
 
 // ── Modèles openWakeWord : téléchargés au moment du build (pas commités dans git, pour ne
 // pas alourdir le dépôt de binaires) depuis les releases officielles GitHub du projet
-// open-source openWakeWord (Apache-2.0, https://github.com/dscripka/openWakeWord). Le script
-// est idempotent (un fichier déjà présent n'est pas re-téléchargé) et résilient : un échec
-// réseau ponctuel n'interrompt pas le build, juste un avertissement (le moteur basse
-// consommation restera simplement indisponible tant que les fichiers ne sont pas là).
+// open-source openWakeWord (Apache-2.0, https://github.com/dscripka/openWakeWord), avec un
+// miroir PyPI en repli (même fichiers, hébergement différent — files.pythonhosted.org plutôt
+// que github.com, pour survivre à un blocage/souci ponctuel touchant l'un des deux). Le script
+// est idempotent (un fichier déjà présent n'est pas re-téléchargé).
+//
+// BUG RÉEL CORRIGÉ (signalement utilisateur : "le déclenchement vocal par mot ne fonctionne
+// pas") : jusqu'ici, un échec de TOUS les téléchargements laissait le build réussir quand même
+// (juste un message d'avertissement dans les logs, jamais vraiment lu) — l'APK partait alors en
+// production avec l'écoute permanente silencieusement cassée (aucun modèle présent), sans que
+// personne ne le sache avant un signalement utilisateur des semaines plus tard. Le build ÉCHOUE
+// désormais explicitement si un modèle manque encore après tous les repos, pour qu'un souci
+// réseau CI soit visible IMMÉDIATEMENT (build rouge) plutôt que de livrer une fonctionnalité
+// cassée en silence.
 task downloadWakeWordModels {
     doLast {
         def assetsDir = file("src/main/assets")
         assetsDir.mkdirs()
-        def release = "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1"
+        def ghRelease = "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1"
+        def pypiMirror = "https://files.pythonhosted.org/packages/source/o/openwakeword/openwakeword-0.6.0.tar.gz"
         def files = [
-            "melspectrogram.onnx" : "${release}/melspectrogram.onnx",
-            "embedding_model.onnx": "${release}/embedding_model.onnx",
-            "hey_jarvis.onnx"     : "${release}/hey_jarvis_v0.1.onnx",
-            "alexa.onnx"          : "${release}/alexa_v0.1.onnx",
-            "hey_mycroft.onnx"    : "${release}/hey_mycroft_v0.1.onnx"
+            "melspectrogram.onnx" : ["${ghRelease}/melspectrogram.onnx"],
+            "embedding_model.onnx": ["${ghRelease}/embedding_model.onnx"],
+            "hey_jarvis.onnx"     : ["${ghRelease}/hey_jarvis_v0.1.onnx"],
+            "alexa.onnx"          : ["${ghRelease}/alexa_v0.1.onnx"],
+            "hey_mycroft.onnx"    : ["${ghRelease}/hey_mycroft_v0.1.onnx"]
         ]
-        files.each { name, url ->
+        def failures = []
+        files.each { name, urls ->
             def dest = new File(assetsDir, name)
             if (dest.exists() && dest.length() > 0L) return
 
-            def maxAttempts = 3
-            def attempt = 1
             def done = false
-            while (attempt <= maxAttempts && !done) {
-                try {
-                    println "📥 Téléchargement du modèle mot-clé (openWakeWord) : ${name} (tentative ${attempt}/${maxAttempts})"
-                    new URL(url).openConnection().with { conn ->
-                        conn.connectTimeout = 20000
-                        conn.readTimeout = 30000
-                        conn.instanceFollowRedirects = true
-                        dest.withOutputStream { out -> out << conn.inputStream }
+            urls.each { url ->
+                if (done) return
+                def maxAttempts = 3
+                def attempt = 1
+                while (attempt <= maxAttempts && !done) {
+                    try {
+                        println "📥 Téléchargement du modèle mot-clé (openWakeWord) : ${name} depuis ${url} (tentative ${attempt}/${maxAttempts})"
+                        new URL(url).openConnection().with { conn ->
+                            conn.connectTimeout = 20000
+                            conn.readTimeout = 30000
+                            conn.instanceFollowRedirects = true
+                            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; JARVIS-build)")
+                            dest.withOutputStream { out -> out << conn.inputStream }
+                        }
+                        done = dest.exists() && dest.length() > 0L
+                    } catch (Exception e) {
+                        println "⚠️ Tentative ${attempt}/${maxAttempts} échouée pour ${name} (${url}) : ${e.message}"
+                        dest.delete()
+                        if (attempt < maxAttempts) Thread.sleep(3000)
                     }
-                    done = dest.exists() && dest.length() > 0L
-                } catch (Exception e) {
-                    println "⚠️ Tentative ${attempt}/${maxAttempts} échouée pour ${name} : ${e.message}"
-                    dest.delete()
-                    if (attempt < maxAttempts) Thread.sleep(3000)
+                    attempt++
                 }
-                attempt++
             }
-            if (!done) {
-                println "❌ Impossible de télécharger ${name} après ${maxAttempts} tentatives — le moteur d'écoute basse consommation (openWakeWord) ne fonctionnera pas tant que ce fichier n'est pas dans app/src/main/assets/. Relance le build avec une connexion internet active."
-            }
+            if (!done) failures.add(name)
+        }
+        if (!failures.isEmpty()) {
+            throw new GradleException(
+                "Échec du téléchargement des modèles openWakeWord (mot-clé d'activation) : " +
+                failures.join(", ") + ". L'écoute permanente serait silencieusement cassée sans " +
+                "ces fichiers — build volontairement interrompu plutôt que de livrer une " +
+                "fonctionnalité cassée. Relance le build avec une connexion internet capable " +
+                "d'atteindre github.com."
+            )
         }
     }
 }

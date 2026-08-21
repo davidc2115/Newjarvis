@@ -880,6 +880,8 @@ object JarvisCommandParser {
             "wiki_status" -> WikiController.status(context)
             "wiki_lint" -> WikiController.lint(context)
 
+            "wakeword_status" -> WakeWordService.statusReport(context)
+
             "generate_image" -> {
                 val prompt = json.optString("prompt", "")
                 val count = json.optInt("count", 1)
