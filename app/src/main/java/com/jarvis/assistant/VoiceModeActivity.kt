@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
@@ -72,6 +73,14 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             OrbView.VisualStyle.valueOf(Prefs.getOrbStyle(this))
         } catch (e: IllegalArgumentException) {
             OrbView.VisualStyle.NETWORK_SPHERE
+        }
+        // Charge le VRAI graphe du vault (notes + wikilinks, voir ObsidianController.buildVaultGraph)
+        // en arrière-plan pour le style "Toile Obsidian" — un scan de fichiers ne doit jamais
+        // bloquer le thread principal, même si le style choisi n'est pas celui-ci pour l'instant
+        // (l'utilisateur peut changer de style sans revenir sur cet écran).
+        CoroutineScope(Dispatchers.Main).launch {
+            val graph = withContext(Dispatchers.IO) { ObsidianController.buildVaultGraph(this@VoiceModeActivity) }
+            orbView.graphData = graph
         }
         tts = TextToSpeech(this, this)
 
@@ -259,7 +268,11 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         })
 
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_utterance")
+        // BUG RÉEL CORRIGÉ : contrairement à MainActivity (voir addMessage), cette fonction
+        // envoyait le texte BRUT au moteur TTS — tout le markdown/emojis échappait donc à
+        // stripForSpeech et était lu tel quel en mode vocal (signalement utilisateur : JARVIS
+        // prononce les emojis, les tirets/astérisques de liste...).
+        tts?.speak(MarkdownUtils.stripForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, "jarvis_utterance")
     }
 
     override fun onInit(status: Int) {

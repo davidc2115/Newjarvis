@@ -852,6 +852,73 @@ disant à JARVIS « retiens que... » / « oublie que... ».
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Graphe du vault (pour l'orbe "Toile Obsidian" — voir OrbView.kt) : contrairement à
+    // l'ancien rendu procédural (nœuds/liens purement décoratifs, sans rapport avec le vault
+    // réel — signalement utilisateur "je veux une VRAIE toile Obsidian, avec les notes
+    // enregistrées et les liens entre elles"), ceci scanne le vault RÉEL et construit un vrai
+    // graphe : un nœud par note, un lien par [[wikilink]] effectivement présent entre deux
+    // notes existantes. Limité à [maxNodes] notes (les plus connectées en premier) pour rester
+    // lisible sur un petit écran et performant même sur un vault de plusieurs centaines de
+    // notes — un graphe à 300 nœuds sur un cercle de quelques centimètres n'apporterait rien
+    // de plus lisible qu'un sous-ensemble représentatif des notes les plus centrales.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    data class VaultGraphNode(val title: String, val degree: Int)
+    data class VaultGraph(val nodes: List<VaultGraphNode>, val edges: List<Pair<Int, Int>>)
+
+    fun buildVaultGraph(context: Context, maxNodes: Int = 26): VaultGraph? {
+        if (!hasStorageAccess()) return null
+        val root = getVaultRoot(context)
+        if (!root.exists()) return null
+        return try {
+            val files = root.walkTopDown()
+                .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
+                .toList()
+            if (files.isEmpty()) return null
+
+            val titleByLowercase = HashMap<String, Int>()
+            files.forEachIndexed { i, f -> titleByLowercase[f.nameWithoutExtension.lowercase()] = i }
+
+            val wikilinkRegex = Regex("\[\[([^\]|#]+)")
+            val adjacency = HashMap<Int, MutableSet<Int>>()
+            files.forEachIndexed { i, f ->
+                val fileContent = runCatching { f.readText() }.getOrDefault("")
+                wikilinkRegex.findAll(fileContent).forEach { m ->
+                    val linkedTitle = m.groupValues[1].trim().lowercase()
+                    val j = titleByLowercase[linkedTitle]
+                    if (j != null && j != i) {
+                        adjacency.getOrPut(i) { mutableSetOf() }.add(j)
+                        adjacency.getOrPut(j) { mutableSetOf() }.add(i)
+                    }
+                }
+            }
+
+            val degrees = files.indices.associateWith { adjacency[it]?.size ?: 0 }
+            // Priorité aux notes CONNECTÉES (les plus reliées d'abord) ; si le vault a peu de
+            // liens, complète avec des notes isolées pour quand même montrer un aperçu réel
+            // plutôt qu'un graphe minuscule.
+            val keptIndices = degrees.entries.sortedByDescending { it.value }.take(maxNodes).map { it.key }
+            val keptSet = keptIndices.toSet()
+            val indexRemap = keptIndices.withIndex().associate { (newIdx, oldIdx) -> oldIdx to newIdx }
+
+            val nodes = keptIndices.map { VaultGraphNode(files[it].nameWithoutExtension, degrees[it] ?: 0) }
+            val edgesSet = mutableSetOf<Pair<Int, Int>>()
+            keptIndices.forEach { oldI ->
+                adjacency[oldI]?.forEach { oldJ ->
+                    if (oldJ in keptSet) {
+                        val a = indexRemap.getValue(oldI)
+                        val b = indexRemap.getValue(oldJ)
+                        edgesSet.add(if (a < b) a to b else b to a)
+                    }
+                }
+            }
+            VaultGraph(nodes, edgesSet.toList())
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Vault stats
     // ─────────────────────────────────────────────────────────────────────────
 

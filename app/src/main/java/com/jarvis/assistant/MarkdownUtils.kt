@@ -32,6 +32,24 @@ object MarkdownUtils {
     private val italicOnlyRegex = Regex("(?<!\\*)\\*([^*\\n]+?)\\*(?!\\*)")
     private val codeOnlyRegex = Regex("`(.+?)`")
 
+    // Emojis (pour stripForSpeech, plus bas) : couvre les plages Unicode courantes - symboles/
+    // pictogrammes du plan de base (2600-27BF, fleches/etoiles diverses...), selecteur de
+    // variation (FE0F), joker de liaison (200D), et surtout le plan supplementaire (paires de
+    // substituts D83C-D83E + DC00-DFFF) ou vivent la quasi-totalite des emojis utilises par
+    // JARVIS. Signalement utilisateur : "je ne veux plus qu'il dise les emojis" - jusqu'ici
+    // AUCUNE suppression d'emoji n'existait, seul le markdown etait retire.
+    private val emojiRegex = Regex(
+        "[\\u203C\\u2049\\u2122\\u2139\\u2194-\\u21AA\\u231A\\u231B\\u2328\\u23CF\\u23E9-\\u23FA\\u24C2" +
+            "\\u25AA\\u25AB\\u25B6\\u25C0\\u25FB-\\u25FE\\u2600-\\u27BF\\u2934\\u2935\\u2B05-\\u2B07\\u2B1B" +
+            "\\u2B1C\\u2B50\\u2B55\\u3030\\u303D\\u3297\\u3299\\uFE0F\\u200D\\u20E3]" +
+            "|[\\uD83C-\\uD83E][\\uDC00-\\uDFFF]"
+    )
+    // "-"/"+" isoles (entoures d'espaces, ou en tout debut/fin de ligne) : couvre les tirets/
+    // plus utilises comme puce ou separateur ailleurs qu'en tout debut de ligne (bulletRegex ne
+    // couvre que ce cas precis) SANS toucher aux mots a trait d'union legitimes en francais
+    // (peut-etre, c'est-a-dire...), qui eux n'ont pas d'espace autour du tiret.
+    private val isolatedDashOrPlusRegex = Regex("(^|\\s)[+\\-](\\s|$)", RegexOption.MULTILINE)
+
     // Téléphone : formats français les plus courants (0X XX XX XX XX / +33 X XX XX XX XX),
     // avec séparateurs espace/point/tiret optionnels. Volontairement restrictif (plutôt que
     // "tout ce qui ressemble à des chiffres") pour éviter de rendre cliquables des dates,
@@ -165,7 +183,16 @@ object MarkdownUtils {
         text = headerRegex.replace(text) { it.groupValues[1] }
         text = bulletRegex.replace(text, "")
         text = numberedListRegex.replace(text, "")
-        text = text.replace("*", "").replace("_", "").replace("#", "")
+        // BUG REEL CORRIGE (signalement utilisateur) : ni les emojis, ni les "+" isoles, ni les
+        // "-" hors debut de ligne n'etaient retires jusqu'ici - seul le markdown "standard"
+        // (astérisques, dieses, listes en debut de ligne) l'etait.
+        text = emojiRegex.replace(text, "")
+        text = text.replace("*", "").replace("_", "").replace("#", "").replace("•", "")
+        text = isolatedDashOrPlusRegex.replace(text) { it.groupValues[1] + it.groupValues[2] }
+        // Nettoyage final : les suppressions ci-dessus laissent parfois des espaces multiples
+        // ou des lignes vides - une voix qui marque une pause sur "rien" sonne bizarre.
+        text = text.replace(Regex("[ \t]{2,}"), " ")
+        text = text.lines().joinToString("\n") { it.trim() }.replace(Regex("\n{3,}"), "\n\n").trim()
         return text
     }
 }

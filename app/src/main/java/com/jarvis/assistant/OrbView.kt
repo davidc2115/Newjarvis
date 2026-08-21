@@ -409,13 +409,40 @@ class OrbView @JvmOverloads constructor(
     // notes plutôt qu'une sphère 3D générique.
     // ─────────────────────────────────────────────────────────────────────────
 
-    private data class WebNode(val bx: Float, val by: Float, val phase: Float, val isHub: Boolean)
+    private data class WebNode(val bx: Float, val by: Float, val phase: Float, val isHub: Boolean, val title: String? = null, val showLabel: Boolean = false)
+
+    // Données RÉELLES du vault (notes = nœuds, [[wikilinks]] = liens) — voir
+    // ObsidianController.buildVaultGraph(). Signalement utilisateur : l'ancien rendu était
+    // purement décoratif (nœuds/liens procéduraux sans rapport avec le vault). Fournie par
+    // l'activité hôte (VoiceModeActivity) après un scan en arrière-plan ; tant qu'elle n'est
+    // pas encore chargée (ou vault vide/inaccessible), on retombe sur la disposition
+    // procédurale d'origine plutôt que d'afficher un cercle vide.
+    var graphData: ObsidianController.VaultGraph? = null
+        set(value) {
+            field = value
+            cachedWebNodes = null
+            invalidate()
+        }
+
+    private var cachedWebNodes: List<WebNode>? = null
 
     // Disposition en spirale de Fibonacci (phyllotaxie) : répartition organique et
-    // homogène dans un disque, calculée UNE SEULE FOIS (positions "de base" fixes) —
-    // c'est ce qui garantit un rendu identique à chaque frame en état IDLE.
-    private val webNodes: List<WebNode> by lazy { generateWebNodes(22) }
+    // homogène dans un disque. Recalculée uniquement quand graphData change (voir le setter
+    // ci-dessus) — c'est ce qui garantit un rendu identique à chaque frame tant que les
+    // données ne changent pas.
+    private fun webNodes(): List<WebNode> {
+        cachedWebNodes?.let { return it }
+        val graph = graphData
+        val computed = if (graph != null && graph.nodes.isNotEmpty()) {
+            layoutFromGraph(graph)
+        } else {
+            generateWebNodes(22)
+        }
+        cachedWebNodes = computed
+        return computed
+    }
 
+    /** Disposition procédurale de secours (tant que le vrai graphe n'est pas encore chargé). */
     private fun generateWebNodes(count: Int): List<WebNode> {
         val nodes = mutableListOf<WebNode>()
         val goldenAngle = Math.PI * (3.0 - sqrt(5.0))
@@ -432,6 +459,44 @@ class OrbView @JvmOverloads constructor(
             nodes.add(WebNode(x, y, phase, isHub = false))
         }
         return nodes
+    }
+
+    /**
+     * Même disposition en spirale de Fibonacci que generateWebNodes(), mais l'ORDRE dans le
+     * disque suit le degré réel de chaque note (les plus connectées près du centre, comme le
+     * fait naturellement la vue graphe d'Obsidian) au lieu d'un index arbitraire — la note la
+     * plus reliée devient le nœud central mis en avant (isHub). Les indices du résultat
+     * correspondent exactement à ceux de [graph.nodes]/[graph.edges] (pas de ré-indexation),
+     * pour que drawObsidianWeb puisse tracer les vrais liens directement par index.
+     */
+    private fun layoutFromGraph(graph: ObsidianController.VaultGraph): List<WebNode> {
+        val count = graph.nodes.size
+        val order = graph.nodes.indices.sortedByDescending { graph.nodes[it].degree }
+        val goldenAngle = Math.PI * (3.0 - sqrt(5.0))
+        val result = MutableList(count) { WebNode(0f, 0f, 0f, false) }
+        val labelCutoff = minOf(8, count)
+        order.forEachIndexed { rank, originalIdx ->
+            val title = graph.nodes[originalIdx].title
+            val showLabel = rank < labelCutoff
+            val phase = (rank * 0.6180339887f) % 1f * 2f * Math.PI.toFloat()
+            result[originalIdx] = if (rank == 0) {
+                WebNode(0f, 0f, phase, isHub = true, title = title, showLabel = showLabel)
+            } else {
+                val r = sqrt(rank / (count - 1f).coerceAtLeast(1f))
+                val theta = goldenAngle * rank
+                val x = (cos(theta) * r).toFloat()
+                val y = (sin(theta) * r).toFloat()
+                WebNode(x, y, phase, isHub = false, title = title, showLabel = showLabel)
+            }
+        }
+        return result
+    }
+
+    // Paint pour les libellés de titre (vrai graphe uniquement — voir graphData) ; taille et
+    // couleur ajustées à la volée dans drawObsidianWeb() selon la couleur d'accent courante.
+    private val webLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        textSize = 22f
     }
 
     private fun drawObsidianWeb(canvas: Canvas) {
@@ -455,31 +520,50 @@ class OrbView @JvmOverloads constructor(
         }
         val t = pulsePhase * 2f * Math.PI.toFloat() * pulseSpeed
 
-        val screenPoints = webNodes.map { n ->
+        val nodes = webNodes()
+        val screenPoints = nodes.map { n ->
             val dx = if (driftAmplitude > 0f) sin(t + n.phase) * driftAmplitude else 0f
             val dy = if (driftAmplitude > 0f) cos(t * 0.8f + n.phase) * driftAmplitude else 0f
             Triple(cx + (n.bx + dx) * scale, cy + (n.by + dy) * scale, n.isHub)
         }
 
-        // Liens : toute paire de nœuds suffisamment proches, comme pour la sphère réseau,
-        // avec une opacité qui "respire" doucement une fois actif (statique en IDLE).
-        val threshold = scale * 0.55f
-        for (i in screenPoints.indices) {
-            val (x1, y1, _) = screenPoints[i]
-            for (j in i + 1 until screenPoints.size) {
-                val (x2, y2, _) = screenPoints[j]
-                val dist = hypot((x1 - x2).toDouble(), (y1 - y2).toDouble()).toFloat()
-                if (dist < threshold) {
+        val realEdges = graphData?.edges
+        if (!realEdges.isNullOrEmpty()) {
+            // Vrai graphe : on ne trace QUE les liens [[wikilink]] réellement présents entre
+            // deux notes, pas une heuristique de distance — c'est tout l'intérêt par rapport à
+            // l'ancien rendu procédural.
+            realEdges.forEach { (i, j) ->
+                if (i < screenPoints.size && j < screenPoints.size) {
+                    val (x1, y1, _) = screenPoints[i]
+                    val (x2, y2, _) = screenPoints[j]
                     val shimmer = if (pulseSpeed > 0f) (sin(t + i * 0.4f + j * 0.7f) * 0.5f + 0.5f) else 0.5f
-                    val alpha = (28 + shimmer * 55).toInt().coerceIn(20, 90)
+                    val alpha = (35 + shimmer * 60).toInt().coerceIn(25, 100)
                     linePaint.color = accentColor
                     linePaint.alpha = alpha
                     canvas.drawLine(x1, y1, x2, y2, linePaint)
                 }
             }
+        } else {
+            // Pas encore de données réelles (chargement en cours, vault vide/inaccessible) :
+            // repli sur l'ancienne heuristique de distance, pour ne jamais afficher un cercle vide.
+            val threshold = scale * 0.55f
+            for (i in screenPoints.indices) {
+                val (x1, y1, _) = screenPoints[i]
+                for (j in i + 1 until screenPoints.size) {
+                    val (x2, y2, _) = screenPoints[j]
+                    val dist = hypot((x1 - x2).toDouble(), (y1 - y2).toDouble()).toFloat()
+                    if (dist < threshold) {
+                        val shimmer = if (pulseSpeed > 0f) (sin(t + i * 0.4f + j * 0.7f) * 0.5f + 0.5f) else 0.5f
+                        val alpha = (28 + shimmer * 55).toInt().coerceIn(20, 90)
+                        linePaint.color = accentColor
+                        linePaint.alpha = alpha
+                        canvas.drawLine(x1, y1, x2, y2, linePaint)
+                    }
+                }
+            }
         }
 
-        for ((x, y, isHub) in screenPoints) {
+        screenPoints.forEachIndexed { idx, (x, y, isHub) ->
             val pulse = if (pulseSpeed > 0f) 0.7f + 0.3f * sin(t * 1.3f + x + y) else 1f
             if (isHub) {
                 dotPaint.shader = RadialGradient(
@@ -494,6 +578,17 @@ class OrbView @JvmOverloads constructor(
                 dotPaint.color = accentColor
                 dotPaint.alpha = (150 * pulse).toInt().coerceIn(80, 220)
                 canvas.drawCircle(x, y, (3f + 1.5f * pulse), dotPaint)
+            }
+
+            // Titre de la note sous le nœud — uniquement pour les notes les plus connectées
+            // (voir showLabel dans layoutFromGraph), sinon un vault de plusieurs dizaines de
+            // notes deviendrait illisible sur un petit orbe.
+            val node = nodes.getOrNull(idx)
+            if (node?.showLabel == true && node.title != null) {
+                webLabelPaint.color = accentColor
+                webLabelPaint.alpha = if (node.isHub) 230 else 160
+                val label = if (node.title.length > 14) node.title.take(13) + "…" else node.title
+                canvas.drawText(label, x, y + scale * 0.11f + 22f, webLabelPaint)
             }
         }
     }
