@@ -126,6 +126,16 @@
         <intent>
             <action android:name="android.intent.action.SET_TIMER" />
         </intent>
+
+        <!-- Visibilité du service de reconnaissance vocale système (Android 11+) : requis pour
+             que SpeechRecognizer.createSpeechRecognizer() trouve le moteur par défaut du
+             téléphone : voir WakeWordService.startKeywordSpotting() (mode-clé libre, ex:
+             "Jarvis" seul ou tout autre mot personnalisé non couvert par un modèle openWakeWord
+             pré-entraîné). Sans cette déclaration, le service de reconnaissance reste invisible
+             et l'écoute échouerait silencieusement, comme pour Termux/Horloge ci-dessus. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
     </queries>
 
     <application

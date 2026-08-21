@@ -7,8 +7,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import androidx.core.app.NotificationCompat
 import com.rementia.openwakeword.lib.WakeWordEngine
 import com.rementia.openwakeword.lib.model.DetectionMode
@@ -18,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 /**
  * Service qui écoute en permanence en arrière-plan et déclenche le mode
@@ -36,15 +41,29 @@ import kotlinx.coroutines.launch
  * d'accès) retiré à la demande explicite de l'utilisateur — plus aucune
  * dépendance à un service tiers payant/à compte pour l'écoute permanente.
  *
- * ⚠️ LIMITE HONNÊTE À CONNAÎTRE : contrairement à l'ancien moteur de repli
- * (reconnaissance vocale standard Android, retiré à la demande explicite de
- * l'utilisateur car trop gourmand en batterie et dépendant d'internet),
- * openWakeWord est un détecteur PRÉ-ENTRAÎNÉ sur un nombre limité de
- * mots-clés fixes (voir OWW_KEYWORDS ci-dessous) — pas un mot totalement
- * arbitraire tapé par l'utilisateur. Si le mot-clé choisi dans les réglages
- * ne correspond à aucun de ceux supportés, le service écoute automatiquement
- * « Jarvis » à la place et le signale clairement dans sa notification
- * permanente, plutôt que de laisser croire qu'un mot non supporté fonctionne.
+ * ⚠️ LIMITE TECHNIQUE (openWakeWord) : c'est un détecteur PRÉ-ENTRAÎNÉ sur un
+ * nombre limité de phrases fixes (voir OWW_KEYWORDS ci-dessous), chacune
+ * correspondant à une empreinte acoustique précise apprise par un petit
+ * réseau de neurones — « hey jarvis » fonctionne car un modèle a été
+ * entraîné spécifiquement dessus, mais dire juste « Jarvis » (sans « Hey »)
+ * ne produit PAS le même motif audio et ne peut donc pas être détecté de
+ * façon fiable par ce modèle, quel que soit le réglage de seuil. Entraîner
+ * un nouveau modèle pour un mot-clé arbitraire demanderait un pipeline
+ * d'apprentissage dédié (GPU, données synthétiques, plusieurs dizaines de
+ * minutes minimum) — pas faisable à la volée depuis l'app.
+ *
+ * SOLUTION RETENUE (demande utilisateur : « Jarvis » seul, ou n'importe quel
+ * mot-clé personnalisé) : pour tout mot-clé qui n'a PAS de modèle openWakeWord
+ * entraîné dédié, le service bascule automatiquement sur un second moteur —
+ * reconnaissance vocale native Android (SpeechRecognizer), qui transcrit en
+ * continu et déclenche le mode vocal dès que le texte reconnu CONTIENT le
+ * mot-clé configuré, quel qu'il soit. Voir startKeywordSpotting() ci-dessous.
+ * Contrepartie honnête : consommation batterie et latence plus élevées
+ * qu'un modèle openWakeWord dédié (ce n'est pas un petit classifieur qui
+ * tourne en boucle, mais une vraie reconnaissance vocale relancée en continu),
+ * et peut nécessiter une connexion internet sur les téléphones sans moteur de
+ * reconnaissance hors-ligne installé — c'est le compromis inévitable pour
+ * supporter un mot-clé réellement arbitraire sans entraînement de modèle.
  *
  * Modèles téléchargés au moment du build (pas commités dans git, ~qq Mo) —
  * voir la tâche downloadWakeWordModels dans app/build.gradle, qui FAIT
@@ -56,9 +75,14 @@ import kotlinx.coroutines.launch
  */
 class WakeWordService : Service() {
 
-    // ── openWakeWord (gratuit, sans clé, basse consommation) — seul moteur ─────
+    // ── openWakeWord (gratuit, sans clé, basse consommation) — mots-clés avec modèle dédié ────
     private var owwEngine: WakeWordEngine? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // ── Reconnaissance vocale (mot-clé libre) — repli pour tout mot-clé sans modèle openWakeWord
+    // dédié, voir startKeywordSpotting() ────────────────────────────────────────────────────────
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var keywordSpottingActive = false
 
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
@@ -93,8 +117,13 @@ class WakeWordService : Service() {
 
         /** Modèles ONNX intégrés openWakeWord (moteur unique — gratuit, sans clé).
          *  Paire (nom de fichier dans assets/, libellé affiché). */
+        // BUG RÉEL CORRIGÉ (signalement utilisateur : « juste Jarvis, retire le Hey devant ») :
+        // "jarvis" (seul) était auparavant mappé ici sur le même modèle que "hey jarvis" — ce
+        // qui laissait croire que dire juste « Jarvis » fonctionnerait, alors que le modèle
+        // hey_jarvis.onnx n'est fiable QUE sur la phrase complète « Hey Jarvis » (voir le
+        // commentaire de classe ci-dessus). "jarvis" seul (et tout autre mot-clé non listé ici)
+        // passe maintenant par startKeywordSpotting() (reconnaissance vocale, mot-clé libre).
         private val OWW_KEYWORDS = mapOf(
-            "jarvis" to ("hey_jarvis.onnx" to "Hey Jarvis"),
             "hey jarvis" to ("hey_jarvis.onnx" to "Hey Jarvis"),
             "alexa" to ("alexa.onnx" to "Alexa"),
             "mycroft" to ("hey_mycroft.onnx" to "Hey Mycroft"),
@@ -128,22 +157,44 @@ class WakeWordService : Service() {
                 return "🔇 Écoute permanente désactivée (⚙ → Réglages → Mot-clé d'activation)."
             }
             val keyword = Prefs.getWakeWord(context).lowercase().trim().ifBlank { "jarvis" }
-            val requiredAssets = listOf("melspectrogram.onnx", "embedding_model.onnx", OWW_DEFAULT_FILE)
-            val missing = requiredAssets.filterNot { name ->
-                try { context.assets.open(name).use { true } } catch (e: Exception) { false }
-            }
+            val usesTrainedModel = OWW_KEYWORDS.containsKey(keyword)
             val sb = StringBuilder("🎙️ Mot-clé configuré : « $keyword ».\n")
-            if (missing.isNotEmpty()) {
-                sb.append(
-                    "❌ Modèles openWakeWord manquants dans l'app (${missing.joinToString(", ")}) — " +
-                        "le téléchargement a échoué au moment du build CI. Ce n'est PAS réparable " +
-                        "depuis le téléphone : il faut relancer un build (voir GitHub Actions) avec " +
-                        "une connexion internet capable d'atteindre github.com."
-                )
+
+            if (usesTrainedModel) {
+                val (modelFile, _) = OWW_KEYWORDS.getValue(keyword)
+                val requiredAssets = listOf("melspectrogram.onnx", "embedding_model.onnx", modelFile)
+                val missing = requiredAssets.filterNot { name ->
+                    try { context.assets.open(name).use { true } } catch (e: Exception) { false }
+                }
+                sb.append("Moteur : openWakeWord (modèle pré-entraîné, faible consommation, hors-ligne).\n")
+                if (missing.isNotEmpty()) {
+                    sb.append(
+                        "❌ Modèles openWakeWord manquants dans l'app (${missing.joinToString(", ")}) — " +
+                            "le téléchargement a échoué au moment du build CI. Ce n'est PAS réparable " +
+                            "depuis le téléphone : il faut relancer un build (voir GitHub Actions) avec " +
+                            "une connexion internet capable d'atteindre github.com."
+                    )
+                } else {
+                    sb.append("✅ Modèles présents dans l'app.\n")
+                    sb.append(
+                        if (lastStatusText.isNotBlank()) "Dernier statut connu du service : $lastStatusText"
+                        else "Le service ne s'est pas encore lancé depuis le dernier démarrage de l'app — ouvre/ferme l'app une fois, ou vérifie que la permission microphone est accordée."
+                    )
+                }
             } else {
-                sb.append("✅ Modèles présents dans l'app.\n")
+                // Mot-clé sans modèle openWakeWord dédié (ex: "jarvis" seul, ou tout mot
+                // personnalisé) — voir startKeywordSpotting().
                 sb.append(
-                    if (lastStatusText.isNotBlank()) "Dernier statut connu du service : $lastStatusText"
+                    "Moteur : reconnaissance vocale (mot-clé libre) — « $keyword » n'a pas de " +
+                        "modèle openWakeWord pré-entraîné dédié, JARVIS transcrit donc la parole en " +
+                        "continu et se déclenche dès que le texte reconnu contient ce mot. " +
+                        "Consomme plus de batterie qu'un modèle dédié et peut nécessiter internet " +
+                        "sur certains téléphones sans reconnaissance hors-ligne installée.\n"
+                )
+                sb.append(
+                    if (!SpeechRecognizer.isRecognitionAvailable(context))
+                        "❌ Aucun service de reconnaissance vocale disponible sur cet appareil — ce mot-clé ne peut pas être détecté."
+                    else if (lastStatusText.isNotBlank()) "Dernier statut connu du service : $lastStatusText"
                     else "Le service ne s'est pas encore lancé depuis le dernier démarrage de l'app — ouvre/ferme l'app une fois, ou vérifie que la permission microphone est accordée."
                 )
             }
@@ -169,6 +220,7 @@ class WakeWordService : Service() {
                 // en mode pause, pour rester valide vis-à-vis d'Android.
                 startForeground(NOTIFICATION_ID, buildNotification("⏸ en pause — micro utilisé ailleurs (chat/mode vocal)"))
                 stopOpenWakeWord()
+                stopKeywordSpotting()
                 return START_STICKY
             }
             ACTION_RESUME -> {
@@ -194,7 +246,18 @@ class WakeWordService : Service() {
 
     private fun startBestAvailableEngine() {
         val keyword = Prefs.getWakeWord(this).lowercase().trim().ifBlank { "jarvis" }
-        startOpenWakeWord(keyword)
+        // "hey jarvis"/"alexa"/"mycroft"/"hey mycroft" ont un vrai modèle openWakeWord entraîné
+        // dessus (faible conso, hors-ligne) -- tout le reste (dont "jarvis" seul, demandé
+        // explicitement par l'utilisateur, et n'importe quel mot-clé personnalisé) passe par la
+        // reconnaissance vocale (mot-clé libre), seule façon de détecter une phrase pour
+        // laquelle aucun modèle entraîné n'existe. Voir le commentaire de classe ci-dessus.
+        if (OWW_KEYWORDS.containsKey(keyword)) {
+            stopKeywordSpotting()
+            startOpenWakeWord(keyword)
+        } else {
+            stopOpenWakeWord()
+            startKeywordSpotting(keyword)
+        }
     }
 
     // ── openWakeWord (gratuit, sans clé, basse consommation) ───────────────────
@@ -257,6 +320,106 @@ class WakeWordService : Service() {
         isRunning = false
         handler.removeCallbacksAndMessages(null)
         stopOpenWakeWord()
+        stopKeywordSpotting()
+    }
+
+    // ── Reconnaissance vocale (mot-clé libre) ───────────────────────────────────
+
+    /**
+     * Repli pour tout mot-clé sans modèle openWakeWord entraîné dédié (ex: « Jarvis » seul,
+     * ou n'importe quel mot personnalisé) — voir le commentaire de classe pour le contexte
+     * complet. SpeechRecognizer n'a pas de mode « écoute continue » natif sur Android : chaque
+     * session se termine après un silence/une phrase, donc on relance une nouvelle session à
+     * chaque fin (résultat, erreur, timeout) pour simuler une écoute permanente. Doit être
+     * démarré/arrêté sur le thread principal (contrainte de SpeechRecognizer), d'où le passage
+     * systématique par [handler].
+     */
+    private fun startKeywordSpotting(requestedKeyword: String) {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            updateNotification("❌ reconnaissance vocale indisponible sur cet appareil — impossible d'écouter « $requestedKeyword »")
+            return
+        }
+        keywordSpottingActive = true
+        updateNotification("mode reconnaissance vocale — écoute « $requestedKeyword » (mot-clé libre)")
+        handler.post { startKeywordSpottingSession(requestedKeyword) }
+    }
+
+    private fun startKeywordSpottingSession(keyword: String) {
+        if (!keywordSpottingActive) return
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) { }
+
+        val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        speechRecognizer = recognizer
+
+        val recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+
+            // Silence, timeout, pas de correspondance, service occupé... quelle que soit la
+            // cause, on relance une nouvelle session -- c'est ce qui simule l'écoute continue.
+            override fun onError(error: Int) {
+                restartKeywordSpotting(keyword)
+            }
+
+            override fun onResults(results: Bundle?) {
+                checkForKeyword(results, keyword)
+                restartKeywordSpotting(keyword)
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                checkForKeyword(partialResults, keyword)
+            }
+        })
+
+        try {
+            recognizer.startListening(recognizerIntent)
+        } catch (e: Exception) {
+            updateNotification("❌ échec du démarrage de la reconnaissance vocale : ${e.message}")
+            restartKeywordSpotting(keyword)
+        }
+    }
+
+    private fun checkForKeyword(bundle: Bundle?, keyword: String) {
+        val matches = bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+        val heard = matches.any { it.lowercase(Locale.getDefault()).contains(keyword) }
+        if (heard) {
+            // Coupe tout de suite la session en cours pour libérer le micro avant que
+            // VoiceModeActivity (déclenché par triggerVoiceMode) ne le réclame à son tour.
+            stopKeywordSpottingSession()
+            triggerVoiceMode()
+        }
+    }
+
+    private fun restartKeywordSpotting(keyword: String) {
+        if (!keywordSpottingActive) return
+        handler.postDelayed({ startKeywordSpottingSession(keyword) }, 350L)
+    }
+
+    private fun stopKeywordSpottingSession() {
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.destroy()
+        } catch (_: Exception) { }
+        speechRecognizer = null
+    }
+
+    private fun stopKeywordSpotting() {
+        keywordSpottingActive = false
+        stopKeywordSpottingSession()
     }
 
     private fun triggerVoiceMode() {

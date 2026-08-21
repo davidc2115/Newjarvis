@@ -443,7 +443,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="💡 Écoute permanente 100% GRATUITE, SANS CLÉ NI COMPTE : moteur openWakeWord, hors-ligne, à très faible consommation batterie (aucune reconnaissance vocale continue, juste un petit modèle qui reconnaît un mot précis). \n\n⚠️ Important : ce moteur ne reconnaît que des mots-clés prédéfinis, pas un mot totalement inventé — « jarvis », « alexa », « mycroft ». Si tu tapes un autre mot, JARVIS écoutera « Jarvis » à la place et te le signalera dans la notification — c'est le compromis nécessaire pour une écoute permanente qui ne vide pas la batterie."
+                android:text="💡 Écoute permanente 100% GRATUITE, SANS CLÉ NI COMPTE. \n\n« hey jarvis », « alexa », « hey mycroft » utilisent un petit modèle pré-entraîné (hors-ligne, très faible consommation). \n\nTout autre mot-clé — dont « jarvis » tout seul, ou n'importe quel mot que tu choisis — bascule automatiquement sur la reconnaissance vocale du téléphone : ça fonctionne pour n'importe quelle phrase, mais consomme plus de batterie et peut nécessiter internet sur certains téléphones sans reconnaissance hors-ligne installée."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp"
