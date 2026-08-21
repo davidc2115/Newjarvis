@@ -477,7 +477,10 @@ class OrbView @JvmOverloads constructor(
         val labelCutoff = minOf(8, count)
         order.forEachIndexed { rank, originalIdx ->
             val title = graph.nodes[originalIdx].title
-            val showLabel = rank < labelCutoff
+            // forceLabel : faits de Mémoire JARVIS / entrées de Génération -- leur libellé EST
+            // l'information utile, donc toujours affiché même si leur "degré" (nombre de liens)
+            // les place hors du top habituel (voir VaultGraphNode.forceLabel).
+            val showLabel = rank < labelCutoff || graph.nodes[originalIdx].forceLabel
             val phase = (rank * 0.6180339887f) % 1f * 2f * Math.PI.toFloat()
             result[originalIdx] = if (rank == 0) {
                 WebNode(0f, 0f, phase, isHub = true, title = title, showLabel = showLabel)

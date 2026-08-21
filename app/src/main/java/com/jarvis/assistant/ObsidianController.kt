@@ -863,7 +863,12 @@ disant à JARVIS « retiens que... » / « oublie que... ».
     // de plus lisible qu'un sous-ensemble représentatif des notes les plus centrales.
     // ─────────────────────────────────────────────────────────────────────────
 
-    data class VaultGraphNode(val title: String, val degree: Int)
+    // forceLabel : vrai pour un nœud dont le libellé doit TOUJOURS s'afficher, même si son
+    // "degré" (nombre de liens) est trop faible pour entrer dans le top habituel (voir
+    // labelCutoff dans OrbView.layoutFromGraph) — utilisé ci-dessous pour les faits de mémoire
+    // et les générations, dont le contenu textuel EST tout l'intérêt (demande utilisateur :
+    // "mettre les détails de la mémoire" au lieu d'un seul nœud générique "Mémoire JARVIS").
+    data class VaultGraphNode(val title: String, val degree: Int, val forceLabel: Boolean = false)
     data class VaultGraph(val nodes: List<VaultGraphNode>, val edges: List<Pair<Int, Int>>)
 
     fun buildVaultGraph(context: Context, maxNodes: Int = 26): VaultGraph? {
@@ -871,10 +876,21 @@ disant à JARVIS « retiens que... » / « oublie que... ».
         val root = getVaultRoot(context)
         if (!root.exists()) return null
         return try {
-            val files = root.walkTopDown()
+            // Le fichier "Mémoire JARVIS" agrège potentiellement des dizaines de faits DISTINCTS
+            // dans un seul fichier .md — le montrer comme un unique nœud générique écraserait
+            // toute cette richesse (signalement utilisateur : "au lieu de mettre Mémoire JARVIS,
+            // mettre les détails de la mémoire avec des points reliés"). Exclu ci-dessous du
+            // graphe "notes classiques", puis explosé plus bas en autant de nœuds que de faits
+            // retenus, chacun relié au précédent par un trait — même logique appliquée aux
+            // générations (image/vidéo/site/fichiers), qui existent déjà comme fichiers
+            // individuels dans le vault mais restaient des points isolés faute de [[wikilinks]]
+            // entre elles.
+            val allFiles = root.walkTopDown()
                 .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
                 .toList()
-            if (files.isEmpty()) return null
+            if (allFiles.isEmpty()) return null
+            val files = allFiles.filterNot { it.nameWithoutExtension == MEMORY_NOTE_TITLE }
+            if (files.isEmpty() && getMemoryFacts(context).isEmpty()) return null
 
             val titleByLowercase = HashMap<String, Int>()
             files.forEachIndexed { i, f -> titleByLowercase[f.nameWithoutExtension.lowercase()] = i }
@@ -901,7 +917,7 @@ disant à JARVIS « retiens que... » / « oublie que... ».
             val keptSet = keptIndices.toSet()
             val indexRemap = keptIndices.withIndex().associate { (newIdx, oldIdx) -> oldIdx to newIdx }
 
-            val nodes = keptIndices.map { VaultGraphNode(files[it].nameWithoutExtension, degrees[it] ?: 0) }
+            val nodes = keptIndices.map { VaultGraphNode(files[it].nameWithoutExtension, degrees[it] ?: 0) }.toMutableList()
             val edgesSet = mutableSetOf<Pair<Int, Int>>()
             keptIndices.forEach { oldI ->
                 adjacency[oldI]?.forEach { oldJ ->
@@ -912,9 +928,56 @@ disant à JARVIS « retiens que... » / « oublie que... ».
                     }
                 }
             }
+
+            // ── Détail Mémoire JARVIS : un nœud par fait retenu (les plus récents), reliés en
+            // chaîne (chaque fait relié au précédent) plutôt qu'un unique nœud générique. ──────
+            val memoryFacts = getMemoryFacts(context).takeLast(12)
+            var previousMemoryIdx: Int? = null
+            memoryFacts.forEach { fact ->
+                val idx = nodes.size
+                nodes.add(VaultGraphNode("🧠 " + fact.take(60), degree = 1, forceLabel = true))
+                previousMemoryIdx?.let { prev -> edgesSet.add(prev to idx) }
+                previousMemoryIdx = idx
+            }
+
+            // ── Détail Génération : les notes du dossier "Générations" (une par image/vidéo/
+            // site/fichier créé, voir Prefs.logGenerationToVault) sont déjà des nœuds distincts
+            // ci-dessus, mais sans lien entre elles -- on les relie en chaîne chronologique
+            // (les plus récentes d'abord, comme l'historique 🎨 Génération) pour qu'un vrai
+            // trait relie chaque point plutôt que de les laisser flotter isolément. ────────────
+            val generationIndices = keptIndices.withIndex()
+                .filter { (_, oldI) -> files[oldI].parentFile?.name == "Générations" }
+                .sortedByDescending { (_, oldI) -> files[oldI].lastModified() }
+                .map { (newIdx, _) -> newIdx }
+            generationIndices.forEachIndexed { i, newIdx ->
+                nodes[newIdx] = nodes[newIdx].copy(forceLabel = true)
+                if (i > 0) {
+                    val a = generationIndices[i - 1]
+                    edgesSet.add(if (a < newIdx) a to newIdx else newIdx to a)
+                }
+            }
+
             VaultGraph(nodes, edgesSet.toList())
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /** Faits individuels de la note "Mémoire JARVIS" (texte du fait seul, sans la date/puce),
+     *  les plus anciens en premier — voir buildVaultGraph() (explosion en nœuds individuels) et
+     *  getMemoryContext() (version brute complète pour le system prompt). */
+    fun getMemoryFacts(context: Context): List<String> {
+        if (!hasStorageAccess()) return emptyList()
+        val root = getVaultRoot(context)
+        val file = File(root, "$MEMORY_NOTE_TITLE.md")
+        if (!file.exists()) return emptyList()
+        return try {
+            file.readText().lines()
+                .filter { it.trim().startsWith("- [") }
+                .map { line -> line.substringAfter("] ", missingDelimiterValue = line).trim() }
+                .filter { it.isNotBlank() }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
