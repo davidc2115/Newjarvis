@@ -866,6 +866,20 @@ object JarvisCommandParser {
                 ObsidianController.forgetFact(context, query)
             }
 
+            // ─── Wiki structuré (pattern "LLM Wiki", voir WikiController) ─────────────
+            "wiki_init" -> WikiController.init(context)
+            "wiki_page" -> {
+                val type = json.optString("type", "")
+                val title = json.optString("title", "")
+                val pageContent = json.optString("content", "")
+                val summary = json.optString("summary", "")
+                val tags = mutableListOf<String>()
+                json.optJSONArray("tags")?.let { arr -> for (i in 0 until arr.length()) tags.add(arr.optString(i)) }
+                WikiController.page(context, type, title, pageContent, summary, tags)
+            }
+            "wiki_status" -> WikiController.status(context)
+            "wiki_lint" -> WikiController.lint(context)
+
             "generate_image" -> {
                 val prompt = json.optString("prompt", "")
                 val count = json.optInt("count", 1)

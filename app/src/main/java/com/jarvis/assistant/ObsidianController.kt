@@ -306,6 +306,14 @@ Ce vault est géré par **JARVIS Assistant**.
     // milieu d'un autre mot), jamais si le lien existe déjà quelque part dans le texte.
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Wrapper public pour réutiliser la logique de liens [[wikilinks]] automatiques depuis
+     * un autre contrôleur (WikiController) sans dupliquer le scan du vault — même pattern que
+     * missingStorageAccessMessagePublic()/getVaultRoot() déjà exposés publiquement plus haut.
+     */
+    fun autoLinkContentPublic(context: Context, content: String, excludeTitle: String? = null): String =
+        autoLinkContent(context, content, excludeTitle)
+
     private fun autoLinkContent(context: Context, content: String, excludeTitle: String? = null): String {
         if (content.isBlank() || !hasStorageAccess()) return content
         val root = getVaultRoot(context)
