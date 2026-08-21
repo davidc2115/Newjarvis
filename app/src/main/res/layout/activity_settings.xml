@@ -460,6 +460,18 @@
                 android:background="@drawable/bg_mic_button"
                 android:layout_marginBottom="8dp" />
 
+            <TextView
+                android:id="@+id/requestBatteryExemptionButton"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:text="🔋 AUTORISER EN ARRIÈRE-PLAN (batterie)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
@@ -643,7 +655,19 @@
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp"
                 android:textColor="@color/text_primary"
-                android:hint="Modèle (ex: llama3.1)"
+                android:hint="Modèle principal (ex: llama3.1)"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginBottom="8dp" />
+
+            <EditText
+                android:id="@+id/ollamaFallbackModelsInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="Modèles de secours, séparés par virgule (rotation si le principal échoue)"
                 android:textColorHint="@color/text_secondary"
                 android:layout_marginBottom="8dp" />
 

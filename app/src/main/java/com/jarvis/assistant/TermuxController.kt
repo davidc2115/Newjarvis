@@ -90,6 +90,15 @@ import java.util.concurrent.TimeUnit
  * actionnable au lieu du message générique. Ajout aussi de `--nowebui` (API REST uniquement, pas
  * d'interface Gradio) : JARVIS n'appelle jamais l'UI HTML, seulement `/sdapi/v1/...`, donc ce
  * flag réduit la mémoire/temps de démarrage sans rien retirer d'utile.
+ *
+ * TROISIÈME CAUSE RÉELLE TROUVÉE ET CORRIGÉE (signalement utilisateur : "~/jarvis_sd_install.log
+ * PERMISSION DENIED") : le script redirigeait toute sa sortie vers ce fichier via `tee -a` (mode
+ * AJOUT) dès sa toute première commande — si un fichier de ce nom existait déjà avec des
+ * permissions incompatibles (reliquat d'un essai antérieur à une version plus ancienne du script,
+ * ou touché depuis un autre contexte), `tee -a` échouait immédiatement et TOUT le reste du script
+ * ne s'exécutait jamais, sans qu'aucun message utile n'apparaisse (la redirection elle-même est ce
+ * qui échoue). Le script supprime désormais ce fichier avant de rediriger dessus, repartant à
+ * chaque installation d'un fichier neuf appartenant forcément au bon processus.
  */
 object TermuxController {
 
@@ -158,6 +167,8 @@ object TermuxController {
     // imbriqué fragile.
     private const val SETUP_SCRIPT = """
 set -e
+rm -f ~/jarvis_sd_install.log 2>/dev/null || true
+touch ~/jarvis_sd_install.log
 exec > >(tee -a ~/jarvis_sd_install.log) 2>&1
 trap 'echo "=== ECHEC ligne ${'$'}LINENO : ${'$'}BASH_COMMAND — detail complet dans ~/jarvis_sd_install.log ==="' ERR
 echo "=== Debut installation : $(date) ==="

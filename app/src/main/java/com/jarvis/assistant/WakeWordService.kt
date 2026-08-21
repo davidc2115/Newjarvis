@@ -102,7 +102,16 @@ class WakeWordService : Service() {
         )
         private const val OWW_DEFAULT_FILE = "hey_jarvis.onnx"
         private const val OWW_DEFAULT_LABEL = "Hey Jarvis"
-        private const val OWW_THRESHOLD = 0.5f
+        // BUG REEL CORRIGE (signalement utilisateur : "l'ecoute ne fonctionne toujours pas" apres
+        // le retrait de Picovoice et la fiabilisation du telechargement des modeles) : 0.5f est
+        // la valeur par defaut du PARAMETRE de la librairie (generique, pensee pour un modele de
+        // demo), PAS un seuil realiste pour de vrais modeles openWakeWord entraines comme
+        // hey_jarvis/alexa/hey_mycroft -- leur doc officielle (Re-MENTIA/openwakeword-android-kt)
+        // utilise des seuils typiques de 0.08 a 0.15 dans ses propres exemples avec de vrais
+        // modeles. A 0.5, le score de sortie du modele ne depassait quasiment jamais le seuil en
+        // conditions reelles -> aucune detection ne se declenchait JAMAIS, silencieusement (aucune
+        // erreur, le service tournait normalement, juste aucun mot-cle ne franchissait la barre).
+        private const val OWW_THRESHOLD = 0.12f
         private const val ANTI_DOUBLON_MS = 1500L
 
         @Volatile private var lastStatusText: String = ""

@@ -303,6 +303,7 @@ class SettingsActivity : AppCompatActivity() {
         val modelCardsContainer  = findViewById<LinearLayout>(R.id.modelCardsContainer)
         val wakeWordInput        = findViewById<EditText>(R.id.wakeWordInput)
         val toggleWakeWordButton = findViewById<TextView>(R.id.toggleWakeWordButton)
+        val requestBatteryExemptionButton = findViewById<TextView>(R.id.requestBatteryExemptionButton)
 
         wakeWordInput.setText(Prefs.getWakeWord(this))
         updateWakeWordButtonLabel(toggleWakeWordButton)
@@ -417,6 +418,33 @@ class SettingsActivity : AppCompatActivity() {
             updateWakeWordButtonLabel(toggleWakeWordButton)
         }
 
+        // BUG REEL CORRIGE (signalement utilisateur : "l'ecoute ne fonctionne toujours pas") :
+        // sur beaucoup de telephones (Xiaomi/MIUI en tete, mais Samsung/OnePlus/Huawei ont des
+        // equivalents), Android tue ou throttle agressivement un service en arriere-plan comme
+        // WakeWordService des que l'ecran est eteint depuis un moment, SAUF si l'app est
+        // explicitement exemptee des optimisations de batterie. Avant, seul un texte
+        // informatif mentionnait cette etape a faire manuellement dans les reglages systeme,
+        // jamais retrouvable facilement -- ce bouton declenche directement la VRAIE demande
+        // systeme (popup Android standard), un seul appui.
+        requestBatteryExemptionButton.setOnClickListener {
+            try {
+                val pm = getSystemService(android.os.PowerManager::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && pm?.isIgnoringBatteryOptimizations(packageName) == true) {
+                    Toast.makeText(this, "✅ Deja exempte des optimisations de batterie", Toast.LENGTH_SHORT).show()
+                } else {
+                    val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                }
+            } catch (e: Exception) {
+                // Repli : certains constructeurs (Xiaomi/MIUI notamment) bloquent cette action
+                // standard Android -- on ouvre au moins l'ecran general des parametres app.
+                TermuxController.openAppSettings(this)
+                Toast.makeText(this, "Ouvre les parametres batterie de l'app depuis cet ecran (⚠️ ${e.message})", Toast.LENGTH_LONG).show()
+            }
+        }
+
         setupTermuxSdSection()
         setupDebugLogsButton()
         setupOllamaSection()
@@ -435,6 +463,7 @@ class SettingsActivity : AppCompatActivity() {
         val hostInput = findViewById<EditText>(R.id.ollamaHostInput)
         val portInput = findViewById<EditText>(R.id.ollamaPortInput)
         val modelInputOllama = findViewById<EditText>(R.id.ollamaModelInput)
+        val fallbackModelsInput = findViewById<EditText>(R.id.ollamaFallbackModelsInput)
         val toggleButton = findViewById<TextView>(R.id.toggleOllamaAutoButton)
         val saveButtonOllama = findViewById<TextView>(R.id.saveOllamaButton)
         val testButton = findViewById<TextView>(R.id.testOllamaButton)
@@ -448,6 +477,7 @@ class SettingsActivity : AppCompatActivity() {
         )
         portInput.setText(Prefs.getOllamaPort(this))
         modelInputOllama.setText(Prefs.getOllamaModel(this))
+        fallbackModelsInput.setText(Prefs.getOllamaFallbackModels(this).joinToString(", "))
 
         fun refreshToggleLabel() {
             toggleButton.text = if (Prefs.isOllamaAutoEnabled(this)) {
@@ -467,6 +497,7 @@ class SettingsActivity : AppCompatActivity() {
             Prefs.saveOllamaHost(this, hostInput.text.toString())
             Prefs.saveOllamaPort(this, portInput.text.toString())
             Prefs.saveOllamaModel(this, modelInputOllama.text.toString())
+            Prefs.saveOllamaFallbackModels(this, fallbackModelsInput.text.toString())
             Toast.makeText(this, "✅ Configuration Ollama enregistrée", Toast.LENGTH_SHORT).show()
         }
 

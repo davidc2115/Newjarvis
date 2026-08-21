@@ -859,6 +859,21 @@ object Prefs {
         prefs(context).edit().putBoolean("ollama_auto_enabled", enabled).apply()
     }
 
+    /** Modèles de SECOURS Ollama (rotation) : si le modèle principal (getOllamaModel) échoue ou
+     *  prend trop de temps, ApiClient.sendOpenAiWithRotation essaie ceux-ci un par un dans
+     *  l'ordre, avant de retomber sur le cloud — même logique que la rotation multi-clés déjà
+     *  utilisée pour les fournisseurs cloud (Prefs.getNextApiKey), appliquée ici aux MODÈLES
+     *  plutôt qu'aux clés puisque Ollama n'en a pas. Stockés comme une simple liste séparée par
+     *  des virgules, saisie utilisateur dans Réglages -> Local -> Ollama. */
+    fun getOllamaFallbackModels(context: Context): List<String> {
+        val raw = prefs(context).getString("ollama_fallback_models", "") ?: ""
+        return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
+    fun saveOllamaFallbackModels(context: Context, models: String) {
+        prefs(context).edit().putString("ollama_fallback_models", models.trim()).apply()
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // BOX INTERNET UNIFIÉE (voir RouterController) — un seul système pour piloter
     // Freebox, Livebox (Orange), SFR Box ou Bbox (Bouygues) selon le fournisseur

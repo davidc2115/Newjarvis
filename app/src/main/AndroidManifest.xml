@@ -76,6 +76,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Exemption d'optimisation batterie : indispensable sur beaucoup de telephones (Xiaomi/MIUI
+         en tete) pour que l'ecoute permanente (WakeWordService) ne soit pas tuee par le systeme
+         apres quelques minutes en arriere-plan (voir requestBatteryExemptionButton). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.SET_ALARM" />
     <!-- BUG RÉEL CORRIGÉ : sur certains ROM/OEM, com.android.deskclock.HandleSetAlarmActivity
