@@ -139,10 +139,8 @@ object ApiClient {
             }
             if (vaultMiss != null) {
                 val followUpPrompt = effectiveSystemPrompt +
-                    "
-
-Le vault Obsidian ne contient RIEN sur la dernière question de l'utilisateur " +
-                    "(${vaultMiss.action} a renvoyé : "${vaultMiss.outputMessage}"). N'appelle PLUS " +
+                    "\n\nLe vault Obsidian ne contient RIEN sur la dernière question de l'utilisateur " +
+                    "(${vaultMiss.action} a renvoyé : \"${vaultMiss.outputMessage}\"). N'appelle PLUS " +
                     "obsidian_search ni obsidian_read pour cette même question : réponds-y MAINTENANT avec tes " +
                     "connaissances générales, ou avec web_search{query} si c'est une info qui change dans le " +
                     "temps (actualité, prix, horaires, disponibilité...). Si tu obtiens une réponse factuelle " +
