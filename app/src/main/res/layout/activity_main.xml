@@ -4,13 +4,30 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- ── Contenu principal (chat) ─────────────────────────────────────────── -->
-    <LinearLayout
+    <!-- ── Contenu principal (chat), avec la Toile Obsidian en arriere-plan ────
+         FrameLayout : l'orb "Toile Obsidian" (nœuds/liens du vault reel) occupe
+         tout l'ecran en fond, en dessous du LinearLayout de chat (transparent),
+         demande explicitement par l'utilisateur pour qu'elle soit visible aussi
+         dans le chat texte, pas seulement en mode vocal. Alpha reduit pour ne
+         pas nuire a la lisibilite des messages. Voir MainActivity.refreshChatOrbGraph(). -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:background="@color/background_dark"
-        android:padding="12dp">
+        android:background="@color/background_dark">
+
+        <com.jarvis.assistant.OrbView
+            android:id="@+id/chatBackgroundOrb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:alpha="0.22" />
+
+        <!-- ── Contenu principal (chat) ─────────────────────────────────────────── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="@android:color/transparent"
+            android:padding="12dp">
 
         <LinearLayout
             android:id="@+id/headerRow"
@@ -182,7 +199,9 @@
             android:layout_marginBottom="-12dp"
             android:layout_marginTop="8dp" />
 
-    </LinearLayout>
+        </LinearLayout>
+
+    </FrameLayout>
 
     <!-- ── Tiroir latéral rétractable : historique des conversations ──────────── -->
     <LinearLayout

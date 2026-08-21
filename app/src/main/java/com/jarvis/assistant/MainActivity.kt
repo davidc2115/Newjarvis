@@ -22,8 +22,12 @@ import androidx.core.content.ContextCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -40,6 +44,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var removePendingImageButtonRef: TextView? = null
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var conversationListContainer: LinearLayout
+
+    // Toile Obsidian en arriere-plan du chat (voir activity_main.xml) — demande explicitement
+    // par l'utilisateur pour que le graphe du vault (notes reelles + [[wikilinks]]) soit visible
+    // aussi derriere les messages, pas seulement dans VoiceModeActivity. rafraichie
+    // periodiquement (voir onCreate/repeatOnLifecycle) ET immediatement apres chaque reponse de
+    // JARVIS susceptible d'avoir cree/modifie une note, pour "grossir en temps reel".
+    private lateinit var chatBackgroundOrb: OrbView
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -110,6 +121,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         pendingImageThumbnail = findViewById(R.id.pendingImageThumbnail)
         drawerLayout = findViewById(R.id.drawerLayout)
         conversationListContainer = findViewById(R.id.conversationListContainer)
+        chatBackgroundOrb = findViewById(R.id.chatBackgroundOrb)
+        chatBackgroundOrb.visualStyle = OrbView.VisualStyle.OBSIDIAN_WEB
+        chatBackgroundOrb.state = OrbView.OrbState.IDLE
+        refreshChatOrbGraph()
+        // Rafraichissement periodique du graphe pendant que l'ecran de chat est au premier
+        // plan (RESUMED) : c'est ce qui fait "grossir en temps reel" la toile quand JARVIS
+        // cree/modifie des notes en arriere-plan (ex: remember_fact, obsidian_create_note...)
+        // sans attendre que l'utilisateur quitte/revienne sur l'ecran. Coroutine liee au
+        // lifecycle : se met en pause automatiquement hors RESUMED, pas de fuite ni de travail
+        // inutile en arriere-plan.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    delay(20_000)
+                    refreshChatOrbGraph()
+                }
+            }
+        }
         val menuButton = findViewById<TextView>(R.id.menuButton)
         val newConversationButton = findViewById<TextView>(R.id.newConversationButton)
         val micButton = findViewById<TextView>(R.id.micButton)
@@ -491,6 +520,31 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 imageBase64 = result.imageBase64, imageMime = result.imageMime
             )
             statusText.text = "● en veille"
+            // Rafraichit la toile tout de suite après une réponse (au lieu d'attendre le
+            // prochain cycle de 20s) : c'est l'action qui vient d'avoir lieu (obsidian_create_note,
+            // remember_fact, wiki_page...) qui a le plus de chances d'avoir fait grossir le vault,
+            // donc la mise à jour "temps réel" doit être visible dès ce tour-ci.
+            refreshChatOrbGraph()
+        }
+    }
+
+    /**
+     * Recharge le VRAI graphe du vault (notes + [[wikilinks]], voir
+     * ObsidianController.buildVaultGraph) et l'applique à l'orb affichée en arrière-plan du
+     * chat — c'est ce qui la fait "grossir" avec de nouveaux nœuds/liens au fil de la
+     * conversation, exactement comme dans VoiceModeActivity. Travail disque en IO, mise à
+     * jour de la vue sur Main.
+     */
+    private fun refreshChatOrbGraph() {
+        lifecycleScope.launch {
+            val graph = try {
+                withContext(Dispatchers.IO) { ObsidianController.buildVaultGraph(this@MainActivity) }
+            } catch (_: Exception) {
+                null
+            }
+            if (graph != null) {
+                chatBackgroundOrb.graphData = graph
+            }
         }
     }
 
