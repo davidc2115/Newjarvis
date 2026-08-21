@@ -560,9 +560,21 @@ ${if (linkedContent.isNotBlank()) linkedContent else "— Notes du jour —"}
         // que de ne rien injecter du tout, on signale quand même l'existence et les titres
         // des notes les plus récentes — un aperçu léger, sans le contenu complet — pour que
         // JARVIS ait conscience du vault dès le début d'une conversation même sans mot-clé.
+        // "Générations" (voir Prefs.logGenerationToVault) : un fichier PAR image/vidéo/site/
+        // fichier créé — un simple journal, pas une connaissance utile pour répondre à une
+        // question, mais dont le volume grossit vite pour un utilisateur qui génère beaucoup
+        // de contenu. L'inclure ici gonflait le nombre de fichiers relus EN ENTIER à CHAQUE
+        // message pour rien (cause probable du signalement "JARVIS très long à répondre" une
+        // fois le vault chargé) — exclu de ce scan de contexte automatique. Reste consultable
+        // explicitement via list_generations/obsidian_search si vraiment nécessaire.
+        val candidateFiles = root.walkTopDown()
+            .filter {
+                it.isFile && it.extension == "md" && !it.path.contains(".obsidian") &&
+                    it.parentFile?.name != "Générations"
+            }
+
         if (words.isEmpty()) {
-            val recent = root.walkTopDown()
-                .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
+            val recent = candidateFiles
                 .sortedByDescending { it.lastModified() }
                 .take(maxNotes)
                 .toList()
@@ -570,12 +582,20 @@ ${if (linkedContent.isNotBlank()) linkedContent else "— Notes du jour —"}
             return recent.joinToString("\n") { "### ${it.nameWithoutExtension} (récent)" }
         }
 
+        // Cap de lecture par fichier : une note anormalement grosse (import massif, log
+        // technique...) ne doit pas à elle seule ralentir CHAQUE message — 40 Ko couvre très
+        // largement une vraie note manuscrite tout en bornant le pire cas.
+        val maxCharsPerFile = 40_000
+
         data class Hit(val file: File, val score: Int, val excerpt: String)
         val hits = mutableListOf<Hit>()
-        for (file in root.walkTopDown()) {
-            if (!file.isFile || file.extension != "md" || file.path.contains(".obsidian")) continue
+        for (file in candidateFiles) {
             try {
-                val text = file.readText()
+                val text = file.bufferedReader().use { reader ->
+                    val buffer = CharArray(maxCharsPerFile)
+                    val n = reader.read(buffer)
+                    if (n <= 0) "" else String(buffer, 0, n)
+                }
                 val textLower = text.lowercase()
                 val nameLower = file.nameWithoutExtension.lowercase()
                 val titleMatches = words.count { nameLower.contains(it) }

@@ -119,8 +119,47 @@ object ApiClient {
             }
 
             // Exécution automatique des commandes système si présentes dans la réponse
-            val commandResult = JarvisCommandParser.parseAndExecute(context, rawResponse)
-            val cleanText = JarvisCommandParser.cleanResponse(rawResponse)
+            var commandResult = JarvisCommandParser.parseAndExecute(context, rawResponse)
+            var cleanText = JarvisCommandParser.cleanResponse(rawResponse)
+
+            // REBOND BORNÉ (signalement utilisateur : "il me dit introuvable dans le vault,
+            // mais ne recherche pas sur internet ou dans les IA pour avoir l'info puis la
+            // conserver") : l'architecture ne fait normalement QU'UN appel IA par tour — si ce
+            // tour se limite à un obsidian_search/obsidian_read qui n'a RIEN trouvé, l'IA
+            // n'avait jusqu'ici aucune seconde chance de rebondir sur le web/ses connaissances
+            // générales, et le message "introuvable" brut du vault finissait affiché tel quel
+            // comme réponse finale. Un unique appel de suivi (jamais plus, pour borner la
+            // latence) corrige ça : instruction explicite de répondre quand même ET de
+            // mémoriser la réponse trouvée pour ne plus avoir à la re-chercher.
+            val vaultMiss = (commandResult as? JarvisCommandParser.CommandResult.Executed)?.let { r ->
+                val isVaultLookup = r.action == "obsidian_search" || r.action == "obsidian_read"
+                val notFound = r.outputMessage.startsWith("🔍 Aucun résultat") ||
+                    r.outputMessage.startsWith("❌ Aucune note trouvée")
+                if (isVaultLookup && notFound) r else null
+            }
+            if (vaultMiss != null) {
+                val followUpPrompt = effectiveSystemPrompt +
+                    "
+
+Le vault Obsidian ne contient RIEN sur la dernière question de l'utilisateur " +
+                    "(${vaultMiss.action} a renvoyé : "${vaultMiss.outputMessage}"). N'appelle PLUS " +
+                    "obsidian_search ni obsidian_read pour cette même question : réponds-y MAINTENANT avec tes " +
+                    "connaissances générales, ou avec web_search{query} si c'est une info qui change dans le " +
+                    "temps (actualité, prix, horaires, disponibilité...). Si tu obtiens une réponse factuelle " +
+                    "utile, ajoute AUSSI un appel remember_fact{fact} (fait court et durable) ou " +
+                    "obsidian_create_note{title,content} (pour un contenu plus long) dans la MÊME réponse, pour " +
+                    "ne plus avoir à la re-chercher la prochaine fois. Si tu ne sais vraiment pas et qu'aucune " +
+                    "recherche web ne peut aider, dis-le honnêtement plutôt que d'inventer."
+                val followUpResponse = try {
+                    dispatchToProvider(context, provider, history, followUpPrompt)
+                } catch (e: Exception) {
+                    null
+                }
+                if (followUpResponse != null) {
+                    commandResult = JarvisCommandParser.parseAndExecute(context, followUpResponse)
+                    cleanText = JarvisCommandParser.cleanResponse(followUpResponse)
+                }
+            }
 
             when (commandResult) {
                 is JarvisCommandParser.CommandResult.Executed -> {
