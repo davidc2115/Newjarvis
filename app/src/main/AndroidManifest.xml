@@ -106,6 +106,22 @@
          invisible que ce projet évite systématiquement ailleurs (voir FreeboxController). -->
     <queries>
         <package android:name="com.termux" />
+
+        <!-- Même restriction de visibilité (Android 11+) pour l'appli Horloge/Réveil par
+             défaut : sans ces déclarations, intent.resolveActivity() renvoie TOUJOURS null
+             même quand une vraie appli Horloge est installée, et JARVIS répond à tort
+             "aucune application horloge n'est installée" (bug réel signalé par l'utilisateur,
+             alors que le téléphone en a bien une) — startActivity() aurait fonctionné sans
+             cette vérification, mais pas la vérification préalable elle-même. -->
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_TIMER" />
+        </intent>
     </queries>
 
     <application

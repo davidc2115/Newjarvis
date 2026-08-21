@@ -21,6 +21,18 @@ import android.provider.AlarmClock
  * seul AlarmClock.ACTION_SET_ALARM (créer) et ACTION_SHOW_ALARMS (ouvrir la liste) sont
  * disponibles. "Désactiver un réveil" est donc honnêtement traité comme "ouvrir la liste des
  * réveils pour que l'utilisateur le désactive lui-même en un tap", jamais simulé comme réussi.
+ *
+ * Minuteurs : AlarmClock.ACTION_SET_TIMER délègue à l'appli Horloge par défaut, comme pour
+ * les réveils — même limitation (aucune API pour lister/annuler un minuteur en cours par
+ * programme), donc pas de showTimers().
+ *
+ * BUG RÉEL CORRIGÉ : intent.resolveActivity() est une méthode de requête soumise à la
+ * restriction de visibilité des paquets (Android 11+/targetSdk 30+) — sans déclaration
+ * <queries><intent> correspondante dans le manifest, elle renvoie null MÊME QUAND une vraie
+ * appli Horloge est installée, ce qui faisait répondre à tort "aucune application horloge
+ * n'est installée". startActivity() avec l'intent implicite aurait fonctionné directement
+ * (il n'est pas soumis à cette restriction), seule la vérification préalable était en cause.
+ * Voir les entrées SET_ALARM/SHOW_ALARMS/SET_TIMER ajoutées au <queries> du manifest.
  */
 object DeviceControlController {
 
@@ -120,5 +132,54 @@ object DeviceControlController {
         } catch (e: Exception) {
             "❌ Impossible d'ouvrir la liste des réveils : ${e.message}"
         }
+    }
+
+    /**
+     * Crée un minuteur via l'appli Horloge par défaut (même mécanisme que setAlarm).
+     * durationSeconds : durée totale en secondes (ex: 5 min -> 300).
+     */
+    fun setTimer(context: Context, durationSeconds: Int, message: String = "", skipUi: Boolean = true): String {
+        if (durationSeconds <= 0) return "❌ Durée de minuteur invalide — précise une durée positive."
+        return try {
+            val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
+                putExtra(AlarmClock.EXTRA_LENGTH, durationSeconds)
+                putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
+                if (message.isNotBlank()) putExtra(AlarmClock.EXTRA_MESSAGE, message)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            if (intent.resolveActivity(context.packageManager) == null) {
+                return "❌ Aucune appli Horloge/Minuteur trouvée sur ce téléphone."
+            }
+            context.startActivity(intent)
+            val dureeStr = formatDuration(durationSeconds)
+            "⏱️ Minuteur de $dureeStr lancé${if (message.isNotBlank()) " (« $message »)" else ""}."
+        } catch (e: SecurityException) {
+            try {
+                val fallback = Intent(AlarmClock.ACTION_SET_TIMER).apply {
+                    putExtra(AlarmClock.EXTRA_LENGTH, durationSeconds)
+                    putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+                    if (message.isNotBlank()) putExtra(AlarmClock.EXTRA_MESSAGE, message)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(fallback)
+                val dureeStr = formatDuration(durationSeconds)
+                "⏱️ J'ouvre l'appli Horloge pour confirmer le minuteur de $dureeStr — le lancement silencieux est bloqué par une restriction de ce téléphone."
+            } catch (e2: Exception) {
+                "❌ Impossible de lancer le minuteur : ton téléphone bloque cette action (permission manquante)."
+            }
+        } catch (e: Exception) {
+            "❌ Échec du lancement du minuteur : ${e.message}"
+        }
+    }
+
+    private fun formatDuration(totalSeconds: Int): String {
+        val h = totalSeconds / 3600
+        val m = (totalSeconds % 3600) / 60
+        val s = totalSeconds % 60
+        val parts = mutableListOf<String>()
+        if (h > 0) parts.add("${h}h")
+        if (m > 0) parts.add("${m}min")
+        if (s > 0 || parts.isEmpty()) parts.add("${s}s")
+        return parts.joinToString(" ")
     }
 }
