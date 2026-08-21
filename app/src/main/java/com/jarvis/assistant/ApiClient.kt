@@ -681,7 +681,23 @@ object ApiClient {
      *  expirer côté téléphone (le serveur Ollama pilote le téléchargement, pas la connexion), donc
      *  en cas de timeout ici, dis à l'utilisateur de vérifier avec ollama_list_models un peu plus
      *  tard plutôt que de conclure à un échec. */
-    suspend fun pullOllamaModel(context: Context, name: String): String = withContext(Dispatchers.IO) {
+    // BUG RÉEL CORRIGÉ (signalement utilisateur : "en permanence sur téléchargement") : avec
+    // stream=false, Ollama ne renvoie STRICTEMENT AUCUN octet tant que le modèle entier n'est
+    // pas fini de télécharger côté serveur -- pour un gros modèle (dolphin-mixtral fait ~26 Go),
+    // la requête HTTP restait donc silencieuse plusieurs dizaines de minutes, sans AUCUN moyen
+    // de savoir si ça avançait ou si c'était figé, avant d'expirer au bout de 10 min côté
+    // téléphone (souvent AVANT la fin réelle du téléchargement). stream=true fait l'inverse :
+    // Ollama envoie une ligne JSON de progression (status/completed/total) à intervalles
+    // réguliers pendant tout le téléchargement -- onProgress permet à l'appelant (bouton
+    // Réglages) d'afficher un vrai pourcentage en direct, et readTimeout ne s'applique plus
+    // qu'ENTRE deux lignes de progression (quelques secondes normalement), pas sur la durée
+    // totale du téléchargement -- beaucoup plus robuste pour un gros fichier sur une connexion
+    // lente.
+    suspend fun pullOllamaModel(
+        context: Context,
+        name: String,
+        onProgress: ((String) -> Unit)? = null
+    ): String = withContext(Dispatchers.IO) {
         val host = Prefs.getOllamaHost(context).trim()
             .removePrefix("https://").removePrefix("http://").trimEnd('/')
         if (host.isBlank()) {
@@ -692,25 +708,48 @@ object ApiClient {
         try {
             val pullClient = OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(600, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .build()
-            val body = JSONObject().put("name", name).put("stream", false).toString().toRequestBody(JSON)
+            val body = JSONObject().put("name", name).put("stream", true).toString().toRequestBody(JSON)
             val request = Request.Builder().url("http://$host:$port/api/pull").post(body).build()
             pullClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     return@withContext "❌ Échec du téléchargement de « $name » (HTTP ${response.code}) : ${response.body?.string()?.take(200)}"
                 }
-                val bodyStr = response.body?.string() ?: "{}"
-                val status = JSONObject(bodyStr).optString("status", "")
-                if (status.contains("error", ignoreCase = true)) {
-                    "❌ Ollama a refusé « $name » : $status — vérifie le nom exact sur ollama.com/library."
+                val source = response.body?.source()
+                    ?: return@withContext "❌ Réponse vide du serveur Ollama."
+                var lastStatus = ""
+                var lastError: String? = null
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    if (line.isBlank()) continue
+                    val obj = try { JSONObject(line) } catch (_: Exception) { continue }
+                    if (obj.has("error")) {
+                        lastError = obj.optString("error", "erreur inconnue")
+                        continue
+                    }
+                    val status = obj.optString("status", "")
+                    if (status.isBlank()) continue
+                    lastStatus = status
+                    val total = obj.optLong("total", 0L)
+                    val completed = obj.optLong("completed", 0L)
+                    val progressText = if (total > 0) {
+                        val pct = (completed * 100 / total)
+                        "⏳ « $name » : $status — $pct % (${"%.1f".format(completed / 1_000_000_000.0)}/${"%.1f".format(total / 1_000_000_000.0)} Go)"
+                    } else {
+                        "⏳ « $name » : $status"
+                    }
+                    onProgress?.invoke(progressText)
+                }
+                if (lastError != null) {
+                    "❌ Ollama a refusé « $name » : $lastError — vérifie le nom exact sur ollama.com/library."
                 } else {
-                    "✅ Modèle « $name » téléchargé et prêt sur le serveur Ollama. Utilise-le comme modèle principal ou de secours (Réglages → Local → Ollama)."
+                    "✅ Modèle « $name » téléchargé et prêt sur le serveur Ollama (dernier statut : $lastStatus). Utilise-le comme modèle principal ou de secours (Réglages → Local → Ollama)."
                 }
             }
         } catch (e: java.net.SocketTimeoutException) {
-            "⏳ Le téléchargement de « $name » prend plus de 10 minutes et a expiré côté téléphone — le serveur Ollama continue probablement en arrière-plan. Vérifie dans une minute avec ollama_list_models."
+            "⏳ Aucune progression reçue depuis plus de 2 minutes pour « $name » — le serveur Ollama continue peut-être en arrière-plan, ou la connexion a été coupée. Vérifie avec ollama_list_models."
         } catch (e: Exception) {
             "❌ Injoignable à $host:$port : ${e.javaClass.simpleName} — ${e.message}."
         }

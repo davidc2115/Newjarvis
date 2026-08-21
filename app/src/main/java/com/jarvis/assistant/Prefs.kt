@@ -891,11 +891,11 @@ object Prefs {
     // tant que rien n'était tapé à la main, donc AUCUNE rotation de modèle ne se produisait
     // par défaut). Mélange volontaire de tailles/familles pour maximiser les chances qu'AU
     // MOINS un modèle soit déjà installé sur le serveur Ollama de l'utilisateur (un modèle non
-    // installé échoue juste silencieusement, ApiClient passe au suivant) ; dolphin-mixtral
+    // installé échoue juste silencieusement, ApiClient passe au suivant) ; dolphin-llama3
     // inclus car demandé explicitement (modèle non censuré). N'a AUCUN effet tant que
     // l'utilisateur n'a pas activé Ollama en mode Automatique (isOllamaAutoEnabled).
     private val DEFAULT_OLLAMA_FALLBACK_MODELS = listOf(
-        "llama3.1:8b", "qwen2.5:7b", "mistral", "dolphin-mixtral"
+        "llama3.1:8b", "qwen2.5:7b", "mistral", "dolphin-llama3"
     )
 
     fun getOllamaFallbackModels(context: Context): List<String> {

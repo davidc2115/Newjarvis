@@ -642,9 +642,16 @@ class SettingsActivity : AppCompatActivity() {
             Prefs.saveOllamaHost(this, hostInput.text.toString())
             Prefs.saveOllamaPort(this, portInput.text.toString())
             installDolphinButton.isEnabled = false
-            statusText.text = "⏳ Téléchargement de dolphin-mixtral lancé sur le serveur Ollama… peut prendre plusieurs minutes."
+            // dolphin-llama3 (~4.7 Go, base Llama 3 8B) au lieu de dolphin-mixtral (~26 Go,
+            // base Mixtral 8x7B) -- signalement utilisateur : "en permanence sur
+            // téléchargement" avec l'ancien modèle, beaucoup trop volumineux pour une
+            // connexion/du matériel de Freebox typique. dolphin-llama3 reste bien un modèle
+            // Dolphin non censuré, juste une variante nettement plus légère et réaliste ici.
+            statusText.text = "⏳ Connexion au serveur Ollama…"
             CoroutineScope(Dispatchers.Main).launch {
-                val result = ApiClient.pullOllamaModel(this@SettingsActivity, "dolphin-mixtral")
+                val result = ApiClient.pullOllamaModel(this@SettingsActivity, "dolphin-llama3") { progress ->
+                    runOnUiThread { statusText.text = progress }
+                }
                 statusText.text = result
                 installDolphinButton.isEnabled = true
             }
