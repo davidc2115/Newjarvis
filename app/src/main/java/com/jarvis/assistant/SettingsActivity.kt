@@ -230,9 +230,18 @@ class SettingsActivity : AppCompatActivity() {
                 // Sauvegarde immédiate du choix, quelle que soit la page où l'utilisateur
                 // navigue ensuite — évite de perdre la sélection en changeant d'onglet
                 // sans être passé par le bouton ENREGISTRER de l'onglet Config.
-                // Exception : Ollama/Custom nécessitent une URL saisie manuellement,
-                // donc on attend le clic explicite sur ENREGISTRER pour ceux-là.
-                if (provider != Provider.OLLAMA && provider != Provider.CUSTOM) {
+                // BUG RÉEL CORRIGÉ (signalement utilisateur : "même message d'erreur avec et
+                // sans Ollama, même en réglant uniquement sur IA locale Ollama") : Ollama était
+                // auparavant EXCLU de cette sauvegarde immédiate ("nécessite une URL saisie
+                // manuellement" — raison devenue fausse depuis qu'Ollama a ses propres champs
+                // dédiés host/port dans l'onglet Local, indépendants de baseUrlInput). Résultat
+                // concret : choisir "IA locale sur PC (Ollama)" dans ce menu ne changeait RIEN
+                // tant que l'utilisateur ne cliquait pas EN PLUS sur ENREGISTRER — Prefs.getProvider
+                // restait sur le fournisseur précédent (souvent Automatique), donc dispatchToProvider
+                // continuait de passer par sendAuto() et son repli Pollinations, quoi que le menu
+                // affiche visuellement. Seul Custom garde l'exception (URL à saisir avant que la
+                // sauvegarde ait un sens).
+                if (provider != Provider.CUSTOM) {
                     Prefs.save(
                         this@SettingsActivity,
                         provider,
@@ -240,6 +249,11 @@ class SettingsActivity : AppCompatActivity() {
                         modelInput.text.toString().trim(),
                         apiKeyInput.text.toString().trim()
                     )
+                    Toast.makeText(
+                        this@SettingsActivity,
+                        "✅ IA active : ${provider.displayName}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}

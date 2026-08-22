@@ -62,8 +62,18 @@ Java_com_jarvis_assistant_NativeLlama_loadModel(JNIEnv* env, jobject /* this */,
     }
 
     llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 2048;
-    ctx_params.n_batch = 2048;
+    // BUG RÉEL CORRIGÉ (signalement utilisateur : "quand je télécharge une IA locale comme
+    // Qwen, la conversation est trop longue pour le modèle local") : n_ctx=2048 rendait
+    // l'échec SYSTÉMATIQUE et immédiat, dès le premier message -- le seul prompt système de
+    // JARVIS (ApiClient.SYSTEM_PROMPT, ~6700 tokens) dépasse déjà 2048 tokens à lui seul, avant
+    // même d'ajouter l'historique de conversation. Ce n'était donc pas "la conversation devient
+    // trop longue avec le temps" mais un plafond trop bas pour fonctionner ne serait-ce qu'une
+    // fois. 4096 laisse une vraie marge pour un prompt système allégé (voir LOCAL_SYSTEM_PROMPT
+    // dans ApiClient.kt, utilisé spécifiquement par sendLocal()) + plusieurs tours de
+    // conversation, tout en restant raisonnable en RAM pour un modèle quantifié 1-4B sur
+    // téléphone (le cache KV grandit avec n_ctx).
+    ctx_params.n_ctx = 4096;
+    ctx_params.n_batch = 512;
     unsigned int hw = std::thread::hardware_concurrency();
     int n_threads = hw > 0 ? std::min<unsigned int>(hw, 6) : 4;
     ctx_params.n_threads = n_threads;
