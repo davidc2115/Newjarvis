@@ -109,15 +109,25 @@ ton téléphone. Réinstalle la dernière version depuis GitHub Actions.
 
         return try {
             if (loadedGgufPath != modelPath) {
-                val ok = NativeLlama.loadModel(modelPath)
+                // loadModelSafe (pas loadModel) : vrai timeout, voir le commentaire détaillé
+                // dans NativeLlama.kt -- withTimeoutOrNull côté ApiClient.sendLocal ne pouvait
+                // pas interrompre cet appel JNI bloquant (signalement utilisateur : le blocage
+                // sur "réfléchit" persistait malgré ce délai).
+                val ok = NativeLlama.loadModelSafe(modelPath)
                 if (!ok) {
-                    return "❌ Échec du chargement du modèle .gguf. Vérifie qu'il s'agit bien " +
-                        "d'un fichier GGUF valide et que le téléphone a assez de mémoire libre."
+                    return "❌ Échec du chargement du modèle .gguf (ou délai dépassé). Vérifie qu'il " +
+                        "s'agit bien d'un fichier GGUF valide et que le téléphone a assez de mémoire libre."
                 }
                 loadedGgufPath = modelPath
             }
-            val result = NativeLlama.generate(prompt, 512)
-            if (result.startsWith("[ERREUR]")) result.removePrefix("[ERREUR]").trim() else result
+            val result = NativeLlama.generateSafe(prompt, 512)
+            // BUG RÉEL CORRIGÉ : cette ligne effaçait le marqueur d'erreur "[ERREUR]" sans le
+            // remplacer par "❌" -- ApiClient.sendLocal décide s'il faut basculer sur un autre
+            // modèle local enregistré (rotation, voir Prefs.getLocalModelsRegistry) uniquement
+            // via result.startsWith("❌") ; un vrai échec natif (timeout, décodage impossible...)
+            // finissait donc affiché tel quel comme si c'était la RÉPONSE de l'IA, sans jamais
+            // déclencher la bascule vers un autre modèle de secours.
+            if (result.startsWith("[ERREUR]")) "❌ " + result.removePrefix("[ERREUR]").trim() else result
         } catch (e: Exception) {
             "❌ Erreur du moteur local : ${e.message}"
         }
