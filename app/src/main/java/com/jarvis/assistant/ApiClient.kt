@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -746,9 +747,22 @@ object ApiClient {
             .filter { it != modelPath }
         val pathsToTry = listOf(modelPath) + otherPaths
 
+        // Demande utilisateur ("même Llama 1B très long à répondre voire ne répond pas") :
+        // avant ce correctif, un appel natif (JNI, donc bloquant et non annulable côté Kotlin)
+        // anormalement lent laissait l'écran bloqué sur "JARVIS réfléchit…" indéfiniment, sans
+        // aucun message d'erreur ni possibilité de réessayer -- exactement ce qui a été signalé.
+        // 90s par modèle : largement suffisant pour un modèle 1-3B correctement chargé en RAM,
+        // mais permet de rendre la main à l'utilisateur avec un message clair si le téléphone est
+        // en train de souffrir d'un souci système (swap vers le "RAM boost" par le stockage,
+        // voir le commentaire sur use_mlock dans jarvis_llama_jni.cpp) plutôt que de rester figé.
         var lastResult = ""
         for (path in pathsToTry) {
-            val result = LocalLlmManager.generate(context, path, prompt)
+            val result = withTimeoutOrNull(90_000) {
+                LocalLlmManager.generate(context, path, prompt)
+            } ?: "❌ Le modèle local met trop de temps à répondre (plus de 90s). Cause probable : " +
+                "mémoire insuffisante ou fonction d'extension de RAM par le stockage (RAM Plus / " +
+                "mémoire virtuelle) qui ralentit fortement l'IA locale -- essaie de la désactiver " +
+                "dans les réglages RAM du téléphone, ou choisis un modèle plus petit."
             lastResult = result
             if (!result.startsWith("❌")) {
                 return result
