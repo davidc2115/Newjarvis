@@ -872,7 +872,14 @@ class SettingsActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             setOnClickListener {
-                startDownload(entry.url, entry.format, useToken = entry.needsHfToken)
+                // Modèles ONNX Runtime GenAI réels (Phi-3.5 mini / Phi-3 mini demandés par
+                // l'utilisateur) : plusieurs fichiers obligatoires (poids + config + tokenizer),
+                // jamais un seul fichier autonome comme GGUF/.task -- voir entry.multiFiles.
+                if (!entry.multiFiles.isNullOrEmpty()) {
+                    startMultiFileDownload(entry, useToken = entry.needsHfToken)
+                } else {
+                    startDownload(entry.url, entry.format, useToken = entry.needsHfToken)
+                }
             }
         }
         card.addView(btnDownload)
@@ -940,8 +947,16 @@ class SettingsActivity : AppCompatActivity() {
                                 updateSdModelLabel()
                                 Toast.makeText(this@SettingsActivity, "Modèle Stable Diffusion enregistré ✅", Toast.LENGTH_SHORT).show()
                             } else {
-                                // Activer automatiquement le mode local
-                                val targetProvider = if (format == LocalLlmManager.LocalModelFormat.TASK) Provider.ON_DEVICE else Provider.LOCAL_GGUF
+                                // Activer automatiquement le mode local -- BUG RÉEL CORRIGÉ : ONNX
+                                // retombait sur Provider.LOCAL_GGUF (seul TASK avait un cas dédié),
+                                // alors que Provider.LOCAL_ONNX existe déjà comme entrée séparée ;
+                                // sans conséquence tant qu'aucun modèle ONNX n'était au catalogue,
+                                // mais désormais réel avec Phi-3.5/Phi-3 mini ajoutés ci-dessous.
+                                val targetProvider = when (format) {
+                                    LocalLlmManager.LocalModelFormat.TASK -> Provider.ON_DEVICE
+                                    LocalLlmManager.LocalModelFormat.ONNX -> Provider.LOCAL_ONNX
+                                    else -> Provider.LOCAL_GGUF
+                                }
                                 selectedProvider = targetProvider
                                 providerSpinner.setSelection(Provider.entries.indexOf(targetProvider))
                                 Prefs.save(this@SettingsActivity, targetProvider, "", "", "")
@@ -949,6 +964,46 @@ class SettingsActivity : AppCompatActivity() {
                                 updateLocalModelLabel()
                                 Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
                             }
+                        }
+                        is ModelDownloader.Progress.Error -> {
+                            isDownloading = false
+                            downloadProgressText.text = ""
+                            Toast.makeText(this@SettingsActivity, progress.message, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Téléchargement multi-fichiers (modèles ONNX Runtime GenAI réels : poids .onnx +
+     *  .onnx.data + config/tokenizer dans un même dossier -- voir ModelDownloader.downloadMultiFile
+     *  et le commentaire sur ModelEntry.multiFiles). Réutilise isDownloading/downloadProgressText
+     *  comme startDownload ci-dessus pour un comportement UI identique. */
+    private fun startMultiFileDownload(entry: ModelDownloader.ModelEntry, useToken: Boolean) {
+        if (isDownloading) {
+            Toast.makeText(this, "Un téléchargement est déjà en cours…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val hfToken = if (useToken) hfTokenInput.text.toString().trim() else ""
+        isDownloading = true
+        downloadProgressText.text = "⬇ Démarrage du téléchargement (${entry.multiFiles?.size ?: 0} fichiers)…"
+
+        CoroutineScope(Dispatchers.Main).launch {
+            ModelDownloader.downloadMultiFile(this@SettingsActivity, entry, hfToken) { progress ->
+                runOnUiThread {
+                    when (progress) {
+                        is ModelDownloader.Progress.Percent -> downloadProgressText.text = "⬇ Téléchargement… ${progress.value}%"
+                        is ModelDownloader.Progress.Done -> {
+                            isDownloading = false
+                            downloadProgressText.text = "✅ Modèle téléchargé et actif sur le téléphone !"
+
+                            selectedProvider = Provider.LOCAL_ONNX
+                            providerSpinner.setSelection(Provider.entries.indexOf(Provider.LOCAL_ONNX))
+                            Prefs.save(this@SettingsActivity, Provider.LOCAL_ONNX, "", "", "")
+
+                            updateLocalModelLabel()
+                            Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
                         }
                         is ModelDownloader.Progress.Error -> {
                             isDownloading = false
@@ -1033,13 +1088,23 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    /** Taille récursive -- BUG RÉEL CORRIGÉ : File.length() sur un DOSSIER (modèles ONNX,
+     *  téléchargés en plusieurs fichiers depuis ModelDownloader.downloadMultiFile) renvoie
+     *  toujours 0 en Java/Android, contrairement à un fichier unique (GGUF/.task) -- affichait
+     *  systématiquement "~0 Mo" pour tout modèle ONNX. */
+    private fun folderOrFileSizeBytes(file: File): Long {
+        if (!file.exists()) return 0L
+        if (file.isFile) return file.length()
+        return file.listFiles()?.sumOf { folderOrFileSizeBytes(it) } ?: 0L
+    }
+
     private fun updateLocalModelLabel() {
         val path = Prefs.getLocalModelPath(this)
         localModelPathText.text = if (path.isBlank()) {
             "Modèle actif : Aucun"
         } else {
             val file = File(path)
-            val sizeMb = if (file.exists()) file.length() / (1024 * 1024) else 0
+            val sizeMb = folderOrFileSizeBytes(file) / (1024 * 1024)
             "Modèle actif sur l'appareil : ${file.name} (${selectedProvider.displayName}, ~${sizeMb} Mo)"
         }
     }
@@ -1055,7 +1120,10 @@ class SettingsActivity : AppCompatActivity() {
             .setMessage("${File(path).name} sera effacé du téléphone. Tu pourras le retélécharger plus tard si besoin.")
             .setPositiveButton("Supprimer") { _, _ ->
                 LocalLlmManager.unload()
-                File(path).delete()
+                // BUG RÉEL CORRIGÉ : File.delete() ne supprime jamais un dossier NON VIDE (modèles
+                // ONNX multi-fichiers) -- échouait silencieusement, laissant le dossier et ses
+                // fichiers sur le disque malgré le message "Modèle supprimé".
+                File(path).deleteRecursively()
                 Prefs.saveLocalModelPath(this, "")
                 updateLocalModelLabel()
                 Toast.makeText(this, "🗑️ Modèle supprimé.", Toast.LENGTH_SHORT).show()
