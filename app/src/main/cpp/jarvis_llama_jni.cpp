@@ -78,6 +78,12 @@ Java_com_jarvis_assistant_NativeLlama_loadModel(JNIEnv* env, jobject /* this */,
     int n_threads = hw > 0 ? std::min<unsigned int>(hw, 6) : 4;
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = n_threads;
+    // Demande utilisateur ("modèles ultra rapides") : flash attention réduit le temps de calcul
+    // de l'attention et l'usage mémoire du cache KV, sans perte de précision (contrairement à
+    // type_k/type_v qui quantifient le cache KV lui-même -- non activé ici, risque de précision).
+    // Champ confirmé présent à la version de llama.cpp épinglée dans build.yml (tag b4753,
+    // llama_context_params::flash_attn, [EXPERIMENTAL] mais stable en usage CPU mobile courant).
+    ctx_params.flash_attn = true;
 
     g_ctx = llama_init_from_model(g_model, ctx_params);
     if (g_ctx == nullptr) {

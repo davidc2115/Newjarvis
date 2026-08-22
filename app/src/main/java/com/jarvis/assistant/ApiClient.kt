@@ -724,6 +724,12 @@ object ApiClient {
 
     // ─── Modèle local sur l'appareil ──────────────────────────────────────────
 
+    /** Demande utilisateur ("rotation entre les modèles") : si le modèle local ACTIF échoue
+     *  (LocalLlmManager.generate renvoie un message d'erreur préfixé "❌", jamais d'exception --
+     *  voir buildErrorMessage), on retente automatiquement avec les autres modèles déjà
+     *  téléchargés et enregistrés dans Prefs.getLocalModelsRegistry, dans l'ordre où ils ont été
+     *  téléchargés, avant d'abandonner -- même principe que la rotation de secours déjà en place
+     *  pour Ollama (modelsToTry dans sendOpenAiWithRotation). */
     private suspend fun sendLocal(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val modelPath = Prefs.getLocalModelPath(context)
         if (modelPath.isBlank()) {
@@ -734,7 +740,21 @@ object ApiClient {
         // native (2048, désormais 4096 tokens), provoquant un échec garanti dès le premier
         // message ("la conversation est trop longue pour le modèle local").
         val prompt = buildPromptFromHistory(history, LOCAL_SYSTEM_PROMPT, maxTurns = 3)
-        return LocalLlmManager.generate(context, modelPath, prompt)
+
+        val otherPaths = Prefs.getLocalModelsRegistry(context)
+            .map { it.path }
+            .filter { it != modelPath }
+        val pathsToTry = listOf(modelPath) + otherPaths
+
+        var lastResult = ""
+        for (path in pathsToTry) {
+            val result = LocalLlmManager.generate(context, path, prompt)
+            lastResult = result
+            if (!result.startsWith("❌")) {
+                return result
+            }
+        }
+        return lastResult
     }
 
     private fun buildPromptFromHistory(history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT, maxTurns: Int = 8): String {

@@ -328,6 +328,53 @@ object Prefs {
         prefs(context).edit().putString(KEY_LOCAL_MODEL_FORMAT, format).apply()
     }
 
+    // ─── Registre des modèles locaux téléchargés (demande utilisateur : "encoche sur les
+    // modèles locaux téléchargés" + "rotation entre les modèles") ────────────────────────
+    // Jusqu'ici un SEUL modèle local pouvait exister à la fois : chaque téléchargement
+    // écrasait le fichier précédent (toujours "local_model.<ext>"), donc impossible d'avoir
+    // plusieurs modèles installés en même temps, impossible de savoir dans l'écran de
+    // téléchargement lesquels étaient déjà présents, et impossible de basculer sur un autre
+    // modèle si le modèle actif échoue. Ce registre (JSON, indépendant du fichier physique)
+    // retient CHAQUE modèle téléchargé (chemin, format, libellé) -- getLocalModelPath/
+    // getLocalModelFormat ci-dessus restent le modèle "actif" (essayé en premier), les autres
+    // servent de repli automatique (voir ApiClient.sendLocal).
+    data class LocalModelRegistryEntry(val path: String, val format: String, val label: String)
+
+    private const val KEY_LOCAL_MODELS_REGISTRY = "local_models_registry"
+
+    fun getLocalModelsRegistry(context: Context): List<LocalModelRegistryEntry> {
+        val json = prefs(context).getString(KEY_LOCAL_MODELS_REGISTRY, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).mapNotNull {
+                val o = arr.getJSONObject(it)
+                val path = o.optString("path")
+                if (path.isBlank() || !java.io.File(path).exists()) return@mapNotNull null
+                LocalModelRegistryEntry(path, o.optString("format"), o.optString("label"))
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** Ajoute (ou met à jour si déjà présent au même chemin) une entrée du registre. */
+    fun addLocalModelToRegistry(context: Context, path: String, format: String, label: String) {
+        val current = getLocalModelsRegistry(context).filter { it.path != path }
+        val updated = current + LocalModelRegistryEntry(path, format, label)
+        val arr = JSONArray()
+        updated.forEach {
+            arr.put(JSONObject().put("path", it.path).put("format", it.format).put("label", it.label))
+        }
+        prefs(context).edit().putString(KEY_LOCAL_MODELS_REGISTRY, arr.toString()).apply()
+    }
+
+    fun removeLocalModelFromRegistry(context: Context, path: String) {
+        val updated = getLocalModelsRegistry(context).filter { it.path != path }
+        val arr = JSONArray()
+        updated.forEach {
+            arr.put(JSONObject().put("path", it.path).put("format", it.format).put("label", it.label))
+        }
+        prefs(context).edit().putString(KEY_LOCAL_MODELS_REGISTRY, arr.toString()).apply()
+    }
+
     // ─── UI / Style ───────────────────────────────────────────────────────────
 
     fun getAccentColor(context: Context): Int =

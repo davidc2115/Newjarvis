@@ -28,6 +28,7 @@ import java.io.FileOutputStream
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var providerSpinner: Spinner
+    private lateinit var modelCardsContainer: LinearLayout
     private lateinit var tabCloud: TextView
     private lateinit var tabApiKeys: TextView
     private lateinit var tabLocal: TextView
@@ -396,7 +397,7 @@ class SettingsActivity : AppCompatActivity() {
         val downloadCustomButton = findViewById<TextView>(R.id.downloadCustomButton)
         val saveButton           = findViewById<TextView>(R.id.saveButton)
         val saveApiKeysButton    = findViewById<TextView>(R.id.saveApiKeysButton)
-        val modelCardsContainer  = findViewById<LinearLayout>(R.id.modelCardsContainer)
+        modelCardsContainer         = findViewById(R.id.modelCardsContainer)
         val wakeWordInput        = findViewById<EditText>(R.id.wakeWordInput)
         val toggleWakeWordButton = findViewById<TextView>(R.id.toggleWakeWordButton)
         val requestBatteryExemptionButton = findViewById<TextView>(R.id.requestBatteryExemptionButton)
@@ -435,10 +436,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         // ── Cartes dynamiques de modèles ──────────────────────────────────────
-        modelCardsContainer.removeAllViews()
-        ModelDownloader.MODEL_CATALOG.forEachIndexed { index, entry ->
-            buildModelCard(modelCardsContainer, entry, index)
-        }
+        rebuildModelCatalogUI()
 
         // ── Import fichier local ───────────────────────────────────────────────
         pickModelButton.setOnClickListener { pickModelLauncher.launch(arrayOf("*/*")) }
@@ -460,7 +458,18 @@ class SettingsActivity : AppCompatActivity() {
                     url.endsWith(".onnx", ignoreCase = true) -> LocalLlmManager.LocalModelFormat.ONNX
                     else -> LocalLlmManager.LocalModelFormat.TASK
                 }
-                startDownload(url, format, useToken = true)
+                val slug = url.substringAfterLast('/').substringBefore('?').ifBlank { "custom" }
+                    .replace(Regex("[^A-Za-z0-9_.-]"), "_").take(60)
+                val customEntry = ModelDownloader.ModelEntry(
+                    key = "custom_$slug",
+                    label = "Modèle personnalisé ($slug)",
+                    url = url,
+                    pageUrl = url,
+                    format = format,
+                    sizeHint = "?",
+                    needsHfToken = true
+                )
+                startDownload(customEntry, useToken = true)
             }
         }
 
@@ -804,7 +813,13 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** Crée une carte visuelle pour un modèle du catalogue. */
+    /** Crée une carte visuelle pour un modèle du catalogue.
+     *
+     *  Demande utilisateur ("encoche sur les modèles locaux téléchargés") : chaque carte
+     *  indique maintenant si CE modèle précis a déjà été téléchargé (comparaison par
+     *  ModelEntry.key, stable, dans Prefs.getLocalModelsRegistry -- voir le commentaire sur
+     *  ModelDownloader.download) et lequel est actuellement actif (Prefs.getLocalModelPath),
+     *  avec un bouton pour re-basculer l'actif sur un modèle déjà téléchargé sans re-télécharger. */
     private fun buildModelCard(container: LinearLayout, entry: ModelDownloader.ModelEntry, index: Int) {
         val dp = resources.displayMetrics.density
 
@@ -817,6 +832,10 @@ class SettingsActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).also { it.bottomMargin = (12 * dp).toInt() }
         }
+
+        val registryEntry = Prefs.getLocalModelsRegistry(this).firstOrNull { it.path.contains("_${entry.key}.") }
+        val isDownloaded = registryEntry != null
+        val isActive = isDownloaded && registryEntry!!.path == Prefs.getLocalModelPath(this)
 
         // Nom du modèle + taille
         val titleRow = LinearLayout(this).apply {
@@ -847,6 +866,18 @@ class SettingsActivity : AppCompatActivity() {
         }
         card.addView(descText)
 
+        // Coche "déjà téléchargé" / "actif" -- demande utilisateur explicite.
+        if (isDownloaded) {
+            val badge = TextView(this).apply {
+                text = if (isActive) "✅ Téléchargé — modèle actif en ce moment" else "✅ Téléchargé (non actif)"
+                setTextColor(getColor(R.color.cyan_accent))
+                textSize = 11f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(0, 0, 0, (8 * dp).toInt())
+            }
+            card.addView(badge)
+        }
+
         // Badge "Jeton HF requis"
         if (entry.needsHfToken) {
             val badge = TextView(this).apply {
@@ -858,33 +889,72 @@ class SettingsActivity : AppCompatActivity() {
             card.addView(badge)
         }
 
-        // Bouton télécharger
-        val btnDownload = TextView(this).apply {
-            text = "⬇ TÉLÉCHARGER SUR LE TÉLÉPHONE"
-            setTextColor(getColor(R.color.background_dark))
-            textSize = 12f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = android.view.Gravity.CENTER
-            background = getDrawable(R.drawable.bg_mic_button)
-            setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            setOnClickListener {
-                // Modèles ONNX Runtime GenAI réels (Phi-3.5 mini / Phi-3 mini demandés par
-                // l'utilisateur) : plusieurs fichiers obligatoires (poids + config + tokenizer),
-                // jamais un seul fichier autonome comme GGUF/.task -- voir entry.multiFiles.
-                if (!entry.multiFiles.isNullOrEmpty()) {
-                    startMultiFileDownload(entry, useToken = entry.needsHfToken)
-                } else {
-                    startDownload(entry.url, entry.format, useToken = entry.needsHfToken)
+        val buttonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+
+        if (isDownloaded && !isActive) {
+            // Déjà sur le téléphone : proposer de le réactiver directement, sans retélécharger.
+            val btnActivate = TextView(this).apply {
+                text = "⭐ UTILISER CE MODÈLE"
+                setTextColor(getColor(R.color.background_dark))
+                textSize = 12f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+                background = getDrawable(R.drawable.bg_mic_button)
+                setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener {
+                    activateLocalModel(registryEntry!!.path, entry.format)
                 }
             }
+            buttonRow.addView(btnActivate)
+        } else {
+            // Bouton télécharger (ou re-télécharger si déjà présent)
+            val btnDownload = TextView(this).apply {
+                text = if (isDownloaded) "🔁 RE-TÉLÉCHARGER" else "⬇ TÉLÉCHARGER SUR LE TÉLÉPHONE"
+                setTextColor(getColor(R.color.background_dark))
+                textSize = 12f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+                background = getDrawable(R.drawable.bg_mic_button)
+                setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener {
+                    startDownload(entry, useToken = entry.needsHfToken)
+                }
+            }
+            buttonRow.addView(btnDownload)
         }
-        card.addView(btnDownload)
+        card.addView(buttonRow)
 
         container.addView(card)
+    }
+
+    /** Réactive un modèle DÉJÀ téléchargé (registre) comme modèle local actif, sans retélécharger
+     *  ni retoucher au fichier -- voir la coche "téléchargé/actif" dans buildModelCard. */
+    private fun activateLocalModel(path: String, format: LocalLlmManager.LocalModelFormat) {
+        Prefs.saveLocalModelPath(this, path)
+        Prefs.saveLocalModelFormat(this, format.name)
+        LocalLlmManager.unload()
+        val targetProvider = when (format) {
+            LocalLlmManager.LocalModelFormat.TASK -> Provider.ON_DEVICE
+            LocalLlmManager.LocalModelFormat.ONNX -> Provider.LOCAL_ONNX
+            else -> Provider.LOCAL_GGUF
+        }
+        selectedProvider = targetProvider
+        providerSpinner.setSelection(Provider.entries.indexOf(targetProvider))
+        Prefs.save(this, targetProvider, "", "", "")
+        updateLocalModelLabel()
+        rebuildModelCatalogUI()
+        Toast.makeText(this, "✅ Modèle activé : ${File(path).name}", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Reconstruit les cartes du catalogue -- nécessaire après un téléchargement ou une
+     *  activation pour que la coche "téléchargé/actif" se mette à jour immédiatement. */
+    private fun rebuildModelCatalogUI() {
+        modelCardsContainer.removeAllViews()
+        ModelDownloader.MODEL_CATALOG.forEachIndexed { index, entry ->
+            buildModelCard(modelCardsContainer, entry, index)
+        }
     }
 
 
@@ -925,17 +995,22 @@ class SettingsActivity : AppCompatActivity() {
         LinearSnapHelper().attachToRecyclerView(orbStyleCarousel)
     }
 
-    private fun startDownload(url: String, format: LocalLlmManager.LocalModelFormat, useToken: Boolean) {
+    /** Démarre le téléchargement d'une entrée du catalogue (ou d'une entrée personnalisée
+     *  construite depuis une URL, voir downloadCustomButton). Depuis la refonte GGUF, chaque
+     *  ModelEntry porte son propre fichier de destination unique (ModelDownloader.download,
+     *  clé "key") : plusieurs modèles peuvent donc coexister sur le téléphone, d'où
+     *  rebuildModelCatalogUI() en fin de téléchargement pour rafraîchir la coche téléchargé/actif. */
+    private fun startDownload(entry: ModelDownloader.ModelEntry, useToken: Boolean) {
         if (isDownloading) {
             Toast.makeText(this, "Un téléchargement est déjà en cours…", Toast.LENGTH_SHORT).show()
             return
         }
         val hfToken = if (useToken) hfTokenInput.text.toString().trim() else ""
         isDownloading = true
-        downloadProgressText.text = "⬇ Démarrage du téléchargement…"
+        downloadProgressText.text = "⬇ Démarrage du téléchargement — ${entry.label}…"
 
         CoroutineScope(Dispatchers.Main).launch {
-            ModelDownloader.download(this@SettingsActivity, url, hfToken, format) { progress ->
+            ModelDownloader.download(this@SettingsActivity, entry, hfToken) { progress ->
                 runOnUiThread {
                     when (progress) {
                         is ModelDownloader.Progress.Percent -> downloadProgressText.text = "⬇ Téléchargement… ${progress.value}%"
@@ -943,16 +1018,14 @@ class SettingsActivity : AppCompatActivity() {
                             isDownloading = false
                             downloadProgressText.text = "✅ Modèle téléchargé et actif sur le téléphone !"
 
-                            if (format == LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION) {
+                            if (entry.format == LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION) {
                                 updateSdModelLabel()
                                 Toast.makeText(this@SettingsActivity, "Modèle Stable Diffusion enregistré ✅", Toast.LENGTH_SHORT).show()
                             } else {
                                 // Activer automatiquement le mode local -- BUG RÉEL CORRIGÉ : ONNX
                                 // retombait sur Provider.LOCAL_GGUF (seul TASK avait un cas dédié),
-                                // alors que Provider.LOCAL_ONNX existe déjà comme entrée séparée ;
-                                // sans conséquence tant qu'aucun modèle ONNX n'était au catalogue,
-                                // mais désormais réel avec Phi-3.5/Phi-3 mini ajoutés ci-dessous.
-                                val targetProvider = when (format) {
+                                // alors que Provider.LOCAL_ONNX existe déjà comme entrée séparée.
+                                val targetProvider = when (entry.format) {
                                     LocalLlmManager.LocalModelFormat.TASK -> Provider.ON_DEVICE
                                     LocalLlmManager.LocalModelFormat.ONNX -> Provider.LOCAL_ONNX
                                     else -> Provider.LOCAL_GGUF
@@ -964,46 +1037,7 @@ class SettingsActivity : AppCompatActivity() {
                                 updateLocalModelLabel()
                                 Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
                             }
-                        }
-                        is ModelDownloader.Progress.Error -> {
-                            isDownloading = false
-                            downloadProgressText.text = ""
-                            Toast.makeText(this@SettingsActivity, progress.message, Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /** Téléchargement multi-fichiers (modèles ONNX Runtime GenAI réels : poids .onnx +
-     *  .onnx.data + config/tokenizer dans un même dossier -- voir ModelDownloader.downloadMultiFile
-     *  et le commentaire sur ModelEntry.multiFiles). Réutilise isDownloading/downloadProgressText
-     *  comme startDownload ci-dessus pour un comportement UI identique. */
-    private fun startMultiFileDownload(entry: ModelDownloader.ModelEntry, useToken: Boolean) {
-        if (isDownloading) {
-            Toast.makeText(this, "Un téléchargement est déjà en cours…", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val hfToken = if (useToken) hfTokenInput.text.toString().trim() else ""
-        isDownloading = true
-        downloadProgressText.text = "⬇ Démarrage du téléchargement (${entry.multiFiles?.size ?: 0} fichiers)…"
-
-        CoroutineScope(Dispatchers.Main).launch {
-            ModelDownloader.downloadMultiFile(this@SettingsActivity, entry, hfToken) { progress ->
-                runOnUiThread {
-                    when (progress) {
-                        is ModelDownloader.Progress.Percent -> downloadProgressText.text = "⬇ Téléchargement… ${progress.value}%"
-                        is ModelDownloader.Progress.Done -> {
-                            isDownloading = false
-                            downloadProgressText.text = "✅ Modèle téléchargé et actif sur le téléphone !"
-
-                            selectedProvider = Provider.LOCAL_ONNX
-                            providerSpinner.setSelection(Provider.entries.indexOf(Provider.LOCAL_ONNX))
-                            Prefs.save(this@SettingsActivity, Provider.LOCAL_ONNX, "", "", "")
-
-                            updateLocalModelLabel()
-                            Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
+                            rebuildModelCatalogUI()
                         }
                         is ModelDownloader.Progress.Error -> {
                             isDownloading = false
@@ -1088,10 +1122,10 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** Taille récursive -- BUG RÉEL CORRIGÉ : File.length() sur un DOSSIER (modèles ONNX,
-     *  téléchargés en plusieurs fichiers depuis ModelDownloader.downloadMultiFile) renvoie
-     *  toujours 0 en Java/Android, contrairement à un fichier unique (GGUF/.task) -- affichait
-     *  systématiquement "~0 Mo" pour tout modèle ONNX. */
+    /** Taille récursive -- BUG RÉEL CORRIGÉ : File.length() sur un DOSSIER renvoie toujours 0
+     *  en Java/Android, contrairement à un fichier unique (GGUF/.task) -- affichait
+     *  systématiquement "~0 Mo" pour tout modèle stocké en dossier. Généraliste, conservé même
+     *  après le retour à des modèles GGUF (fichiers uniques) pour rester robuste. */
     private fun folderOrFileSizeBytes(file: File): Long {
         if (!file.exists()) return 0L
         if (file.isFile) return file.length()
