@@ -769,16 +769,24 @@ object ApiClient {
         // Signalement utilisateur répété ("même erreur avec et sans Ollama, même en réglant
         // uniquement sur IA locale Ollama") causé par une désynchronisation invisible entre
         // ce qui était affiché dans le menu déroulant et Prefs.getProvider() réellement utilisé
-        // par dispatchToProvider() -- toujours afficher le fournisseur RÉELLEMENT actif en
-        // premier, pour qu'un décalage de ce genre soit visible immédiatement au lieu de rester
-        // invisible.
+        // par dispatchToProvider() -- toujours afficher le fournisseur RÉELLEMENT actif, pour
+        // qu'un décalage de ce genre soit visible immédiatement au lieu de rester invisible.
+        // BUG RÉEL CORRIGÉ (signalement utilisateur : "j'ai deux fois Ollama dans le test des
+        // clés, une croix rouge et une coche verte") : cette ligne était D'ABORD ajoutée AVANT
+        // le préfixe ✅/❌ -- ApiKeyTestController.testOllama() dépend de status.startsWith("✅")
+        // pour décider vert/rouge, donc le préfixe n'étant plus en toute première position, le
+        // test passait TOUJOURS en échec (croix rouge) même quand Ollama répondait bien, et le
+        // texte "✅ Ollama joignable..." qui suivait plus loin dans la même chaîne (avec ses
+        // propres retours à la ligne) donnait l'impression visuelle d'une deuxième entrée verte
+        // séparée. Le préfixe ✅/❌ doit rester en tout premier caractère : cette ligne est donc
+        // maintenant ajoutée en SUFFIXE, jamais en préfixe.
         val activeProvider = Prefs.getProvider(context)
-        val activeLine = "🎛️ Fournisseur IA actif en ce moment : ${activeProvider.displayName}\n" +
-            "(vérifiable/modifiable dans ⚙ Réglages → Config)\n\n"
+        val activeLine = "\n\n🎛️ Fournisseur IA actif en ce moment : ${activeProvider.displayName} " +
+            "(vérifiable/modifiable dans ⚙ Réglages → Config)"
         val host = Prefs.getOllamaHost(context).trim()
             .removePrefix("https://").removePrefix("http://").trimEnd('/')
         if (host.isBlank()) {
-            return@withContext activeLine + "❌ Aucune adresse Ollama configurée — Réglages → Local → « IA locale réseau (Ollama) »."
+            return@withContext "❌ Aucune adresse Ollama configurée — Réglages → Local → « IA locale réseau (Ollama) »." + activeLine
         }
         val port = Prefs.getOllamaPort(context).trim().ifBlank { "11434" }
         try {
@@ -788,7 +796,7 @@ object ApiClient {
                 .build()
             val request = Request.Builder().url("http://$host:$port/api/tags").get().build()
             testClient.newCall(request).execute().use { response ->
-                activeLine + if (!response.isSuccessful) {
+                (if (!response.isSuccessful) {
                     "❌ Ollama a répondu mais avec une erreur (HTTP ${response.code})."
                 } else {
                     val body = response.body?.string() ?: "{}"
@@ -796,10 +804,10 @@ object ApiClient {
                     val count = models?.length() ?: 0
                     val autoNote = if (Prefs.isOllamaAutoEnabled(context)) " Essayé en premier en mode Automatique." else " Pas encore activé en mode Automatique."
                     "✅ Ollama joignable à $host:$port — $count modèle(s) installé(s).$autoNote"
-                }
+                }) + activeLine
             }
         } catch (e: Exception) {
-            activeLine + "❌ Injoignable à $host:$port : ${e.javaClass.simpleName} — ${e.message}."
+            "❌ Injoignable à $host:$port : ${e.javaClass.simpleName} — ${e.message}." + activeLine
         }
     }
 
