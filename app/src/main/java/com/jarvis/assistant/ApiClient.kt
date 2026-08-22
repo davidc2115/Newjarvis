@@ -628,11 +628,8 @@ object ApiClient {
         // premier, pour qu'un décalage de ce genre soit visible immédiatement au lieu de rester
         // invisible.
         val activeProvider = Prefs.getProvider(context)
-        val activeLine = "🎛️ Fournisseur IA actif en ce moment : ${activeProvider.displayName}
-" +
-            "(vérifiable/modifiable dans ⚙ Réglages → Config)
-
-"
+        val activeLine = "🎛️ Fournisseur IA actif en ce moment : ${activeProvider.displayName}\n" +
+            "(vérifiable/modifiable dans ⚙ Réglages → Config)\n\n"
         val host = Prefs.getOllamaHost(context).trim()
             .removePrefix("https://").removePrefix("http://").trimEnd('/')
         if (host.isBlank()) {
