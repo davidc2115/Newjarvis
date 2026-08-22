@@ -113,14 +113,20 @@ ton téléphone. Réinstalle la dernière version depuis GitHub Actions.
                 // dans NativeLlama.kt -- withTimeoutOrNull côté ApiClient.sendLocal ne pouvait
                 // pas interrompre cet appel JNI bloquant (signalement utilisateur : le blocage
                 // sur "réfléchit" persistait malgré ce délai).
+                DiagnosticsLog.log(context, "LocalLLM", "Chargement du modèle : $modelPath")
                 val ok = NativeLlama.loadModelSafe(modelPath)
+                DiagnosticsLog.log(context, "LocalLLM", "Chargement terminé, succès=$ok")
                 if (!ok) {
                     return "❌ Échec du chargement du modèle .gguf (ou délai dépassé). Vérifie qu'il " +
                         "s'agit bien d'un fichier GGUF valide et que le téléphone a assez de mémoire libre."
                 }
                 loadedGgufPath = modelPath
+            } else {
+                DiagnosticsLog.log(context, "LocalLLM", "Modèle déjà chargé, génération directe")
             }
+            DiagnosticsLog.log(context, "LocalLLM", "Génération démarrée (prompt=${prompt.length} car.)")
             val result = NativeLlama.generateSafe(prompt, 512)
+            DiagnosticsLog.log(context, "LocalLLM", "Génération terminée : ${result.take(80)}")
             // BUG RÉEL CORRIGÉ : cette ligne effaçait le marqueur d'erreur "[ERREUR]" sans le
             // remplacer par "❌" -- ApiClient.sendLocal décide s'il faut basculer sur un autre
             // modèle local enregistré (rotation, voir Prefs.getLocalModelsRegistry) uniquement

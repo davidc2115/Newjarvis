@@ -299,6 +299,11 @@ object ApiClient {
                     "voir une note en entier ou d'en chercher d'autres) :\n" + vaultContext
             }
 
+            // Diagnostic (voir commentaire détaillé dans sendLocal) : confirme que la recherche
+            // vault ci-dessus s'est bien terminée et que le dispatch vers le fournisseur actif
+            // démarre réellement, pour distinguer un blocage "avant" (vault/mémoire) d'un
+            // blocage "dans" l'appel IA lui-même.
+            DiagnosticsLog.log(context, "Chat", "Dispatch vers ${provider.name}")
             val rawResponse = try {
                 dispatchToProvider(context, provider, history, effectiveSystemPrompt)
             } catch (e: Exception) {
@@ -754,9 +759,21 @@ object ApiClient {
         // en arrière-plan) vit maintenant directement dans NativeLlama.generateSafe/loadModelSafe
         // -- LocalLlmManager.generate() renvoie donc déjà un "❌ ..." après son propre délai
         // interne, sans qu'un timeout supplémentaire soit nécessaire ici.
+        //
+        // Signalement utilisateur : le blocage persiste malgré CE timeout natif -- ce qui
+        // signifierait que le point de blocage réel est ailleurs (avant même d'atteindre ce
+        // code), ce qu'aucun log actuel ne permettait de confirmer. Traces horodatées via
+        // DiagnosticsLog (consultables avec l'action read_debug_logs, MÊME pendant qu'une
+        // précédente tentative est encore bloquée en arrière-plan) pour localiser précisément
+        // l'étape en cause au prochain test, plutôt que de continuer à deviner à l'aveugle.
+        DiagnosticsLog.log(context, "Local", "sendLocal: début, ${pathsToTry.size} modèle(s) à essayer")
         var lastResult = ""
         for (path in pathsToTry) {
+            val startedAt = System.currentTimeMillis()
+            DiagnosticsLog.log(context, "Local", "Tentative sur ${java.io.File(path).name}")
             val result = LocalLlmManager.generate(context, path, prompt)
+            val elapsedSec = (System.currentTimeMillis() - startedAt) / 1000
+            DiagnosticsLog.log(context, "Local", "Retour après ${elapsedSec}s : ${result.take(100)}")
             lastResult = result
             if (!result.startsWith("❌")) {
                 return result
