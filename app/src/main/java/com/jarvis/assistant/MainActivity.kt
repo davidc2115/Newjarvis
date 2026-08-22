@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var adapter: ChatAdapter
     private lateinit var messageInput: EditText
     private lateinit var statusText: TextView
+    private lateinit var ramUsageText: TextView
     private lateinit var pendingImageBar: View
     private lateinit var pendingImageThumbnail: ImageView
     private var removePendingImageButtonRef: TextView? = null
@@ -113,10 +114,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         BottomNav.setup(this, NavDestination.CHAT)
         EdgeToEdgeHelper.applyTopInset(findViewById(R.id.headerRow))
         EdgeToEdgeHelper.applyBottomInset(findViewById(R.id.bottomNavRoot))
+        // BUG RÉEL CORRIGÉ (signalement utilisateur : bouton "supprimer toutes les
+        // conversations" masqué par la barre/gestes de navigation Android) : le tiroir de
+        // conversations n'avait jamais reçu d'inset bas, contrairement au contenu principal
+        // ci-dessus -- son dernier élément (le bouton de suppression) se retrouvait donc
+        // littéralement sous la barre système en bord à bord (Android 15+).
+        EdgeToEdgeHelper.applyBottomInset(findViewById(R.id.conversationDrawer))
 
         recyclerView = findViewById(R.id.recyclerView)
         messageInput = findViewById(R.id.messageInput)
         statusText = findViewById(R.id.statusText)
+        ramUsageText = findViewById(R.id.ramUsageText)
+        refreshRamUsage()
         pendingImageBar = findViewById(R.id.pendingImageBar)
         pendingImageThumbnail = findViewById(R.id.pendingImageThumbnail)
         drawerLayout = findViewById(R.id.drawerLayout)
@@ -136,6 +145,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 while (true) {
                     delay(20_000)
                     refreshChatOrbGraph()
+                }
+            }
+        }
+        // Compteur RAM (demande utilisateur) : rafraîchi plus souvent que le graphe (5s) car
+        // la RAM peut varier rapidement, notamment pendant le chargement/l'inférence d'un
+        // modèle IA local -- voir RamMonitor.kt.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    refreshRamUsage()
+                    delay(5_000)
                 }
             }
         }
@@ -535,6 +555,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
      * conversation, exactement comme dans VoiceModeActivity. Travail disque en IO, mise à
      * jour de la vue sur Main.
      */
+    /** Compteur RAM utilisée (demande utilisateur) -- voir RamMonitor.kt. Colore le texte en
+     *  orange/alerte quand le système signale un niveau de mémoire bas, pour rendre visible
+     *  d'un coup d'œil qu'un modèle IA local pourrait échouer faute de RAM disponible. */
+    private fun refreshRamUsage() {
+        ramUsageText.text = RamMonitor.usageLabel(this)
+        ramUsageText.setTextColor(
+            if (RamMonitor.isLowMemory(this)) getColor(R.color.error_glow) else getColor(R.color.text_secondary)
+        )
+    }
+
     private fun refreshChatOrbGraph() {
         lifecycleScope.launch {
             val graph = try {

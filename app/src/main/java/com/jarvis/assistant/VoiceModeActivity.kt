@@ -17,8 +17,10 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -37,6 +39,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var statusText: TextView
     private lateinit var transcriptText: TextView
     private lateinit var imageOverlay: ImageView
+    private lateinit var ramUsageText: TextView
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
@@ -59,6 +62,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         statusText = findViewById(R.id.voiceStatusText)
         transcriptText = findViewById(R.id.voiceTranscriptText)
         imageOverlay = findViewById(R.id.voiceImageOverlay)
+        ramUsageText = findViewById(R.id.ramUsageText)
         val closeButton = findViewById<TextView>(R.id.closeVoiceButton)
         val micToggle = findViewById<TextView>(R.id.micToggleButton)
 
@@ -81,6 +85,16 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         CoroutineScope(Dispatchers.Main).launch {
             val graph = withContext(Dispatchers.IO) { ObsidianController.buildVaultGraph(this@VoiceModeActivity) }
             orbView.graphData = graph
+        }
+        // Compteur RAM (demande utilisateur, voir aussi MainActivity.refreshRamUsage) -- boucle
+        // liée à lifecycleScope, donc automatiquement annulée à la fermeture de cet écran
+        // (fermer le mode vocal détruit toujours cette Activity, pas de fuite possible).
+        refreshRamUsage()
+        lifecycleScope.launch {
+            while (true) {
+                delay(5_000)
+                refreshRamUsage()
+            }
         }
         tts = TextToSpeech(this, this)
 
@@ -280,6 +294,12 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val result = tts?.setLanguage(Locale.FRENCH)
             ttsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
         }
+    }
+
+    /** Compteur RAM (demande utilisateur) -- voir RamMonitor.kt et le même mécanisme dans
+     *  MainActivity.refreshRamUsage(). */
+    private fun refreshRamUsage() {
+        ramUsageText.text = RamMonitor.usageLabel(this)
     }
 
     override fun onDestroy() {

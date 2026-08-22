@@ -73,6 +73,18 @@
                     android:textSize="12sp"
                     android:fontFamily="monospace" />
 
+                <!-- Compteur RAM utilisée (demande utilisateur), voir RamMonitor.kt et
+                     MainActivity.refreshRamUsage(), rafraîchi périodiquement pendant que
+                     l'écran de chat est au premier plan. -->
+                <TextView
+                    android:id="@+id/ramUsageText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="RAM : —"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp"
+                    android:fontFamily="monospace" />
+
             </LinearLayout>
 
             <!-- Un seul bouton vers le menu complet (domotique, création IA, Obsidian,
@@ -204,7 +216,14 @@
     </FrameLayout>
 
     <!-- ── Tiroir latéral rétractable : historique des conversations ──────────── -->
+    <!-- BUG RÉEL CORRIGÉ (signalement utilisateur : bouton "supprimer toutes les
+         conversations" masqué par la barre/gestes de navigation Android) : contrairement à
+         headerRow/bottomNavRoot dans le contenu principal, ce tiroir n'avait jamais reçu
+         d'inset bas (voir EdgeToEdgeHelper.applyBottomInset dans MainActivity.onCreate) :
+         en bord à bord (Android 15+), son dernier élément se retrouvait donc littéralement
+         sous la barre système. -->
     <LinearLayout
+        android:id="@+id/conversationDrawer"
         android:layout_width="280dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
