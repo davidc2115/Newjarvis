@@ -55,7 +55,7 @@ object NativeLlama {
     }
 
     /** Comme loadModel(), mais avec un vrai timeout (voir commentaire ci-dessus). */
-    fun loadModelSafe(modelPath: String, timeoutMs: Long = 60_000): Boolean {
+    fun loadModelSafe(modelPath: String, timeoutMs: Long = 90_000): Boolean {
         val future: Future<Boolean> = executor.submit(Callable { loadModel(modelPath) })
         return try {
             future.get(timeoutMs, TimeUnit.MILLISECONDS)

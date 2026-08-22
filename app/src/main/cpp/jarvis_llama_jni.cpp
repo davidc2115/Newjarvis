@@ -55,21 +55,20 @@ Java_com_jarvis_assistant_NativeLlama_loadModel(JNIEnv* env, jobject /* this */,
 
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = 0; // CPU uniquement sur mobile
-    // Signalement utilisateur ("6,2 Go de RAM libre mais très lent/ne répond pas", téléphone
-    // avec "RAM boost via le stockage" = fonctionnalité Android d'extension mémoire qui swap de
-    // la RAM sur le stockage interne, bien plus lent) : le modèle est chargé via mmap (comportement
-    // par défaut, use_mmap déjà true), donc ses pages ne comptent PAS comme "RAM utilisée" tant
-    // qu'elles ne sont pas touchées -- et Android peut les évincer très agressivement sous
-    // pression mémoire globale (elles sont "gratuites" à récupérer, il suffit de les relire
-    // depuis le fichier). Or l'inférence relit la QUASI-TOTALITÉ des poids à CHAQUE token généré
-    // : la moindre page évincée doit être rechargée depuis le stockage (encore plus lent si elle
-    // a été swapée vers la partition d'extension RAM), ce qui peut faire chuter le débit de
-    // plusieurs ordres de grandeur et donner l'impression que JARVIS "ne répond pas". use_mlock
-    // demande au noyau de verrouiller les pages du modèle en RAM réelle pour empêcher cette
-    // éviction. Si le téléphone limite RLIMIT_MEMLOCK (cas courant sans root), l'appel échoue
-    // simplement avec un avertissement dans les logs et l'app continue normalement (vérifié dans
-    // les sources de llama.cpp, llama-mmap.cpp::raw_lock -- aucun risque de plantage).
-    model_params.use_mlock = true;
+    // REVERT (signalement utilisateur : après ce changement, le chargement du modèle ÉCHOUE
+    // ou dépasse le délai -- "❌ Échec du chargement du modèle .gguf (ou délai dépassé)" observé
+    // en conditions réelles, alors que le chargement fonctionnait avant). use_mlock avait été
+    // activé pour empêcher l'éviction des pages du modèle en cours d'inférence (RAM Plus /
+    // extension mémoire par le stockage) -- mais l'utilisateur a désactivé cette extension RAM
+    // ET le blocage persistait, prouvant que ce n'était pas la cause réelle de SES symptômes.
+    // En pratique, mlock() force la lecture SYNCHRONE de tout le fichier modèle (~1-2 Go) en RAM
+    // dès le chargement (au lieu du mmap paresseux par défaut, qui ne lit que ce qui est
+    // réellement utilisé, au fur et à mesure) -- sur un stockage de téléphone plus lent qu'un
+    // SSD, ce chargement d'un coup peut largement dépasser le délai de chargement, ce qui
+    // explique précisément l'échec observé. Revient donc au comportement par défaut (mmap
+    // paresseux, use_mlock=false) : chargement rapide, quitte à ce que des pages soient
+    // éventuellement rechargées à la demande pendant la génération si nécessaire.
+    // model_params.use_mlock = true; -- désactivé, voir commentaire ci-dessus.
 
     LOGI("Chargement du modèle : %s", pathStr.c_str());
     g_model = llama_model_load_from_file(pathStr.c_str(), model_params);
