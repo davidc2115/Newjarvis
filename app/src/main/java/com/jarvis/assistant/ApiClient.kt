@@ -33,9 +33,14 @@ object ApiClient {
     // échoue aussi si aucune clé cloud n'est configurée (cas exact de cet utilisateur, qui compte
     // sur Ollama comme IA "illimitée" sans clé payante) → "Toutes les IA ont échoué" alors
     // qu'Ollama aurait fini par répondre correctement avec plus de temps.
+    // readTimeout porté à 300s (était 180s) : signalement utilisateur "toutes les IA échouent
+    // même en réglant sur IA locale Ollama uniquement" -- un CPU de Freebox/NAS sans GPU dédié
+    // peut légitimement mettre plusieurs minutes à générer une réponse complète pour un modèle
+    // 7-8B avec un system prompt de plusieurs milliers de tokens, largement au-delà de ce
+    // qu'accepterait une API cloud rapide (d'où readTimeout distinct du client cloud ci-dessus).
     private val ollamaClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
+        .readTimeout(300, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 

@@ -652,6 +652,27 @@ class SettingsActivity : AppCompatActivity() {
                 val result = ApiClient.pullOllamaModel(this@SettingsActivity, "dolphin-llama3") { progress ->
                     runOnUiThread { statusText.text = progress }
                 }
+                // BUG RÉEL CORRIGÉ (signalement utilisateur : "Dolphin s'est bien installé, en
+                // revanche toujours toutes les IA échouent") : le téléchargement réussi sur le
+                // SERVEUR Ollama ne suffisait pas -- encore fallait-il que "dolphin-llama3"
+                // figure dans la liste de modèles de secours (Prefs.getOllamaFallbackModels)
+                // pour être réellement essayé par la rotation (ApiClient.sendOpenAiWithRotation).
+                // Si l'utilisateur avait DÉJÀ personnalisé ce champ (même vide au moment de la
+                // sauvegarde), la valeur par défaut (voir Prefs.DEFAULT_OLLAMA_FALLBACK_MODELS)
+                // ne s'applique jamais -- un modèle fraîchement installé pouvait donc rester
+                // invisible pour la rotation malgré un téléchargement réussi. On l'ajoute
+                // maintenant explicitement à la liste dès l'installation, et le champ affiché
+                // est resynchronisé pour que ce soit visible immédiatement.
+                if (result.startsWith("✅")) {
+                    val current = fallbackModelsInput.text.toString().split(",", "\n", ";")
+                        .map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+                    if ("dolphin-llama3" !in current) {
+                        current.add("dolphin-llama3")
+                        val updated = current.joinToString(", ")
+                        fallbackModelsInput.setText(updated)
+                        Prefs.saveOllamaFallbackModels(this@SettingsActivity, updated)
+                    }
+                }
                 statusText.text = result
                 installDolphinButton.isEnabled = true
             }
