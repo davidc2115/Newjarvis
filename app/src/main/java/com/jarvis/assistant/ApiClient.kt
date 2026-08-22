@@ -856,6 +856,36 @@ object ApiClient {
         }
     }
 
+    /** Demande utilisateur ("mets une détection automatique des modèles pour éviter les
+     *  erreurs de modèle") : interroge /api/tags (endpoint natif Ollama, PAS le compatible
+     *  OpenAI utilisé pour le chat) pour connaître les noms RÉELLEMENT installés sur un hôte
+     *  donné, avant même de tenter une génération -- voir son usage dans sendOpenAiWithRotation
+     *  ci-dessous. Renvoie null (jamais une liste vide en cas d'erreur) si l'hôte est injoignable
+     *  ou répond mal, pour que l'appelant puisse distinguer "détection impossible, retente
+     *  quand même à l'aveugle comme avant" de "détection réussie, mais 0 modèle installé".
+     *  Timeout volontairement court : sert uniquement à éviter des tentatives de génération
+     *  vouées à l'échec, pas à décider si l'hôte est vivant (déjà couvert par checkOllamaStatus). */
+    private fun fetchInstalledOllamaModelNames(host: String, port: String): List<String>? {
+        return try {
+            val quickClient = OkHttpClient.Builder()
+                .connectTimeout(4, TimeUnit.SECONDS)
+                .readTimeout(4, TimeUnit.SECONDS)
+                .build()
+            val request = Request.Builder().url("http://$host:$port/api/tags").get().build()
+            quickClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val models = JSONObject(body).optJSONArray("models") ?: return null
+                (0 until models.length()).map { i ->
+                    val m = models.getJSONObject(i)
+                    m.optString("name", m.optString("model", ""))
+                }.filter { it.isNotBlank() }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Action ollama_list_models : liste RÉELLE (nom + taille) des modèles installés sur le
      *  serveur Ollama configuré — jusqu'ici seul un COMPTE était visible (checkOllamaStatus),
      *  jamais les noms, rendant impossible de demander à JARVIS "quels modèles j'ai" ou de
@@ -1038,13 +1068,44 @@ object ApiClient {
             // la Freebox vers le port Ollama pour fonctionner.
             val port = Prefs.getOllamaPort(context).trim().ifBlank { "11434" }
             val hostCandidates = buildList {
-                add("local" to ollamaBaseUrlFor(Prefs.getOllamaHost(context), port))
+                add("local" to Prefs.getOllamaHost(context))
                 val remoteHost = Prefs.getOllamaRemoteHost(context)
-                if (remoteHost.isNotBlank()) add("distant" to ollamaBaseUrlFor(remoteHost, port))
+                if (remoteHost.isNotBlank()) add("distant" to remoteHost)
             }
             var lastOllamaErr = ""
-            for ((hostLabel, candidateBaseUrl) in hostCandidates) {
-                for (m in modelsToTry) {
+            for ((hostLabel, rawHost) in hostCandidates) {
+                val candidateBaseUrl = ollamaBaseUrlFor(rawHost, port)
+                // Demande utilisateur ("détection automatique des modèles pour éviter les
+                // erreurs de modèle") : avant ce correctif, un nom de modèle mal configuré (ou
+                // simplement plus disponible sur le serveur) faisait échouer TOUTE la rotation
+                // avec une série de 404 avant, éventuellement, de tomber sur un modèle qui
+                // existe vraiment -- signalement utilisateur exact : "llama3.1 not found" alors
+                // qu'aucun des modèles configurés (llama3.1, llama3.1:8b, qwen2.5:7b, mistral)
+                // n'était installé sur son serveur, qui n'avait que dolphin-llama3 en commun.
+                // Interroge /api/tags UNE FOIS par hôte pour ne tenter que des modèles qui
+                // existent VRAIMENT, avec repli sur le premier modèle réel du serveur si aucun
+                // des modèles configurés n'y figure -- élimine les 404 à répétition. Si la
+                // détection elle-même échoue (hôte injoignable), retombe sur l'ancien
+                // comportement (tenter quand même tous les modèles configurés).
+                val installed = fetchInstalledOllamaModelNames(rawHost, port)
+                val effectiveModelsToTry = if (installed.isNullOrEmpty()) {
+                    modelsToTry
+                } else {
+                    val matched = modelsToTry.filter { configured ->
+                        installed.any { real -> real == configured || (!configured.contains(":") && real.startsWith("$configured:")) }
+                    }
+                    if (matched.isNotEmpty()) {
+                        matched
+                    } else {
+                        DiagnosticsLog.log(
+                            context, "OLLAMA-ROTATION",
+                            "Hôte $hostLabel : aucun des modèles configurés (${modelsToTry.joinToString(", ")}) " +
+                                "n'est installé parmi les ${installed.size} réels -- détection auto, utilise « ${installed.first()} »"
+                        )
+                        listOf(installed.first())
+                    }
+                }
+                for (m in effectiveModelsToTry) {
                     val result = sendOpenAiCompatible(candidateBaseUrl, m, "", history, provider, systemPrompt)
                     if (!result.startsWith("Erreur") &&
                         !result.startsWith("Connexion impossible") &&

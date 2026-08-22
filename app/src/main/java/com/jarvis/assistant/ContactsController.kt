@@ -66,6 +66,16 @@ object ContactsController {
 
     /**
      * Recherche les contacts correspondant à une requête et les retourne sous forme de texte.
+     *
+     * BUG RÉEL CORRIGÉ (signalement utilisateur : "quand je demande des contacts à JARVIS il
+     * ne trouve aucun contact") : cette recherche interrogeait Phone.CONTENT_FILTER_URI, une
+     * vue qui ne contient QUE les lignes ayant un numéro de téléphone enregistré -- un contact
+     * sans aucun numéro (email seul, fiche professionnelle incomplète, contact ajouté juste
+     * pour un libellé...) était donc invisible EN TOTALITÉ pour JARVIS, quel que soit le nom
+     * recherché. Interroge maintenant Contacts.CONTENT_FILTER_URI (la table des contacts
+     * eux-mêmes, tolérante à la casse/aux fautes comme avant) puis récupère le numéro
+     * séparément SI il existe (voir getPrimaryPhoneNumber) -- un contact sans numéro apparaît
+     * donc désormais, juste sans ligne de téléphone.
      */
     fun searchContacts(context: Context, query: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
@@ -74,44 +84,56 @@ object ContactsController {
 
         val cleanQuery = query.trim()
         val projection = arrayOf(
-            ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
-            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-            ContactsContract.CommonDataKinds.Phone.NUMBER
+            ContactsContract.Contacts._ID,
+            ContactsContract.Contacts.DISPLAY_NAME
         )
 
         val filterUri = Uri.withAppendedPath(
-            ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,
+            ContactsContract.Contacts.CONTENT_FILTER_URI,
             Uri.encode(cleanQuery)
         )
 
         return try {
-            val cursor: Cursor? = context.contentResolver.query(filterUri, projection, null, null, "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC")
+            val cursor: Cursor? = context.contentResolver.query(filterUri, projection, null, null, "${ContactsContract.Contacts.DISPLAY_NAME} ASC")
 
             cursor?.use { c ->
                 if (c.count == 0) return "👤 Aucun contact trouvé pour « $query »."
 
                 val sb = StringBuilder("👤 **Résultats de la recherche pour « $query »** :\n\n")
                 var count = 0
-                val seenNumbers = mutableSetOf<String>()
+                val seenIds = mutableSetOf<String>()
 
                 while (c.moveToNext() && count < 10) {
                     val contactId = c.getString(0) ?: ""
+                    if (contactId.isBlank() || !seenIds.add(contactId)) continue
                     val displayName = c.getString(1) ?: "Inconnu"
-                    val rawPhone = c.getString(2) ?: "Pas de numéro"
-                    val cleanPhone = rawPhone.replace(" ", "")
-
-                    if (!seenNumbers.contains(cleanPhone)) {
-                        seenNumbers.add(cleanPhone)
-                        val labels = if (contactId.isNotBlank()) getContactLabels(context, contactId) else emptyList()
-                        val labelsSuffix = if (labels.isNotEmpty()) " 🏷️ ${labels.joinToString(", ")}" else ""
-                        sb.append("${count + 1}. **$displayName** : $rawPhone$labelsSuffix\n")
-                        count++
-                    }
+                    val phone = getPrimaryPhoneNumber(context, contactId)
+                    val labels = getContactLabels(context, contactId)
+                    val labelsSuffix = if (labels.isNotEmpty()) " 🏷️ ${labels.joinToString(", ")}" else ""
+                    val phoneSuffix = if (phone != null) " : $phone" else " (aucun numéro enregistré)"
+                    sb.append("${count + 1}. **$displayName**$phoneSuffix$labelsSuffix\n")
+                    count++
                 }
                 sb.toString()
             } ?: "❌ Impossible d'effectuer la recherche dans les contacts."
         } catch (e: Exception) {
             "❌ Erreur lors de la recherche des contacts : ${e.message}"
+        }
+    }
+
+    /** Numéro principal du contact [contactId], ou null s'il n'en a aucun (voir searchContacts :
+     *  ne doit JAMAIS faire disparaître un contact de la liste, juste laisser le champ vide). */
+    private fun getPrimaryPhoneNumber(context: Context, contactId: String): String? {
+        return try {
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                arrayOf(contactId),
+                null
+            )?.use { c -> if (c.moveToFirst()) c.getString(0)?.takeIf { it.isNotBlank() } else null }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -165,24 +187,26 @@ object ContactsController {
         }
     }
 
+    /** BUG RÉEL CORRIGÉ (voir searchContacts ci-dessus, même cause) : listait via
+     *  Phone.CONTENT_URI, donc omettait tout contact sans numéro de téléphone -- passe par
+     *  Contacts.CONTENT_URI (tous les contacts) puis récupère le numéro séparément si présent. */
     fun getContactList(context: Context, count: Int = 20): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission d'accès aux contacts non accordée."
         }
 
         val projection = arrayOf(
-            ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
-            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-            ContactsContract.CommonDataKinds.Phone.NUMBER
+            ContactsContract.Contacts._ID,
+            ContactsContract.Contacts.DISPLAY_NAME
         )
 
         return try {
             val cursor: Cursor? = context.contentResolver.query(
-                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                ContactsContract.Contacts.CONTENT_URI,
                 projection,
                 null,
                 null,
-                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
+                "${ContactsContract.Contacts.DISPLAY_NAME} ASC"
             )
 
             cursor?.use { c ->
@@ -190,21 +214,18 @@ object ContactsController {
 
                 val sb = StringBuilder("👤 **Liste des contacts (${minOf(count, c.count)})** :\n\n")
                 var idx = 0
-                val seenNumbers = mutableSetOf<String>()
+                val seenIds = mutableSetOf<String>()
 
                 while (c.moveToNext() && idx < count) {
                     val contactId = c.getString(0) ?: ""
+                    if (contactId.isBlank() || !seenIds.add(contactId)) continue
                     val displayName = c.getString(1) ?: "Inconnu"
-                    val phone = c.getString(2) ?: ""
-                    val cleanPhone = phone.replace(" ", "")
-
-                    if (!seenNumbers.contains(cleanPhone)) {
-                        seenNumbers.add(cleanPhone)
-                        val labels = if (contactId.isNotBlank()) getContactLabels(context, contactId) else emptyList()
-                        val labelsSuffix = if (labels.isNotEmpty()) " 🏷️ ${labels.joinToString(", ")}" else ""
-                        sb.append("${idx + 1}. **$displayName** — $phone$labelsSuffix\n")
-                        idx++
-                    }
+                    val phone = getPrimaryPhoneNumber(context, contactId)
+                    val labels = getContactLabels(context, contactId)
+                    val labelsSuffix = if (labels.isNotEmpty()) " 🏷️ ${labels.joinToString(", ")}" else ""
+                    val phoneSuffix = phone ?: "aucun numéro"
+                    sb.append("${idx + 1}. **$displayName** — $phoneSuffix$labelsSuffix\n")
+                    idx++
                 }
                 sb.toString()
             } ?: "❌ Échec de la lecture de la liste des contacts."
@@ -279,7 +300,18 @@ object ContactsController {
         }
     }
 
-    /** Liste les contacts portant un libellé/groupe précis (recherche partielle, insensible à la casse). */
+    /** Liste les contacts portant un libellé/groupe précis (recherche partielle, insensible à la casse).
+     *
+     *  BUG RÉEL CORRIGÉ (signalement utilisateur : "il ne lit pas les libellés") : cette
+     *  fonction trouvait bien le bon groupe ET les bons contactIds via GroupMembership, mais la
+     *  toute dernière étape (récupérer le nom à afficher) interrogeait Phone.CONTENT_URI --
+     *  un contact du groupe SANS numéro de téléphone n'avait alors AUCUNE ligne dans cette
+     *  table, donc `c.moveToFirst()` échouait et ce contact était silencieusement supprimé du
+     *  résultat, malgré avoir bien le libellé demandé. Pire, si TOUS les contacts d'un libellé
+     *  manquaient de numéro (cas plausible pour des contacts filés par catégorie sans être
+     *  forcément joignables), le résultat final semblait dire "aucun contact n'a ce libellé" --
+     *  une conclusion fausse. Le nom est maintenant lu directement sur Contacts.CONTENT_URI
+     *  (garanti présent pour tout contact), le numéro reste une info optionnelle en plus. */
     fun listContactsByLabel(context: Context, label: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission d'accès aux contacts non accordée."
@@ -314,22 +346,18 @@ object ContactsController {
             val sb = StringBuilder("🏷️ **Contacts avec le libellé « $label »** :\n\n")
             var idx = 0
             for (cid in contactIds) {
-                context.contentResolver.query(
-                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                    arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
-                    "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                val name = context.contentResolver.query(
+                    ContactsContract.Contacts.CONTENT_URI,
+                    arrayOf(ContactsContract.Contacts.DISPLAY_NAME),
+                    "${ContactsContract.Contacts._ID} = ?",
                     arrayOf(cid),
                     null
-                )?.use { c ->
-                    if (c.moveToFirst()) {
-                        idx++
-                        val name = c.getString(0) ?: "Inconnu"
-                        val phone = c.getString(1) ?: ""
-                        sb.append("$idx. **$name**${if (phone.isNotBlank()) " : $phone" else ""}\n")
-                    }
-                }
+                )?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: continue
+                idx++
+                val phone = getPrimaryPhoneNumber(context, cid)
+                sb.append("$idx. **$name**${if (phone != null) " : $phone" else ""}\n")
             }
-            if (idx == 0) "📋 Aucun contact avec numéro de téléphone n'a le libellé « $label »." else sb.toString()
+            if (idx == 0) "📋 Aucun contact n'a le libellé « $label »." else sb.toString()
         } catch (e: Exception) {
             "❌ Erreur lors de la recherche par libellé : ${e.message}"
         }
