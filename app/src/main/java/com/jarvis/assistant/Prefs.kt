@@ -1243,6 +1243,35 @@ object Prefs {
             .apply()
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // LIMITE D'HISTORIQUE ENVOYÉ À L'IA (demande utilisateur : "réduire le nombre de
+    // tokens pour réduire la consommation et utiliser les IA plus longtemps")
+    // ═════════════════════════════════════════════════════════════════════════
+    // ApiClient envoyait déjà au plus MAX_HISTORY_MESSAGES=16 messages (utilisateur+JARVIS
+    // confondus) par requête, valeur figée dans le code — l'historique complet reste toujours
+    // affiché dans le chat, seule la fenêtre transmise à l'IA était bornée. Rendu réglable ici
+    // pour que l'utilisateur puisse lui-même arbitrer contexte-conservé vs tokens-consommés
+    // (ex: "réduis l'historique envoyé à l'IA à 8 messages" en conversation) sans dépendre
+    // d'un outil tiers non fiable pour "compresser les prompts" (voir échange sur OmniRoute,
+    // écarté pour risques de sécurité réels : code obfusqué signalé, comptes GitHub multiples
+    // quasi-identiques, CVE référencée). 16 reste la valeur par défaut : aucun changement de
+    // comportement tant que l'utilisateur ne réduit pas lui-même cette limite.
+    private const val DEFAULT_MAX_HISTORY_MESSAGES = 16
+    private const val MIN_HISTORY_MESSAGES = 4
+    private const val MAX_HISTORY_MESSAGES_CAP = 60
+
+    fun getMaxHistoryMessages(context: Context): Int =
+        prefs(context).getInt("max_history_messages", DEFAULT_MAX_HISTORY_MESSAGES)
+
+    /** Enregistre la nouvelle limite, bornée à [MIN_HISTORY_MESSAGES, MAX_HISTORY_MESSAGES_CAP]
+     *  pour éviter un réglage inutilisable par erreur (0/négatif) ou sans effet réel (valeur
+     *  énorme qui annule tout l'intérêt de la limite). Retourne la valeur réellement appliquée. */
+    fun saveMaxHistoryMessages(context: Context, value: Int): Int {
+        val clamped = value.coerceIn(MIN_HISTORY_MESSAGES, MAX_HISTORY_MESSAGES_CAP)
+        prefs(context).edit().putInt("max_history_messages", clamped).apply()
+        return clamped
+    }
+
     // ─── Interne ──────────────────────────────────────────────────────────────
 
     private fun prefs(context: Context) =

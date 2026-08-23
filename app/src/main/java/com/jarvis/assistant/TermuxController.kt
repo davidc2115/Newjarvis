@@ -120,6 +120,29 @@ import java.util.concurrent.TimeUnit
  * instant donné sont conservées, le reste étant libéré — réduit nettement le pic de RAM au prix
  * d'une génération plus lente, compromis approprié sur un téléphone plutôt qu'un GPU dédié.
  */
+ *
+ * CINQUIÈME CAUSE RÉELLE TROUVÉE ET CORRIGÉE (signalement utilisateur : "affiche toujours le
+ * même message pour la mémoire insuffisante, même avec au moins 9 Go de RAM libre") : deux
+ * problèmes distincts identifiés en relisant le code, PAS en devinant.
+ *   1. checkWebuiStatus() affichait "mémoire insuffisante (OOM)" comme cause présumée à CHAQUE
+ *      échec de connexion, y compris pendant les 15-40 minutes normales du tout premier
+ *      démarrage (installation PyTorch + téléchargement du modèle) où "connexion refusée" est
+ *      attendu et n'a RIEN à voir avec la RAM — d'où l'impression du même message à chaque
+ *      essai, qu'il y ait eu OOM ou non. Message réécrit pour ne plus présumer la cause : il
+ *      renvoie vers ~/jarvis_sd_install.log (seul endroit où le VRAI code de sortie du
+ *      processus, donc la vraie cause, est visible) au lieu d'accuser la RAM par défaut.
+ *   2. Le lancement de launch.py n'utilisait pas le flag officiel --use-cpu (documenté par
+ *      AUTOMATIC1111 pour l'exécution 100% CPU, en plus de --skip-torch-cuda-test) — ajouté.
+ *      Point de vigilance honnête, non résolu par du code : --lowvram/--medvram sont conçus à
+ *      l'origine pour décharger des sous-modules entre VRAM GPU et RAM CPU ; sur un appareil
+ *      100% CPU (aucun GPU/VRAM séparée), leur bénéfice mémoire réel est incertain et pourrait
+ *      être minime (voir issues communautaires similaires même sur de vrais GPU). La cause la
+ *      plus probable si l'OOM est confirmé par le log malgré 9 Go de RAM "libres" : le modèle
+ *      SD 1.5 fait ~4 Go en précision complète (fp32, requise sur CPU via --no-half pour éviter
+ *      des images noires/corrompues) — son chargement peut ponctuellement nécessiter le double
+ *      en RAM, plus l'overhead Android + Termux + Ubuntu (proot) + Python, ce qui peut dépasser
+ *      9 Go de RAM *totale* même si une bonne partie semble "libre" au repos.
+ */
 object TermuxController {
 
     data class Result(val success: Boolean, val message: String)
@@ -213,7 +236,7 @@ if [ ! -f models/Stable-diffusion/v1-5-pruned-emaonly.safetensors ]; then
 fi
 echo "=== Lancement du WebUI (1er lancement seulement : installation de PyTorch et dependances Python, peut prendre 10 a 30+ minutes) ==="
 set +e
-python3 launch.py --api --nowebui --listen --port 7860 --skip-torch-cuda-test --no-half --precision full --lowvram
+python3 launch.py --api --nowebui --listen --port 7860 --skip-torch-cuda-test --no-half --precision full --lowvram --use-cpu all
 CODE=${'$'}?
 if [ ${'$'}CODE -ne 0 ]; then
   echo "=== ARRET DU WEBUI (code sortie ${'$'}CODE), le terminal va revenir a l invite. ==="
@@ -345,15 +368,27 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
                 }
             }
         } catch (e: Exception) {
+            // BUG RÉEL CORRIGÉ (signalement utilisateur : "affiche toujours le même message pour
+            // la mémoire insuffisante, alors que j'ai au moins 9 Go de RAM libre") : ce message
+            // affirmait "mémoire insuffisante (OOM)" comme SEULE cause probable à CHAQUE échec de
+            // connexion, sans jamais vérifier si l'OOM avait réellement eu lieu — la même phrase
+            // s'affichait donc aussi bien pendant une installation encore en cours (15-40 min au
+            // premier lancement, "connexion refusée" est normal tant que ce n'est pas fini) qu'en
+            // cas de vraie erreur réseau/permission, donnant l'impression trompeuse d'un problème
+            // de RAM systématique même quand ce n'en était pas un. Le message ne présume plus la
+            // cause : il renvoie l'utilisateur vers le SEUL endroit qui dit la vérité (le log), et
+            // ne mentionne l'OOM que comme une possibilité parmi d'autres à vérifier soi-même.
             Result(
                 false,
-                "⏳ WebUI injoignable (${e.message}). Vérifie qu'il a été lancé via « Configurer Stable Diffusion » " +
-                    "et attends la fin du premier démarrage. Si le terminal Termux est revenu à l'invite de " +
-                    "commande ($) au lieu de rester bloqué sur le serveur en cours d'exécution, le processus " +
-                    "s'est arrêté — cause la plus fréquente sur téléphone : mémoire insuffisante (OOM) pendant " +
-                    "le chargement du modèle. Tape « cat ~/jarvis_sd_install.log » dans Termux et regarde les " +
-                    "toutes dernières lignes : si tu vois « ARRET DU WEBUI » avec un diagnostic OOM, ferme " +
-                    "toutes les autres applications puis relance l'installation."
+                "⏳ WebUI injoignable (${e.message}). Si l'installation vient d'être lancée, c'est normal : " +
+                    "le tout premier démarrage (installation de PyTorch + téléchargement du modèle ~4 Go) " +
+                    "peut prendre 15 à 40 minutes, pendant lesquelles le WebUI est injoignable sans que ce " +
+                    "soit une erreur. Pour connaître la VRAIE cause si ça persiste, tape dans Termux : " +
+                    "« cat ~/jarvis_sd_install.log » et regarde les toutes dernières lignes — le script y " +
+                    "écrit un diagnostic explicite (mémoire insuffisante seulement si le code sortie du " +
+                    "processus est 137/SIGKILL, sinon la cause exacte de l'arrêt). Ne suppose pas un manque " +
+                    "de RAM sans avoir vu ce diagnostic : si le terminal Termux est encore actif et affiche " +
+                    "des logs qui défilent, le WebUI est probablement juste toujours en train de démarrer."
             )
         }
     }

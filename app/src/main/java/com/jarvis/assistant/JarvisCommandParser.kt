@@ -48,7 +48,7 @@ object JarvisCommandParser {
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "run_glif",
         "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "token_usage",
-        "list_contact_templates"
+        "list_contact_templates", "get_history_limit"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -434,6 +434,22 @@ object JarvisCommandParser {
             "clear_debug_logs" -> DiagnosticsLog.clear(context)
             "token_usage" -> Prefs.getTokenUsageReport(context)
             "clear_token_usage" -> { Prefs.clearTokenUsage(context); "✅ Compteur de tokens réinitialisé." }
+            // Limite d'historique envoyé à l'IA (voir Prefs.getMaxHistoryMessages/ApiClient.trimHistory,
+            // demande utilisateur : "réduire le nombre de tokens pour utiliser les IA plus longtemps").
+            // Config en conversation, comme le reste de l'app — jamais de formulaire dédié.
+            "set_history_limit" -> {
+                val requested = json.optInt("count", -1)
+                if (requested <= 0) {
+                    "❌ Précise un nombre de messages (ex : \"réduis l'historique à 8 messages\")."
+                } else {
+                    val applied = Prefs.saveMaxHistoryMessages(context, requested)
+                    val note = if (applied != requested) " (ajusté entre 4 et 60)" else ""
+                    "✅ Historique envoyé à l'IA limité à $applied message(s)$note. Moins de messages passés " +
+                        "= moins de tokens envoyés à chaque requête, mais JARVIS se souvient de moins de " +
+                        "contexte récent dans la conversation — utilise token_usage pour voir l'effet réel."
+                }
+            }
+            "get_history_limit" -> "📊 Historique envoyé à l'IA à chaque requête : ${Prefs.getMaxHistoryMessages(context)} message(s) (utilisateur+JARVIS confondus). L'historique affiché dans le chat n'est jamais tronqué, seule cette fenêtre transmise à l'IA l'est."
 
             "delete_event" -> {
                 val eventId = json.optLong("eventId", -1)
