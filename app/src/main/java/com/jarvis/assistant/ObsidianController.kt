@@ -918,7 +918,7 @@ disant à JARVIS « retiens que... » / « oublie que... ».
     // contenu complet au tap) -- null pour les noeuds synthetiques (faits de Memoire
     // JARVIS), qui n'ont pas de fichier dedie et affichent deja tout leur contenu utile
     // dans le titre.
-    data class VaultGraphNode(val title: String, val degree: Int, val forceLabel: Boolean = false, val filePath: String? = null)
+    data class VaultGraphNode(val title: String, val degree: Int, val forceLabel: Boolean = false, val filePath: String? = null, val isFolder: Boolean = false)
     data class VaultGraph(val nodes: List<VaultGraphNode>, val edges: List<Pair<Int, Int>>)
 
     fun buildVaultGraph(context: Context, maxNodes: Int = 26): VaultGraph? {
@@ -1028,7 +1028,10 @@ disant à JARVIS « retiens que... » / « oublie que... ».
             byCategory.forEach { (category, members) ->
                 if (members.size >= 2 && category.isNotBlank() && category != root.name) {
                     val anchorIdx = nodes.size
-                    nodes.add(VaultGraphNode("📁 $category", degree = members.size, forceLabel = true))
+                    // Titre SANS emoji ici : l'icône 📁 est désormais dessinée directement sur le
+                    // nœud par OrbView/VaultGraphExplorerView (voir isFolder) — la doubler dans le
+                    // texte du libellé ferait un doublon visuel juste à côté de l'icône.
+                    nodes.add(VaultGraphNode(category, degree = members.size, forceLabel = true, isFolder = true))
                     categoryAnchorIdx[category] = anchorIdx
                     members.forEach { memberIdx -> edgesSet.add(if (anchorIdx < memberIdx) anchorIdx to memberIdx else memberIdx to anchorIdx) }
                 }

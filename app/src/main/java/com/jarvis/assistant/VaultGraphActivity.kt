@@ -2,8 +2,10 @@ package com.jarvis.assistant
 
 import android.os.Bundle
 import android.view.View
+import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 
@@ -33,10 +35,18 @@ class VaultGraphActivity : AppCompatActivity() {
         nodeContentText = findViewById(R.id.vaultGraphNodeContent)
 
         findViewById<TextView>(R.id.vaultGraphBackButton).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.vaultGraphNewFolderButton).setOnClickListener { promptCreateFolder() }
 
         explorerView.accentColor = Prefs.getAccentColor(this)
         explorerView.onNodeTapped = { node -> showNodeInfo(node) }
 
+        reloadGraph()
+    }
+
+    /** (Re)charge le graphe réel du vault et l'applique à la vue -- appelé au lancement de
+     * l'écran ET après création d'un nouveau dossier (bouton +) pour que la toile reflète
+     * immédiatement le changement, sans devoir fermer/rouvrir l'écran. */
+    private fun reloadGraph() {
         val graph = ObsidianController.buildVaultGraph(this, maxNodes = 400)
         explorerView.setGraph(graph)
 
@@ -49,9 +59,45 @@ class VaultGraphActivity : AppCompatActivity() {
         }
     }
 
+    /** Bouton + de la barre du haut : création d'un nouveau dossier directement depuis la Toile
+     * Obsidian, demande utilisateur explicite ("la possibilité de créer de nouveau dossier") en
+     * plus de la voie vocale déjà existante (obsidian_create_folder). Réutilise le contrôleur
+     * Obsidian existant (ObsidianController.createFolder), aucune nouvelle logique de fichiers. */
+    private fun promptCreateFolder() {
+        val input = EditText(this).apply {
+            hint = "Nom du dossier (ex: Projets)"
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.GRAY)
+        }
+        val padding = (20 * resources.displayMetrics.density).toInt()
+        val container = android.widget.FrameLayout(this).apply {
+            setPadding(padding, padding / 2, padding, 0)
+            addView(input)
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("📁 Nouveau dossier")
+            .setView(container)
+            .setPositiveButton("Créer") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isBlank()) {
+                    Toast.makeText(this, "Nom de dossier vide", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val result = ObsidianController.createFolder(this, name)
+                Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+                reloadGraph()
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
+    }
+
     private fun showNodeInfo(node: ObsidianController.VaultGraphNode) {
-        nodeTitleText.text = node.title
-        val kind = if (node.filePath != null) "note du vault" else "entrée de mémoire/génération"
+        nodeTitleText.text = if (node.isFolder) "📁 ${node.title}" else node.title
+        val kind = when {
+            node.isFolder -> "dossier du vault"
+            node.filePath != null -> "note du vault"
+            else -> "entrée de mémoire/génération"
+        }
         nodeMetaText.text = "🔗 ${node.degree} lien(s) · $kind"
         nodeContentText.text = if (node.filePath != null) {
             val raw = runCatching { File(node.filePath).readText() }.getOrDefault("")

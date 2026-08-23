@@ -412,7 +412,7 @@ class OrbView @JvmOverloads constructor(
     // notes plutôt qu'une sphère 3D générique.
     // ─────────────────────────────────────────────────────────────────────────
 
-    private data class WebNode(val bx: Float, val by: Float, val phase: Float, val isHub: Boolean, val title: String? = null, val showLabel: Boolean = false)
+    private data class WebNode(val bx: Float, val by: Float, val phase: Float, val isHub: Boolean, val title: String? = null, val showLabel: Boolean = false, val isFolder: Boolean = false)
 
     // Données RÉELLES du vault (notes = nœuds, [[wikilinks]] = liens) — voir
     // ObsidianController.buildVaultGraph(). Signalement utilisateur : l'ancien rendu était
@@ -472,28 +472,75 @@ class OrbView @JvmOverloads constructor(
      * correspondent exactement à ceux de [graph.nodes]/[graph.edges] (pas de ré-indexation),
      * pour que drawObsidianWeb puisse tracer les vrais liens directement par index.
      */
+    /**
+     * Disposition hiérarchique du VRAI graphe : "🧠 Cerveau" toujours au centre (degré
+     * artificiellement maximal côté ObsidianController.buildVaultGraph, donc toujours élu hub
+     * ci-dessous), chaque dossier du vault (isFolder=true, ex. "Contacts") positionné en cercle
+     * autour du Cerveau, et CHAQUE note membre de ce dossier positionnée en étoile directement
+     * autour du point de SON dossier -- demande utilisateur explicite : "mettre tous les
+     * contacts l'un à côté de l'autre... chaque lien des dossiers s'affiche en étoile autour".
+     * Les nœuds restants (notes isolées, faits de Mémoire, entrées de Génération sans dossier
+     * dédié) complètent en spirale de Fibonacci dans la bande extérieure, comme avant. Les
+     * indices du résultat correspondent exactement à ceux de [graph.nodes]/[graph.edges] (pas
+     * de ré-indexation), pour que drawObsidianWeb puisse tracer les vrais liens directement par
+     * index.
+     */
     private fun layoutFromGraph(graph: ObsidianController.VaultGraph): List<WebNode> {
         val count = graph.nodes.size
-        val order = graph.nodes.indices.sortedByDescending { graph.nodes[it].degree }
-        val goldenAngle = Math.PI * (3.0 - sqrt(5.0))
+        if (count == 0) return emptyList()
         val result = MutableList(count) { WebNode(0f, 0f, 0f, false) }
-        val labelCutoff = minOf(8, count)
-        order.forEachIndexed { rank, originalIdx ->
-            val title = graph.nodes[originalIdx].title
-            // forceLabel : faits de Mémoire JARVIS / entrées de Génération -- leur libellé EST
-            // l'information utile, donc toujours affiché même si leur "degré" (nombre de liens)
-            // les place hors du top habituel (voir VaultGraphNode.forceLabel).
-            val showLabel = rank < labelCutoff || graph.nodes[originalIdx].forceLabel
-            val phase = (rank * 0.6180339887f) % 1f * 2f * Math.PI.toFloat()
-            result[originalIdx] = if (rank == 0) {
-                WebNode(0f, 0f, phase, isHub = true, title = title, showLabel = showLabel)
-            } else {
-                val r = sqrt(rank / (count - 1f).coerceAtLeast(1f))
-                val theta = goldenAngle * rank
-                val x = (cos(theta) * r).toFloat()
-                val y = (sin(theta) * r).toFloat()
-                WebNode(x, y, phase, isHub = false, title = title, showLabel = showLabel)
+        var phaseSeed = 0
+        fun nextPhase(): Float {
+            val p = (phaseSeed * 0.6180339887f) % 1f * 2f * Math.PI.toFloat()
+            phaseSeed++
+            return p
+        }
+
+        val hubIdx = graph.nodes.indices.maxByOrNull { graph.nodes[it].degree } ?: 0
+        result[hubIdx] = WebNode(0f, 0f, nextPhase(), isHub = true, title = graph.nodes[hubIdx].title, showLabel = true)
+
+        val neighborsOf = HashMap<Int, MutableList<Int>>()
+        graph.edges.forEach { (a, b) ->
+            neighborsOf.getOrPut(a) { mutableListOf() }.add(b)
+            neighborsOf.getOrPut(b) { mutableListOf() }.add(a)
+        }
+
+        val placed = HashSet<Int>()
+        placed.add(hubIdx)
+        val folderIndices = graph.nodes.indices.filter { it != hubIdx && graph.nodes[it].isFolder }
+        val folderRadius = 0.5f
+        val memberRadius = 0.4f
+        folderIndices.forEachIndexed { fi, folderIdx ->
+            val theta = if (folderIndices.size <= 1) 0.0 else 2.0 * Math.PI * fi / folderIndices.size
+            val fx = (cos(theta) * folderRadius).toFloat()
+            val fy = (sin(theta) * folderRadius).toFloat()
+            val fNode = graph.nodes[folderIdx]
+            result[folderIdx] = WebNode(fx, fy, nextPhase(), isHub = false, title = fNode.title, showLabel = true, isFolder = true)
+            placed.add(folderIdx)
+
+            val members = (neighborsOf[folderIdx] ?: emptyList()).filter { it != hubIdx && it !in folderIndices }
+            members.forEachIndexed { mi, memberIdx ->
+                val mTheta = if (members.size <= 1) theta else 2.0 * Math.PI * mi / members.size
+                val mx = (fx + cos(mTheta) * memberRadius).toFloat()
+                val my = (fy + sin(mTheta) * memberRadius).toFloat()
+                val mNode = graph.nodes[memberIdx]
+                result[memberIdx] = WebNode(mx, my, nextPhase(), isHub = false, title = mNode.title, showLabel = mNode.forceLabel)
+                placed.add(memberIdx)
             }
+        }
+
+        val leftover = graph.nodes.indices.filter { it !in placed }
+        val order = leftover.sortedByDescending { graph.nodes[it].degree }
+        val goldenAngle = Math.PI * (3.0 - sqrt(5.0))
+        val labelCutoff = minOf(8, order.size)
+        order.forEachIndexed { rank, originalIdx ->
+            val n = graph.nodes[originalIdx]
+            val r = 0.62f + 0.38f * sqrt(rank / (order.size - 1f).coerceAtLeast(1f))
+            val theta = goldenAngle * rank
+            val x = (cos(theta) * r).toFloat()
+            val y = (sin(theta) * r).toFloat()
+            val showLabel = rank < labelCutoff || n.forceLabel
+            result[originalIdx] = WebNode(x, y, nextPhase(), isHub = false, title = n.title, showLabel = showLabel)
         }
         return result
     }
@@ -503,6 +550,14 @@ class OrbView @JvmOverloads constructor(
     private val webLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
         textSize = 22f
+    }
+
+    // Icône affichée directement SUR un nœud-dossier (isFolder) -- demande utilisateur : "les
+    // dossiers affichés avec leur icône" sur la Toile Obsidian, distinct du simple point utilisé
+    // pour une note ordinaire.
+    private val folderIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        textSize = 34f
     }
 
     // ── Habillage "cosmos / univers" du style Toile Obsidian ────────────────────────────
@@ -649,6 +704,7 @@ class OrbView @JvmOverloads constructor(
 
         screenPoints.forEachIndexed { idx, (x, y, isHub) ->
             val pulse = if (pulseSpeed > 0f) 0.7f + 0.3f * sin(t * 1.3f + x + y) else 1f
+            val node = nodes.getOrNull(idx)
             if (isHub) {
                 dotPaint.shader = RadialGradient(
                     x, y, scale * 0.16f,
@@ -658,6 +714,19 @@ class OrbView @JvmOverloads constructor(
                 )
                 canvas.drawCircle(x, y, scale * 0.16f * pulse, dotPaint)
                 dotPaint.shader = null
+            } else if (node?.isFolder == true) {
+                // Dossier (catégorie du vault, ex. "Contacts") : icône 📁 bien visible au lieu
+                // du simple point, demande utilisateur explicite ("les dossiers affichés avec
+                // leur icône"), avec un halo pour le distinguer d'une note ordinaire.
+                dotPaint.shader = RadialGradient(
+                    x, y, scale * 0.12f,
+                    intArrayOf(adjustAlpha(accentColor, 0.5f), Color.TRANSPARENT),
+                    null, Shader.TileMode.CLAMP
+                )
+                canvas.drawCircle(x, y, scale * 0.12f * pulse, dotPaint)
+                dotPaint.shader = null
+                folderIconPaint.alpha = 235
+                canvas.drawText("📁", x, y + folderIconPaint.textSize * 0.36f, folderIconPaint)
             } else {
                 dotPaint.color = accentColor
                 dotPaint.alpha = (150 * pulse).toInt().coerceIn(80, 220)
@@ -667,12 +736,12 @@ class OrbView @JvmOverloads constructor(
             // Titre de la note sous le nœud — uniquement pour les notes les plus connectées
             // (voir showLabel dans layoutFromGraph), sinon un vault de plusieurs dizaines de
             // notes deviendrait illisible sur un petit orbe.
-            val node = nodes.getOrNull(idx)
             if (node?.showLabel == true && node.title != null) {
                 webLabelPaint.color = accentColor
                 webLabelPaint.alpha = if (node.isHub) 230 else 160
                 val label = if (node.title.length > 14) node.title.take(13) + "…" else node.title
-                canvas.drawText(label, x, y + scale * 0.11f + 22f, webLabelPaint)
+                val labelOffset = if (node.isFolder) scale * 0.12f + 24f else scale * 0.11f + 22f
+                canvas.drawText(label, x, y + labelOffset, webLabelPaint)
             }
         }
     }

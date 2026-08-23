@@ -37,7 +37,7 @@ class VaultGraphExplorerView @JvmOverloads constructor(
     /** Appelé quand l'utilisateur tape sur un nœud — l'activité affiche alors son détail. */
     var onNodeTapped: ((ObsidianController.VaultGraphNode) -> Unit)? = null
 
-    private data class LaidOutNode(val node: ObsidianController.VaultGraphNode, val bx: Float, val by: Float, val isHub: Boolean)
+    private data class LaidOutNode(val node: ObsidianController.VaultGraphNode, val bx: Float, val by: Float, val isHub: Boolean, val isFolder: Boolean = false)
 
     private var graph: ObsidianController.VaultGraph? = null
     private var laidOut: List<LaidOutNode> = emptyList()
@@ -57,8 +57,11 @@ class VaultGraphExplorerView @JvmOverloads constructor(
         invalidate()
     }
 
-    /** Même disposition en spirale de Fibonacci que l'orb (les notes les plus connectées au
-     * centre), recalculée uniquement quand le graphe change. */
+    /** Même disposition hiérarchique que l'orb (voir OrbView.layoutFromGraph pour le
+     * raisonnement complet) : "🧠 Cerveau" au centre, dossiers du vault en cercle autour, chaque
+     * note membre en étoile autour du point de SON dossier, le reste (notes isolées, Mémoire,
+     * Génération) en spirale de Fibonacci dans la bande extérieure. Recalculée uniquement quand
+     * le graphe change. */
     private fun layoutGraph() {
         val g = graph
         if (g == null || g.nodes.isEmpty()) {
@@ -66,21 +69,50 @@ class VaultGraphExplorerView @JvmOverloads constructor(
             return
         }
         val count = g.nodes.size
-        val order = g.nodes.indices.sortedByDescending { g.nodes[it].degree }
-        val goldenAngle = Math.PI * (3.0 - sqrt(5.0))
         val result = MutableList<LaidOutNode?>(count) { null }
-        order.forEachIndexed { rank, originalIdx ->
-            val n = g.nodes[originalIdx]
-            result[originalIdx] = if (rank == 0) {
-                LaidOutNode(n, 0f, 0f, true)
-            } else {
-                val r = sqrt(rank / (count - 1f).coerceAtLeast(1f))
-                val theta = goldenAngle * rank
-                val x = (cos(theta) * r).toFloat()
-                val y = (sin(theta) * r).toFloat()
-                LaidOutNode(n, x, y, false)
+
+        val hubIdx = g.nodes.indices.maxByOrNull { g.nodes[it].degree } ?: 0
+        result[hubIdx] = LaidOutNode(g.nodes[hubIdx], 0f, 0f, isHub = true)
+
+        val neighborsOf = HashMap<Int, MutableList<Int>>()
+        g.edges.forEach { (a, b) ->
+            neighborsOf.getOrPut(a) { mutableListOf() }.add(b)
+            neighborsOf.getOrPut(b) { mutableListOf() }.add(a)
+        }
+
+        val placed = HashSet<Int>()
+        placed.add(hubIdx)
+        val folderIndices = g.nodes.indices.filter { it != hubIdx && g.nodes[it].isFolder }
+        val folderRadius = 0.5f
+        val memberRadius = 0.4f
+        folderIndices.forEachIndexed { fi, folderIdx ->
+            val theta = if (folderIndices.size <= 1) 0.0 else 2.0 * Math.PI * fi / folderIndices.size
+            val fx = (cos(theta) * folderRadius).toFloat()
+            val fy = (sin(theta) * folderRadius).toFloat()
+            result[folderIdx] = LaidOutNode(g.nodes[folderIdx], fx, fy, isHub = false, isFolder = true)
+            placed.add(folderIdx)
+
+            val members = (neighborsOf[folderIdx] ?: emptyList()).filter { it != hubIdx && it !in folderIndices }
+            members.forEachIndexed { mi, memberIdx ->
+                val mTheta = if (members.size <= 1) theta else 2.0 * Math.PI * mi / members.size
+                val mx = (fx + cos(mTheta) * memberRadius).toFloat()
+                val my = (fy + sin(mTheta) * memberRadius).toFloat()
+                result[memberIdx] = LaidOutNode(g.nodes[memberIdx], mx, my, isHub = false)
+                placed.add(memberIdx)
             }
         }
+
+        val leftover = g.nodes.indices.filter { it !in placed }
+        val order = leftover.sortedByDescending { g.nodes[it].degree }
+        val goldenAngle = Math.PI * (3.0 - sqrt(5.0))
+        order.forEachIndexed { rank, originalIdx ->
+            val r = 0.62f + 0.38f * sqrt(rank / (order.size - 1f).coerceAtLeast(1f))
+            val theta = goldenAngle * rank
+            val x = (cos(theta) * r).toFloat()
+            val y = (sin(theta) * r).toFloat()
+            result[originalIdx] = LaidOutNode(g.nodes[originalIdx], x, y, isHub = false)
+        }
+
         laidOut = result.filterNotNull()
         selectedLaidOutIndex = -1
     }
@@ -117,6 +149,7 @@ class VaultGraphExplorerView @JvmOverloads constructor(
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.6f }
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val folderIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val selectionRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f }
 
     private fun adjustAlpha(color: Int, factor: Float): Int {
@@ -197,6 +230,19 @@ class VaultGraphExplorerView @JvmOverloads constructor(
                 )
                 canvas.drawCircle(x, y, scale * 0.09f, nodePaint)
                 nodePaint.shader = null
+            } else if (laid.isFolder) {
+                // Dossier du vault (ex. "Contacts") : icône 📁 visible au lieu du simple point,
+                // demande utilisateur explicite ("les dossiers affichés avec leur icône").
+                nodePaint.shader = RadialGradient(
+                    x, y, scale * 0.07f,
+                    intArrayOf(adjustAlpha(accentColor, 0.5f), Color.TRANSPARENT),
+                    null, Shader.TileMode.CLAMP
+                )
+                canvas.drawCircle(x, y, scale * 0.07f, nodePaint)
+                nodePaint.shader = null
+                folderIconPaint.textSize = (26f + 12f * scaleFactor).coerceIn(26f, 56f)
+                folderIconPaint.alpha = if (isSelected) 255 else 235
+                canvas.drawText("📁", x, y + folderIconPaint.textSize * 0.32f, folderIconPaint)
             } else {
                 nodePaint.color = accentColor
                 nodePaint.alpha = if (isSelected) 255 else 170
@@ -204,9 +250,14 @@ class VaultGraphExplorerView @JvmOverloads constructor(
             }
 
             if (isSelected) {
+                val selectionRadius = when {
+                    laid.isHub -> scale * 0.09f
+                    laid.isFolder -> scale * 0.07f
+                    else -> 5f
+                }
                 selectionRingPaint.color = Color.WHITE
                 selectionRingPaint.alpha = 220
-                canvas.drawCircle(x, y, (if (laid.isHub) scale * 0.09f else 5f) + 10f, selectionRingPaint)
+                canvas.drawCircle(x, y, selectionRadius + 10f, selectionRingPaint)
             }
 
             val showLabel = laid.node.forceLabel || (rankOf[idx] ?: Int.MAX_VALUE) < labelCutoff || isSelected
@@ -216,7 +267,10 @@ class VaultGraphExplorerView @JvmOverloads constructor(
                 labelPaint.alpha = if (laid.isHub || isSelected) 235 else 175
                 val maxChars = if (scaleFactor > 1.6f) 40 else 16
                 val label = if (laid.node.title.length > maxChars) laid.node.title.take(maxChars - 1) + "…" else laid.node.title
-                canvas.drawText(label, x, y + 16f + labelPaint.textSize * 0.9f, labelPaint)
+                // Décalage plus grand sous un dossier : son icône 📁 (plus grande qu'un simple
+                // point) déborderait sinon sur le libellé.
+                val extraOffset = if (laid.isFolder) folderIconPaint.textSize * 0.6f else 0f
+                canvas.drawText(label, x, y + 16f + labelPaint.textSize * 0.9f + extraOffset, labelPaint)
             }
         }
     }
