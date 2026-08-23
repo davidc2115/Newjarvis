@@ -320,8 +320,8 @@ object ContactsController {
      *  visuellement "exact"). */
     private fun normalizeLabel(s: String): String =
         java.text.Normalizer.normalize(s.lowercase().trim(), java.text.Normalizer.Form.NFD)
-            .replace(Regex("\p{Mn}+"), "")
-            .replace(Regex("\s+"), " ")
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("\\s+"), " ")
 
     fun listContactsByLabel(context: Context, label: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
