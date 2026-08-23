@@ -58,6 +58,24 @@ object ApiClient {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    // BUG RÉEL CORRIGÉ (signalement utilisateur : "même avec toutes les IA, les réponses sont
+    // très très lentes" -- alors qu'aucune IA cloud n'a de raison d'être lente) : en mode
+    // Automatique, sendAuto() essaie Ollama EN PREMIER avant tout fournisseur cloud (voir plus
+    // bas) -- avec le client ollamaClient ci-dessus (readTimeout 300s, volontairement patient
+    // pour un usage EXPLICITE d'Ollama, où il n'y a aucun repli possible), un serveur Ollama
+    // indisponible/surchargé/hôte à 2 Go de RAM qui rame pour charger un modèle pouvait donc
+    // faire attendre l'utilisateur jusqu'à 5 MINUTES, sur CHAQUE message, avant même de tenter
+    // le premier fournisseur cloud -- alors qu'un vrai repli cloud existe et répond en
+    // quelques secondes. Ce client dédié, utilisé UNIQUEMENT lors de la tentative automatique
+    // (voir fastFailForAutoMode plus bas), échoue rapidement pour laisser la main au cloud --
+    // la patience de 300s reste réservée au cas où l'utilisateur a délibérément choisi Ollama
+    // comme SEUL fournisseur (aucun repli possible, donc attendre a du sens).
+    private val ollamaAutoProbeClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .build()
+
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
     data class ChatResult(val text: String, val imageBase64: String? = null, val imageMime: String? = null)
@@ -600,7 +618,7 @@ object ApiClient {
         // cloud) : ne doit jamais faire échouer tout le mode Auto à lui seul.
         if (Prefs.isOllamaAutoEnabled(context) && Prefs.getOllamaHost(context).isNotBlank()) {
             val ollamaResult = try {
-                sendOpenAiWithRotation(context, history, Provider.OLLAMA, systemPrompt)
+                sendOpenAiWithRotation(context, history, Provider.OLLAMA, systemPrompt, fastFailForAutoMode = true)
             } catch (e: Exception) {
                 "Erreur : ${e.message}"
             }
@@ -1021,7 +1039,8 @@ object ApiClient {
         context: Context,
         history: List<HistoryEntry>,
         provider: Provider,
-        systemPrompt: String = SYSTEM_PROMPT
+        systemPrompt: String = SYSTEM_PROMPT,
+        fastFailForAutoMode: Boolean = false
     ): String {
         val keys = Prefs.getApiKeysFor(context, provider)
         // BUG RÉEL CORRIGÉ : Provider.OLLAMA utilisait TOUJOURS son defaultBaseUrl codé en dur
@@ -1091,9 +1110,18 @@ object ApiClient {
                 val effectiveModelsToTry = if (installed.isNullOrEmpty()) {
                     modelsToTry
                 } else {
-                    val matched = modelsToTry.filter { configured ->
-                        installed.any { real -> real == configured || (!configured.contains(":") && real.startsWith("$configured:")) }
-                    }
+                    // BUG RÉEL CORRIGÉ (signalement utilisateur : "j'ai testé qwen2.5, erreur
+                    // Ollama 404" -- alors que qwen2.5:0.5b ET qwen2.5:1.5b sont bien installés) :
+                    // ce filtre vérifiait correctement qu'un modèle configuré correspondait à un
+                    // modèle réellement installé, mais gardait ensuite le nom CONFIGURÉ ("qwen2.5",
+                    // sans tag) au lieu du vrai nom installé ("qwen2.5:0.5b") -- la requête envoyée
+                    // à Ollama utilisait donc toujours le nom incomplet, qui ne correspond à aucun
+                    // modèle exact côté serveur (pas de tag implicite ":latest" pour ce nom-là),
+                    // d'où le 404 malgré une détection "réussie". mapNotNull+firstOrNull substitue
+                    // maintenant le VRAI tag installé correspondant à chaque nom configuré.
+                    val matched = modelsToTry.mapNotNull { configured ->
+                        installed.firstOrNull { real -> real == configured || (!configured.contains(":") && real.startsWith("$configured:")) }
+                    }.distinct()
                     if (matched.isNotEmpty()) {
                         matched
                     } else {
@@ -1106,7 +1134,7 @@ object ApiClient {
                     }
                 }
                 for (m in effectiveModelsToTry) {
-                    val result = sendOpenAiCompatible(candidateBaseUrl, m, "", history, provider, systemPrompt)
+                    val result = sendOpenAiCompatible(candidateBaseUrl, m, "", history, provider, systemPrompt, fastFailForAutoMode)
                     if (!result.startsWith("Erreur") &&
                         !result.startsWith("Connexion impossible") &&
                         !result.startsWith("Format de réponse inattendu")
@@ -1132,7 +1160,7 @@ object ApiClient {
 
         for (attempt in 0 until maxAttempts) {
             val apiKey = if (keys.isNotEmpty()) Prefs.getNextApiKey(context, provider) else ""
-            val result = sendOpenAiCompatible(baseUrl, model, apiKey, history, provider, systemPrompt)
+            val result = sendOpenAiCompatible(baseUrl, model, apiKey, history, provider, systemPrompt, fastFailForAutoMode)
 
             if (!result.startsWith("Erreur API (429)") && !result.startsWith("Erreur API (401)")) {
                 return result
@@ -1171,7 +1199,8 @@ object ApiClient {
         apiKey: String,
         history: List<HistoryEntry>,
         provider: Provider,
-        systemPrompt: String = SYSTEM_PROMPT
+        systemPrompt: String = SYSTEM_PROMPT,
+        fastFailForAutoMode: Boolean = false
     ): String {
         val messagesArray = JSONArray()
         messagesArray.put(JSONObject().put("role", "system").put("content", systemPrompt))
@@ -1228,7 +1257,9 @@ object ApiClient {
                 .addHeader("X-Title", "JARVIS Android")
         }
 
-        val httpClient = if (provider == Provider.OLLAMA) ollamaClient else client
+        val httpClient = if (provider == Provider.OLLAMA) {
+            if (fastFailForAutoMode) ollamaAutoProbeClient else ollamaClient
+        } else client
         httpClient.newCall(requestBuilder.build()).execute().use { response ->
             val bodyStr = response.body?.string() ?: ""
             if (!response.isSuccessful) return "Erreur API (${response.code}) : $bodyStr"
