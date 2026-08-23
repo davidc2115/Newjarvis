@@ -875,15 +875,21 @@ object ApiClient {
     }
 
     /** Demande utilisateur ("mets une détection automatique des modèles pour éviter les
-     *  erreurs de modèle") : interroge /api/tags (endpoint natif Ollama, PAS le compatible
-     *  OpenAI utilisé pour le chat) pour connaître les noms RÉELLEMENT installés sur un hôte
-     *  donné, avant même de tenter une génération -- voir son usage dans sendOpenAiWithRotation
-     *  ci-dessous. Renvoie null (jamais une liste vide en cas d'erreur) si l'hôte est injoignable
-     *  ou répond mal, pour que l'appelant puisse distinguer "détection impossible, retente
-     *  quand même à l'aveugle comme avant" de "détection réussie, mais 0 modèle installé".
-     *  Timeout volontairement court : sert uniquement à éviter des tentatives de génération
-     *  vouées à l'échec, pas à décider si l'hôte est vivant (déjà couvert par checkOllamaStatus). */
-    private fun fetchInstalledOllamaModelNames(host: String, port: String): List<String>? {
+     *  erreurs de modèle" puis "remets les IA Ollama pour qu'elle fonctionne correctement, pas
+     *  seulement Qwen") : interroge /api/tags (endpoint natif Ollama, PAS le compatible OpenAI
+     *  utilisé pour le chat) pour connaître les noms ET LA TAILLE des modèles RÉELLEMENT
+     *  installés sur un hôte donné, avant même de tenter une génération -- voir son usage dans
+     *  sendOpenAiWithRotation ci-dessous. La taille sert à trier les modèles du plus léger au
+     *  plus lourd : sur un hôte à RAM très limitée (ex: Freebox Delta, 2 Go), essayer les
+     *  modèles installés dans cet ordre maximise les chances qu'au moins un tienne en mémoire,
+     *  plutôt que de dépendre uniquement de ce que l'utilisateur a tapé à la main (qui ne
+     *  couvrait avant que le seul modèle configuré manuellement, ex: qwen2.5). Renvoie null
+     *  (jamais une liste vide en cas d'erreur) si l'hôte est injoignable ou répond mal, pour que
+     *  l'appelant puisse distinguer "détection impossible, retente quand même à l'aveugle comme
+     *  avant" de "détection réussie, mais 0 modèle installé". Timeout volontairement court : sert
+     *  uniquement à éviter des tentatives de génération vouées à l'échec, pas à décider si
+     *  l'hôte est vivant (déjà couvert par checkOllamaStatus). */
+    private fun fetchInstalledOllamaModels(host: String, port: String): List<Pair<String, Long>>? {
         return try {
             val quickClient = OkHttpClient.Builder()
                 .connectTimeout(4, TimeUnit.SECONDS)
@@ -896,8 +902,8 @@ object ApiClient {
                 val models = JSONObject(body).optJSONArray("models") ?: return null
                 (0 until models.length()).map { i ->
                     val m = models.getJSONObject(i)
-                    m.optString("name", m.optString("model", ""))
-                }.filter { it.isNotBlank() }
+                    m.optString("name", m.optString("model", "")) to m.optLong("size", Long.MAX_VALUE)
+                }.filter { it.first.isNotBlank() }.sortedBy { it.second }
             }
         } catch (e: Exception) {
             null
@@ -1106,32 +1112,47 @@ object ApiClient {
                 // des modèles configurés n'y figure -- élimine les 404 à répétition. Si la
                 // détection elle-même échoue (hôte injoignable), retombe sur l'ancien
                 // comportement (tenter quand même tous les modèles configurés).
-                val installed = fetchInstalledOllamaModelNames(rawHost, port)
-                val effectiveModelsToTry = if (installed.isNullOrEmpty()) {
+                val installedPairs = fetchInstalledOllamaModels(rawHost, port)
+                val installedNames = installedPairs?.map { it.first }
+                // BUG RÉEL CORRIGÉ (signalement utilisateur : "j'ai testé qwen2.5, erreur Ollama
+                // 404" -- alors que qwen2.5:0.5b ET qwen2.5:1.5b sont bien installés) : ce filtre
+                // vérifiait correctement qu'un modèle configuré correspondait à un modèle
+                // réellement installé, mais gardait ensuite le nom CONFIGURÉ ("qwen2.5", sans
+                // tag) au lieu du vrai nom installé ("qwen2.5:0.5b") -- la requête envoyée à
+                // Ollama utilisait donc toujours le nom incomplet, qui ne correspond à aucun
+                // modèle exact côté serveur (pas de tag implicite ":latest" pour ce nom-là), d'où
+                // le 404 malgré une détection "réussie". mapNotNull+firstOrNull substitue
+                // maintenant le VRAI tag installé correspondant à chaque nom configuré.
+                val matched = if (installedNames.isNullOrEmpty()) emptyList() else modelsToTry.mapNotNull { configured ->
+                    installedNames.firstOrNull { real -> real == configured || (!configured.contains(":") && real.startsWith("$configured:")) }
+                }.distinct()
+                // Demande utilisateur ("remets les IA Ollama pour qu'elle fonctionne
+                // correctement, pas seulement Qwen") : avant ce correctif, dès qu'AU MOINS un
+                // modèle configuré correspondait à un modèle installé, la rotation s'arrêtait à
+                // CE SEUL modèle -- si l'utilisateur n'avait tapé qu'un seul nom (ex: qwen2.5) à
+                // la main, un échec de ce modèle unique (mémoire insuffisante, lenteur) faisait
+                // basculer direct sur le cloud, sans jamais essayer les 13 AUTRES modèles réels
+                // installés sur le même serveur. On complète maintenant TOUJOURS la liste avec
+                // le reste des modèles réellement installés (triés du plus léger au plus lourd,
+                // voir fetchInstalledOllamaModels), au-delà des seuls modèles configurés/matchés
+                // -- exploite tout le serveur Ollama de l'utilisateur, pas seulement ce qu'il a
+                // pensé à taper. Plafonné à 3 tentatives par hôte pour ne pas allonger
+                // excessivement l'attente si tous échouent (surtout en mode explicite/patient,
+                // où chaque tentative peut aller jusqu'à 300s).
+                val effectiveModelsToTry = if (installedNames.isNullOrEmpty()) {
                     modelsToTry
                 } else {
-                    // BUG RÉEL CORRIGÉ (signalement utilisateur : "j'ai testé qwen2.5, erreur
-                    // Ollama 404" -- alors que qwen2.5:0.5b ET qwen2.5:1.5b sont bien installés) :
-                    // ce filtre vérifiait correctement qu'un modèle configuré correspondait à un
-                    // modèle réellement installé, mais gardait ensuite le nom CONFIGURÉ ("qwen2.5",
-                    // sans tag) au lieu du vrai nom installé ("qwen2.5:0.5b") -- la requête envoyée
-                    // à Ollama utilisait donc toujours le nom incomplet, qui ne correspond à aucun
-                    // modèle exact côté serveur (pas de tag implicite ":latest" pour ce nom-là),
-                    // d'où le 404 malgré une détection "réussie". mapNotNull+firstOrNull substitue
-                    // maintenant le VRAI tag installé correspondant à chaque nom configuré.
-                    val matched = modelsToTry.mapNotNull { configured ->
-                        installed.firstOrNull { real -> real == configured || (!configured.contains(":") && real.startsWith("$configured:")) }
-                    }.distinct()
-                    if (matched.isNotEmpty()) {
-                        matched
-                    } else {
+                    val rest = installedNames.filter { it !in matched }
+                    val combined = (matched + rest).distinct().take(3)
+                    if (matched.isEmpty()) {
                         DiagnosticsLog.log(
                             context, "OLLAMA-ROTATION",
                             "Hôte $hostLabel : aucun des modèles configurés (${modelsToTry.joinToString(", ")}) " +
-                                "n'est installé parmi les ${installed.size} réels -- détection auto, utilise « ${installed.first()} »"
+                                "n'est installé parmi les ${installedNames.size} réels -- détection auto, essaie " +
+                                combined.joinToString(" → ") { it }
                         )
-                        listOf(installed.first())
                     }
+                    combined
                 }
                 for (m in effectiveModelsToTry) {
                     val result = sendOpenAiCompatible(candidateBaseUrl, m, "", history, provider, systemPrompt, fastFailForAutoMode)
