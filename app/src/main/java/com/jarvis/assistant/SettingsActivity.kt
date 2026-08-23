@@ -230,18 +230,8 @@ class SettingsActivity : AppCompatActivity() {
 
                 // Sauvegarde immédiate du choix, quelle que soit la page où l'utilisateur
                 // navigue ensuite — évite de perdre la sélection en changeant d'onglet
-                // sans être passé par le bouton ENREGISTRER de l'onglet Config.
-                // BUG RÉEL CORRIGÉ (signalement utilisateur : "même message d'erreur avec et
-                // sans Ollama, même en réglant uniquement sur IA locale Ollama") : Ollama était
-                // auparavant EXCLU de cette sauvegarde immédiate ("nécessite une URL saisie
-                // manuellement" — raison devenue fausse depuis qu'Ollama a ses propres champs
-                // dédiés host/port dans l'onglet Local, indépendants de baseUrlInput). Résultat
-                // concret : choisir "IA locale sur PC (Ollama)" dans ce menu ne changeait RIEN
-                // tant que l'utilisateur ne cliquait pas EN PLUS sur ENREGISTRER — Prefs.getProvider
-                // restait sur le fournisseur précédent (souvent Automatique), donc dispatchToProvider
-                // continuait de passer par sendAuto() et son repli Pollinations, quoi que le menu
-                // affiche visuellement. Seul Custom garde l'exception (URL à saisir avant que la
-                // sauvegarde ait un sens).
+                // sans être passé par le bouton ENREGISTRER de l'onglet Config. Seul Custom
+                // garde l'exception (URL à saisir avant que la sauvegarde ait un sens).
                 if (provider != Provider.CUSTOM) {
                     Prefs.save(
                         this@SettingsActivity,
@@ -263,9 +253,9 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun updateCloudSection(provider: Provider) {
         autoInfoText.visibility  = if (provider.isAuto) View.VISIBLE else View.GONE
-        // Seuls Ollama et Custom nécessitent de préciser une URL/modèle manuellement.
+        // Seul Custom nécessite de préciser une URL/modèle manuellement.
         // Pour tous les autres, l'onglet Config se limite au choix de l'IA.
-        val needsAdvanced = provider == Provider.OLLAMA || provider == Provider.CUSTOM
+        val needsAdvanced = provider == Provider.CUSTOM
         advancedConfigSection.visibility = if (needsAdvanced) View.VISIBLE else View.GONE
         val showCloud = !provider.isLocal && !provider.isAuto
         baseUrlInput.isEnabled = showCloud
@@ -558,156 +548,8 @@ class SettingsActivity : AppCompatActivity() {
 
         setupTermuxSdSection()
         setupDebugLogsButton()
-        setupOllamaSection()
     }
 
-    /**
-     * Section "IA locale réseau (Ollama)" de l'onglet Local — champs dédiés (host/port/modèle)
-     * réellement lus par ApiClient.ollamaBaseUrl/Prefs.getOllamaModel, contrairement à l'ancien
-     * mécanisme générique du sélecteur Cloud dont l'édition n'avait aucun effet réel pour
-     * Provider.OLLAMA (voir le commentaire dans ApiClient.sendOpenAiWithRotation). Host prérempli
-     * avec l'hôte Freebox déjà connu si l'utilisateur n'a rien configuré — l'hostname
-     * mafreebox.freebox.fr se résout sur tout le réseau local d'une Freebox, pas seulement une
-     * fois appairée, donc c'est un point de départ raisonnable pour qui héberge Ollama dessus.
-     */
-    private fun setupOllamaSection() {
-        val hostInput = findViewById<EditText>(R.id.ollamaHostInput)
-        val portInput = findViewById<EditText>(R.id.ollamaPortInput)
-        val modelInputOllama = findViewById<EditText>(R.id.ollamaModelInput)
-        val fallbackModelsInput = findViewById<EditText>(R.id.ollamaFallbackModelsInput)
-        val remoteHostInput = findViewById<EditText>(R.id.ollamaRemoteHostInput)
-        val toggleButton = findViewById<TextView>(R.id.toggleOllamaAutoButton)
-        val saveButtonOllama = findViewById<TextView>(R.id.saveOllamaButton)
-        val testButton = findViewById<TextView>(R.id.testOllamaButton)
-        val installDolphinButton = findViewById<TextView>(R.id.installDolphinButton)
-        val statusText = findViewById<TextView>(R.id.ollamaStatusText)
-
-        val savedHost = Prefs.getOllamaHost(this)
-        hostInput.setText(
-            savedHost.ifBlank {
-                Prefs.getFreeboxHost(this).removePrefix("https://").removePrefix("http://").trimEnd('/')
-            }
-        )
-        portInput.setText(Prefs.getOllamaPort(this))
-        modelInputOllama.setText(Prefs.getOllamaModel(this))
-        fallbackModelsInput.setText(Prefs.getOllamaFallbackModels(this).joinToString(", "))
-        remoteHostInput.setText(Prefs.getOllamaRemoteHost(this))
-
-        fun refreshToggleLabel() {
-            toggleButton.text = if (Prefs.isOllamaAutoEnabled(this)) {
-                "✅ ACTIVÉ dans le mode Automatique — essayé en premier, avant les IA cloud"
-            } else {
-                "⬜ DÉSACTIVÉ dans le mode Automatique — appuie pour activer"
-            }
-        }
-        refreshToggleLabel()
-
-        toggleButton.setOnClickListener {
-            Prefs.setOllamaAutoEnabled(this, !Prefs.isOllamaAutoEnabled(this))
-            refreshToggleLabel()
-        }
-
-        saveButtonOllama.setOnClickListener {
-            Prefs.saveOllamaHost(this, hostInput.text.toString())
-            Prefs.saveOllamaPort(this, portInput.text.toString())
-            Prefs.saveOllamaModel(this, modelInputOllama.text.toString())
-            Prefs.saveOllamaFallbackModels(this, fallbackModelsInput.text.toString())
-            Prefs.saveOllamaRemoteHost(this, remoteHostInput.text.toString())
-            Toast.makeText(this, "✅ Configuration Ollama enregistrée", Toast.LENGTH_SHORT).show()
-        }
-
-        testButton.setOnClickListener {
-            // Teste directement les valeurs des champs (pas besoin d'avoir déjà enregistré) —
-            // utilise l'endpoint natif Ollama /api/tags (liste des modèles installés), plus
-            // simple et plus rapide qu'un vrai appel de génération pour un simple ping.
-            val host = hostInput.text.toString().trim().removePrefix("https://").removePrefix("http://").trimEnd('/')
-            val port = portInput.text.toString().trim().ifBlank { "11434" }
-            if (host.isBlank()) {
-                statusText.text = "❌ Renseigne d'abord une adresse (IP ou nom d'hôte)."
-                return@setOnClickListener
-            }
-            testButton.isEnabled = false
-            statusText.text = "⏳ Test en cours…"
-            CoroutineScope(Dispatchers.Main).launch {
-                val result = withContext(Dispatchers.IO) {
-                    try {
-                        val client = okhttp3.OkHttpClient.Builder()
-                            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
-                            .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
-                            .build()
-                        val request = okhttp3.Request.Builder().url("http://$host:$port/api/tags").get().build()
-                        client.newCall(request).execute().use { response ->
-                            if (!response.isSuccessful) {
-                                "❌ Ollama a répondu mais avec une erreur (HTTP ${response.code}) — vérifie qu'il tourne bien sur ce port."
-                            } else {
-                                val body = response.body?.string() ?: "{}"
-                                val models = org.json.JSONObject(body).optJSONArray("models")
-                                val count = models?.length() ?: 0
-                                "✅ Ollama joignable à $host:$port — $count modèle(s) installé(s)."
-                            }
-                        }
-                    } catch (e: Exception) {
-                        "❌ Injoignable : ${e.javaClass.simpleName} — ${e.message}. Vérifie l'adresse, le port, et que ce téléphone est bien sur le même réseau."
-                    }
-                }
-                statusText.text = result
-                testButton.isEnabled = true
-            }
-        }
-
-        // Déclenche l'installation de Dolphin (non censuré) directement depuis Réglages --
-        // signalement utilisateur : "ajoute Dolphin uncensored sur la Freebox dans Ollama" --
-        // indépendant d'une conversation IA fonctionnelle, contrairement à demander à JARVIS
-        // de le faire via ollama_pull_model (inutile si c'est justement la cascade IA qui est
-        // en panne). Enregistre d'abord les champs affichés (pullOllamaModel lit host/port
-        // depuis Prefs, pas depuis les EditText) pour ne jamais viser un serveur périmé.
-        installDolphinButton.setOnClickListener {
-            Prefs.saveOllamaHost(this, hostInput.text.toString())
-            Prefs.saveOllamaPort(this, portInput.text.toString())
-            installDolphinButton.isEnabled = false
-            // dolphin-llama3 (~4.7 Go, base Llama 3 8B) au lieu de dolphin-mixtral (~26 Go,
-            // base Mixtral 8x7B) -- signalement utilisateur : "en permanence sur
-            // téléchargement" avec l'ancien modèle, beaucoup trop volumineux pour une
-            // connexion/du matériel de Freebox typique. dolphin-llama3 reste bien un modèle
-            // Dolphin non censuré, juste une variante nettement plus légère et réaliste ici.
-            statusText.text = "⏳ Connexion au serveur Ollama…"
-            CoroutineScope(Dispatchers.Main).launch {
-                val result = ApiClient.pullOllamaModel(this@SettingsActivity, "dolphin-llama3") { progress ->
-                    runOnUiThread { statusText.text = progress }
-                }
-                // BUG RÉEL CORRIGÉ (signalement utilisateur : "Dolphin s'est bien installé, en
-                // revanche toujours toutes les IA échouent") : le téléchargement réussi sur le
-                // SERVEUR Ollama ne suffisait pas -- encore fallait-il que "dolphin-llama3"
-                // figure dans la liste de modèles de secours (Prefs.getOllamaFallbackModels)
-                // pour être réellement essayé par la rotation (ApiClient.sendOpenAiWithRotation).
-                // Si l'utilisateur avait DÉJÀ personnalisé ce champ (même vide au moment de la
-                // sauvegarde), la valeur par défaut (voir Prefs.DEFAULT_OLLAMA_FALLBACK_MODELS)
-                // ne s'applique jamais -- un modèle fraîchement installé pouvait donc rester
-                // invisible pour la rotation malgré un téléchargement réussi. On l'ajoute
-                // maintenant explicitement à la liste dès l'installation, et le champ affiché
-                // est resynchronisé pour que ce soit visible immédiatement.
-                if (result.startsWith("✅")) {
-                    val current = fallbackModelsInput.text.toString().split(",", "\n", ";")
-                        .map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
-                    if ("dolphin-llama3" !in current) {
-                        current.add("dolphin-llama3")
-                        val updated = current.joinToString(", ")
-                        fallbackModelsInput.setText(updated)
-                        Prefs.saveOllamaFallbackModels(this@SettingsActivity, updated)
-                    }
-                }
-                statusText.text = result
-                installDolphinButton.isEnabled = true
-            }
-        }
-    }
-
-    /**
-     * Bouton "Voir / copier le journal" — même schéma que showCrashReportIfAny() dans
-     * MainActivity (AlertDialog copiable), mais pour DiagnosticsLog (échecs de cascade
-     * IA/image/commandes, PAS des plantages) : la seule façon honnête de "voir les logs" côté
-     * JARVIS, qui n'a aucun accès distant au téléphone de l'utilisateur.
-     */
     private fun setupDebugLogsButton() {
         val button = findViewById<TextView>(R.id.viewDebugLogsButton)
         button.setOnClickListener {

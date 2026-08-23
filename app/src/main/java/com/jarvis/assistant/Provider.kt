@@ -4,7 +4,7 @@ package com.jarvis.assistant
  * Liste des fournisseurs IA disponibles.
  * isLocal = true signifie : aucun réseau, modèle exécuté directement sur le téléphone.
  * isAuto = true signifie : essaie plusieurs fournisseurs configurés jusqu'à ce que l'un réponde.
- * needsApiKey = false signifie : pas de clé API requise (Ollama local, Custom sans auth…).
+ * needsApiKey = false signifie : pas de clé API requise (Custom sans auth, Pollinations…).
  */
 enum class Provider(
     val displayName: String,
@@ -101,13 +101,6 @@ enum class Provider(
         needsApiKey = false
     ),
 
-    // ── IA sur réseau local (PC) ──────────────────────────────────────────────
-    OLLAMA(
-        "IA locale sur PC (Ollama)",
-        "http://192.168.1.50:11434/v1/chat/completions",
-        "llama3.1",
-        needsApiKey = false
-    ),
     CUSTOM(
         "Autre / URL personnalisée",
         "",

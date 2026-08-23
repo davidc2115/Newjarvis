@@ -53,8 +53,6 @@ object ApiKeyTestController {
         val glifToken = Prefs.getGlifApiToken(context)
         if (glifToken.isNotBlank()) results.add(testGlif(context, glifToken))
 
-        if (Prefs.getOllamaHost(context).isNotBlank()) results.add(testOllama(context))
-
         if (results.isEmpty()) {
             return@withContext "❌ Aucune clé API configurée à tester. Configure-en au moins une dans ⚙ → Clés API, ou un jeton Hugging Face/Replicate dans 🎨 Génération."
         }
@@ -165,14 +163,6 @@ object ApiKeyTestController {
         val label = "Glif (workflows IA)"
         val result = GlifController.testConnection(context)
         return KeyResult(label, mask(token), result.success, result.message)
-    }
-
-    private suspend fun testOllama(context: Context): KeyResult {
-        val label = "Ollama (IA locale réseau)"
-        val hostPort = "${Prefs.getOllamaHost(context)}:${Prefs.getOllamaPort(context)}"
-        val status = ApiClient.checkOllamaStatus(context)
-        val ok = status.startsWith("✅")
-        return KeyResult(label, hostPort, ok, status.removePrefix("✅ ").removePrefix("❌ "))
     }
 
     private fun respondResult(label: String, key: String, request: Request): KeyResult {

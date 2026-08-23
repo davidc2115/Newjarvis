@@ -47,8 +47,7 @@ object JarvisCommandParser {
         "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "run_glif",
-        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "ollama_status",
-        "ollama_list_models", "ollama_pull_model", "token_usage",
+        "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "token_usage",
         "list_contact_templates"
     )
 
@@ -435,9 +434,6 @@ object JarvisCommandParser {
             "clear_debug_logs" -> DiagnosticsLog.clear(context)
             "token_usage" -> Prefs.getTokenUsageReport(context)
             "clear_token_usage" -> { Prefs.clearTokenUsage(context); "✅ Compteur de tokens réinitialisé." }
-            "ollama_status" -> ApiClient.checkOllamaStatus(context)
-            "ollama_list_models" -> ApiClient.listOllamaModels(context)
-            "ollama_pull_model" -> ApiClient.pullOllamaModel(context, json.optString("name", ""))
 
             "delete_event" -> {
                 val eventId = json.optLong("eventId", -1)

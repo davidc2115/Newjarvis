@@ -4,10 +4,9 @@ import android.content.Context
 
 /**
  * Dernier recours 100% local, SANS AUCUN appel réseau ni IA -- signalement utilisateur répété
- * ("toutes les IA ont échoué malgré Ollama configuré", "toujours aucun système en local pour
- * utiliser seulement le vault ou les fonctions du téléphone : réveil, minuteur, flash, etc.") :
- * même quand la cascade IA complète (cloud + Ollama local/distant) est totalement injoignable
- * — panne réseau, Freebox hors ligne, aucune clé configurée — certaines actions basiques
+ * ("toujours aucun système en local pour utiliser seulement le vault ou les fonctions du
+ * téléphone : réveil, minuteur, flash, etc.") : même quand la cascade IA cloud est totalement
+ * injoignable — panne réseau, aucune clé configurée — certaines actions basiques
  * n'ont techniquement BESOIN d'aucune IA pour être exécutées : elles sont déjà des fonctions
  * directes du téléphone (lampe torche, réveil Android, minuteur) ou une simple recherche dans
  * des fichiers déjà présents sur le disque (vault Obsidian). Reconnaissance par mots-clés/regex
