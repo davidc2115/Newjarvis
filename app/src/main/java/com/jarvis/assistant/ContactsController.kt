@@ -312,20 +312,52 @@ object ContactsController {
      *  forcément joignables), le résultat final semblait dire "aucun contact n'a ce libellé" --
      *  une conclusion fausse. Le nom est maintenant lu directement sur Contacts.CONTENT_URI
      *  (garanti présent pour tout contact), le numéro reste une info optionnelle en plus. */
+    /** Casse/accents/espaces normalisés — même logique que PeopleController.normalizeName,
+     *  pour que "École", "ecole" et "ÉCOLE" désignent le même libellé, et pour ne PLUS
+     *  dépendre du repli case-insensible ASCII-only de SQLite LIKE (n'gère PAS correctement
+     *  les caractères accentués -- une différence de casse sur un accent, ex: labels
+     *  provenant d'une synchronisation, pouvait donc échouer à matcher malgré un nom
+     *  visuellement "exact"). */
+    private fun normalizeLabel(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase().trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\p{Mn}+"), "")
+            .replace(Regex("\s+"), " ")
+
     fun listContactsByLabel(context: Context, label: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission d'accès aux contacts non accordée."
         }
         if (label.isBlank()) return "❌ Précise le libellé à rechercher."
         return try {
+            // BUG RÉEL CORRIGÉ (signalement utilisateur : "aucun libellé, même avec le nom
+            // exact") : cette requête ne filtrait PAS Groups.DELETED -- Android conserve
+            // souvent des lignes de groupe "fantômes" marquées supprimées (après une
+            // resynchronisation, un renommage de libellé, etc.) portant parfois le MÊME
+            // titre que le groupe réellement actif. La recherche par LIKE pouvait alors
+            // matcher la ligne supprimée/orpheline (sans aucun membre réel) au lieu de la
+            // ligne active correspondant au libellé que l'utilisateur voit vraiment dans
+            // son appli Contacts, faisant échouer la recherche malgré un nom parfaitement
+            // exact. Comparaison faite maintenant en mémoire via normalizeLabel (accent/
+            // casse insensible, contrairement au LIKE SQLite qui ne gère pas les accents),
+            // sur les MÊMES groupes non supprimés que ceux listés par list_contact_labels
+            // -- garantit que les deux actions voient exactement la même liste.
             val groupIds = mutableListOf<String>()
+            val target = normalizeLabel(label)
             context.contentResolver.query(
                 ContactsContract.Groups.CONTENT_URI,
-                arrayOf(ContactsContract.Groups._ID, ContactsContract.Groups.TITLE),
-                "${ContactsContract.Groups.TITLE} LIKE ?",
-                arrayOf("%$label%"),
+                arrayOf(ContactsContract.Groups._ID, ContactsContract.Groups.TITLE, ContactsContract.Groups.DELETED),
+                null,
+                null,
                 null
-            )?.use { c -> while (c.moveToNext()) groupIds.add(c.getString(0)) }
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val deleted = c.getInt(2)
+                    val title = c.getString(1) ?: continue
+                    if (deleted == 0 && normalizeLabel(title).contains(target)) {
+                        groupIds.add(c.getString(0))
+                    }
+                }
+            }
 
             if (groupIds.isEmpty()) {
                 return "🔍 Aucun libellé de contact ne correspond à « $label » (vérifie l'orthographe exacte dans ton appli Contacts, ou demande list_contact_labels pour voir la liste complète)."

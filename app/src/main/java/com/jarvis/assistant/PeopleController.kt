@@ -588,16 +588,25 @@ object PeopleController {
         if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
         val folder = contactsFolder(context)
         val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
-        val q = query.lowercase()
+        // BUG RÉEL CORRIGÉ (signalement utilisateur : "ne recherche pas non plus dans les
+        // fiches de mes contacts") : cette recherche comparait en .lowercase() BRUT, sans
+        // la normalisation NFD (suppression des accents) utilisée partout ailleurs dans ce
+        // fichier via normalizeName() (ex: resolveContactFile). Résultat concret : chercher
+        // "ecole" ne matchait PAS une fiche dont l'adresse ou le nom contenait "École"/
+        // "Écolé", et une recherche par nom échouait dès que la casse/les accents tapés par
+        // l'utilisateur différaient de ceux enregistrés dans la fiche. On normalise
+        // maintenant la requête ET chaque champ comparé avec normalizeName(), pour un
+        // matching identique (accent/casse insensible) à celui déjà utilisé en écriture.
+        val q = normalizeName(query)
 
         val matches = files.mapNotNull { parseContactFile(it) }.filter { c ->
-            c.name.lowercase().contains(q) ||
+            normalizeName(c.name).contains(q) ||
                 (c.phone?.lowercase()?.contains(q) == true) ||
                 (c.phonePro?.lowercase()?.contains(q) == true) ||
                 (c.email?.lowercase()?.contains(q) == true) ||
-                (c.address?.lowercase()?.contains(q) == true) ||
-                (c.addressPro?.lowercase()?.contains(q) == true) ||
-                c.notes.lowercase().contains(q)
+                (c.address?.let { normalizeName(it) }?.contains(q) == true) ||
+                (c.addressPro?.let { normalizeName(it) }?.contains(q) == true) ||
+                normalizeName(c.notes).contains(q)
         }
 
         if (matches.isEmpty()) return "🔍 Aucun contact trouvé pour « $query »."
