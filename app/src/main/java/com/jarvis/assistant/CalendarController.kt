@@ -503,6 +503,35 @@ object CalendarController {
         }
     }
 
+    /** Vérifie EMPIRIQUEMENT si un calendrier a de vraies occurrences dans les ~90 prochains
+     *  jours, en interrogeant directement Instances -- plutôt que de se fier uniquement aux
+     *  colonnes Calendars.SYNC_EVENTS/VISIBLE (voir getCalendarList). Signalement utilisateur
+     *  répété : "il les détecte mais me dit non synchronisé/introuvable/masqué alors qu'ils ne
+     *  le sont pas sur le smartphone" -- ces deux colonnes sont notoirement PEU FIABLES sur
+     *  certains Android personnalisés (MIUI/Xiaomi notamment, déjà rencontré ailleurs dans ce
+     *  fichier) et certains comptes non-Google : elles peuvent rester à 0 alors que le
+     *  calendrier s'affiche normalement dans l'appli d'agenda et contient bien des événements
+     *  réels et lisibles. Se fier à un test réel évite de désinformer l'utilisateur sur un
+     *  calendrier qui, en pratique, fonctionne très bien. */
+    private fun hasRealUpcomingInstances(context: Context, calendarId: Long): Boolean {
+        return try {
+            val now = System.currentTimeMillis()
+            val horizon = now + 90L * 24 * 60 * 60 * 1000
+            val uriBuilder = CalendarContract.Instances.CONTENT_URI.buildUpon()
+            ContentUris.appendId(uriBuilder, now - 30L * 24 * 60 * 60 * 1000) // 30 j en arrière aussi, au cas où
+            ContentUris.appendId(uriBuilder, horizon)
+            context.contentResolver.query(
+                uriBuilder.build(),
+                arrayOf(CalendarContract.Instances.EVENT_ID),
+                "${CalendarContract.Instances.CALENDAR_ID} = ?",
+                arrayOf(calendarId.toString()),
+                null
+            )?.use { c -> c.count > 0 } ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun getCalendarList(context: Context): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture de l'agenda non accordée."
@@ -530,7 +559,7 @@ object CalendarController {
                 if (c.count == 0) return "📅 Aucun calendrier disponible."
 
                 val sb = StringBuilder("📅 **Calendriers disponibles** :\n\n")
-                var hasSyncIssue = false
+                var hasRealSyncIssue = false
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
                     val name = c.getString(1) ?: "Inconnu"
@@ -540,26 +569,32 @@ object CalendarController {
                     val nickname = Prefs.getCalendarNickname(context, id)
                     val nicknameStr = if (nickname.isNotBlank()) " — surnom : « $nickname »" else ""
                     sb.append("• **$name** (compte : $account, ID: $id)$nicknameStr\n")
-                    // SYNC_EVENTS à 0 = la table Instances/Events reste VIDE pour ce calendrier
-                    // côté Android, même si l'utilisateur le voit très bien dans son appli
-                    // d'agenda (Google Calendar, etc.) — c'est un réglage de synchronisation
-                    // par calendrier, distinct de la visibilité. Cause la plus fréquente d'un
-                    // planning partagé (Skello, calendrier d'équipe, abonnement iCal...) invisible
-                    // pour JARVIS alors qu'il apparaît bien dans l'agenda natif du téléphone.
-                    if (!syncEvents) {
-                        hasSyncIssue = true
-                        sb.append("   ⚠️ Synchronisation désactivée pour ce calendrier — JARVIS ne peut voir AUCUN de ses événements tant que ce n'est pas corrigé (voir note ci-dessous).\n")
-                    } else if (!visible) {
-                        sb.append("   ⚠️ Calendrier masqué (non visible) — vérifie qu'il est bien coché dans ton appli d'agenda.\n")
+                    // SYNC_EVENTS/VISIBLE à 0 côté Android n'est qu'un DRAPEAU, pas une preuve --
+                    // avant d'afficher un avertissement, on vérifie s'il existe malgré tout de
+                    // VRAIES occurrences lisibles (hasRealUpcomingInstances ci-dessus). Si oui,
+                    // le drapeau est visiblement périmé/peu fiable sur cet appareil : on le dit
+                    // clairement au lieu de laisser croire à un vrai problème de synchronisation.
+                    if (!syncEvents || !visible) {
+                        val reallyWorks = hasRealUpcomingInstances(context, id)
+                        if (reallyWorks) {
+                            sb.append("   🟡 Android signale ce calendrier comme désynchronisé/masqué, mais JARVIS y trouve bien de vrais événements à venir — ce signalement est probablement obsolète sur cet appareil, ignore-le : les événements sont lisibles normalement.\n")
+                        } else if (!syncEvents) {
+                            hasRealSyncIssue = true
+                            sb.append("   ⚠️ Synchronisation désactivée pour ce calendrier ET aucun événement à venir trouvé — JARVIS ne peut voir aucun de ses événements tant que ce n'est pas corrigé (voir note ci-dessous).\n")
+                        } else {
+                            sb.append("   ⚠️ Calendrier masqué (non visible) et aucun événement à venir trouvé — vérifie qu'il est bien coché dans ton appli d'agenda.\n")
+                        }
                     }
                 }
-                if (hasSyncIssue) {
+                if (hasRealSyncIssue) {
                     sb.append(
                         "\n🔧 Pour activer un calendrier marqué « synchronisation désactivée » : ouvre l'appli " +
                             "Google Agenda (ou l'appli concernée) → Paramètres → sélectionne ce calendrier " +
                             "précis (pas juste le compte) → active « Synchroniser » — c'est un réglage séparé " +
                             "de la simple visibilité, propre à Android, rien à voir avec un bug de JARVIS. " +
-                            "Une fois activé, les événements deviennent immédiatement lisibles par JARVIS.\n"
+                            "Une fois activé, les événements deviennent immédiatement lisibles par JARVIS. " +
+                            "Tu peux aussi demander à JARVIS de forcer l'activation directement avec " +
+                            "sync_calendar, sans passer par l'appli d'agenda.\n"
                     )
                 }
                 sb.append(
