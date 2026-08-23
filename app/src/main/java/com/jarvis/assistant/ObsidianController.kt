@@ -662,7 +662,11 @@ ${if (linkedContent.isNotBlank()) linkedContent else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     private const val MEMORY_NOTE_TITLE = "Mémoire JARVIS"
-    private const val MAX_MEMORY_CHARS = 4000
+    // Valeur figée retirée : voir Prefs.getMaxMemoryChars (réglable par l'utilisateur,
+    // demande : "~7500 tokens par message, c'est beaucoup trop" -- cette note est relue EN
+    // ENTIER à CHAQUE message sans condition de mot-clé, donc son plafond pèse directement et
+    // systématiquement sur le coût de CHAQUE requête). 4000 caractères reste la valeur par
+    // défaut tant que l'utilisateur ne la réduit pas lui-même.
 
     private fun memoryNoteHeader(): String = """
 ---
@@ -678,15 +682,16 @@ mots-clés correspondent à la conversation en cours). Modifiable librement ici 
 disant à JARVIS « retiens que... » / « oublie que... ».
 """.trimIndent()
 
-    private fun trimMemoryIfNeeded(fullText: String): String {
-        if (fullText.length <= MAX_MEMORY_CHARS) return fullText
+    private fun trimMemoryIfNeeded(context: Context, fullText: String): String {
+        val maxChars = Prefs.getMaxMemoryChars(context)
+        if (fullText.length <= maxChars) return fullText
         val lines = fullText.lines()
         val bulletStartIdx = lines.indexOfFirst { it.trim().startsWith("- [") }
-        if (bulletStartIdx < 0) return fullText.takeLast(MAX_MEMORY_CHARS)
+        if (bulletStartIdx < 0) return fullText.takeLast(maxChars)
         val header = lines.subList(0, bulletStartIdx)
         var bullets = lines.subList(bulletStartIdx, lines.size).filter { it.isNotBlank() }
         while (bullets.isNotEmpty() &&
-            (header.joinToString("\n").length + bullets.joinToString("\n").length) > MAX_MEMORY_CHARS
+            (header.joinToString("\n").length + bullets.joinToString("\n").length) > maxChars
         ) {
             bullets = bullets.drop(1) // retire l'entrée la plus ANCIENNE en premier
         }
@@ -705,7 +710,7 @@ disant à JARVIS « retiens que... » / « oublie que... ».
             val updated = if (!file.exists()) {
                 memoryNoteHeader() + "\n" + line
             } else {
-                trimMemoryIfNeeded(file.readText().trimEnd() + "\n" + line)
+                trimMemoryIfNeeded(context, file.readText().trimEnd() + "\n" + line)
             }
             file.writeText(updated)
             "✅ Retenu durablement : \"$trimmedFact\""

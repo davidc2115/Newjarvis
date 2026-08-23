@@ -572,6 +572,20 @@ object Prefs {
         prefs(context).edit().putBoolean("wake_word_enabled", enabled).apply()
     }
 
+    /** Nom d'affichage de l'assistant (titre UI, message d'accueil, statuts "réfléchit"/
+     *  "répond", persona dans les prompts IA) — demande utilisateur : "pour le nom de JARVIS
+     *  peux-tu faire en sorte qu'il se modifie en fonction du mot-clé choisi pour l'écoute".
+     *  Réutilise DÉLIBÉRÉMENT le mot-clé d'écoute (wake word) déjà existant ci-dessus comme
+     *  SEULE source de vérité, plutôt que d'ajouter un champ "nom" redondant qui pourrait
+     *  diverger du mot-clé réellement écouté — évite d'avoir à synchroniser deux réglages
+     *  différents pour ce qui est conceptuellement la même identité ("comment on appelle
+     *  l'assistant"). Capitalisé pour l'affichage (le mot-clé est saisi en minuscules). */
+    fun getAssistantDisplayName(context: Context): String {
+        val raw = getWakeWord(context).trim()
+        if (raw.isBlank()) return "Jarvis"
+        return raw.replaceFirstChar { it.uppercase() }
+    }
+
     // ─── Surnoms de calendriers (pour distinguer plusieurs agendas similaires) ──
 
     fun getCalendarNickname(context: Context, calendarId: Long): String =
@@ -1269,6 +1283,38 @@ object Prefs {
     fun saveMaxHistoryMessages(context: Context, value: Int): Int {
         val clamped = value.coerceIn(MIN_HISTORY_MESSAGES, MAX_HISTORY_MESSAGES_CAP)
         prefs(context).edit().putInt("max_history_messages", clamped).apply()
+        return clamped
+    }
+
+    // Mode compact (demande utilisateur : "~7500 tokens par message, c'est beaucoup trop") :
+    // voir ApiClient.buildSystemPrompt pour le détail de ce que ça change concrètement
+    // (modules alwaysIf GitHub/Home Assistant/Box repassent en pur mot-clé). Désactivé par
+    // défaut, comme tous les réglages de réduction de tokens de cette section -- aucun
+    // changement de comportement tant que l'utilisateur ne l'active pas lui-même.
+    fun isCompactPromptMode(context: Context): Boolean =
+        prefs(context).getBoolean("compact_prompt_mode", false)
+
+    fun setCompactPromptMode(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("compact_prompt_mode", enabled).apply()
+    }
+
+    // Taille max de la note "Mémoire JARVIS" réellement injectée dans le prompt (voir
+    // ObsidianController.MAX_MEMORY_CHARS, historiquement figée à 4000 caractères = ~1000
+    // tokens systématiquement possibles à CHAQUE message puisque cette note est relue EN
+    // ENTIER sans condition de mot-clé). Réglable pour la même raison que l'historique
+    // ci-dessus : 4000 reste la valeur par défaut, aucun changement tant que l'utilisateur ne
+    // réduit pas lui-même cette limite en conversation (ex: "réduis la mémoire à 1500
+    // caractères"). Bornes larges car une "mémoire" trop courte perd vite son utilité.
+    private const val DEFAULT_MAX_MEMORY_CHARS = 4000
+    private const val MIN_MEMORY_CHARS = 500
+    private const val MAX_MEMORY_CHARS_CAP = 20_000
+
+    fun getMaxMemoryChars(context: Context): Int =
+        prefs(context).getInt("max_memory_chars", DEFAULT_MAX_MEMORY_CHARS)
+
+    fun saveMaxMemoryChars(context: Context, value: Int): Int {
+        val clamped = value.coerceIn(MIN_MEMORY_CHARS, MAX_MEMORY_CHARS_CAP)
+        prefs(context).edit().putInt("max_memory_chars", clamped).apply()
         return clamped
     }
 

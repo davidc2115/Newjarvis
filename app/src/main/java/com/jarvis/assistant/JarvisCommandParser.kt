@@ -48,7 +48,7 @@ object JarvisCommandParser {
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "run_glif",
         "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "token_usage",
-        "list_contact_templates", "get_history_limit"
+        "list_contact_templates", "get_history_limit", "get_compact_mode", "get_memory_limit"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -450,6 +450,38 @@ object JarvisCommandParser {
                 }
             }
             "get_history_limit" -> "📊 Historique envoyé à l'IA à chaque requête : ${Prefs.getMaxHistoryMessages(context)} message(s) (utilisateur+JARVIS confondus). L'historique affiché dans le chat n'est jamais tronqué, seule cette fenêtre transmise à l'IA l'est."
+            // Mode compact (voir ApiClient.buildSystemPrompt, demande utilisateur : "~7500
+            // tokens par message, c'est beaucoup trop") : désactive l'ajout automatique des
+            // modules GitHub/Home Assistant/Box internet quand une intégration est configurée
+            // (ils repassent en pur mot-clé, comme tous les autres modules).
+            "set_compact_mode" -> {
+                val enabled = json.optBoolean("enabled", true)
+                Prefs.setCompactPromptMode(context, enabled)
+                if (enabled) {
+                    "✅ Mode compact activé : GitHub/Home Assistant/Box internet ne sont plus ajoutés " +
+                        "automatiquement au prompt, seulement si le message en cours en parle. Économise des " +
+                        "tokens à chaque requête, au prix d'un risque (rare) d'oubli d'une intégration si aucun " +
+                        "mot-clé pertinent n'apparaît."
+                } else {
+                    "✅ Mode compact désactivé : GitHub/Home Assistant/Box internet redeviennent ajoutés " +
+                        "automatiquement dès qu'ils sont configurés, comme avant."
+                }
+            }
+            "get_compact_mode" -> if (Prefs.isCompactPromptMode(context)) "📊 Mode compact : activé." else "📊 Mode compact : désactivé (réglage par défaut)."
+            // Taille de la note "Mémoire JARVIS" injectée à CHAQUE message (voir
+            // Prefs.getMaxMemoryChars/ObsidianController.trimMemoryIfNeeded).
+            "set_memory_limit" -> {
+                val requested = json.optInt("chars", -1)
+                if (requested <= 0) {
+                    "❌ Précise une taille en caractères (ex : \"réduis la mémoire à 1500 caractères\")."
+                } else {
+                    val applied = Prefs.saveMaxMemoryChars(context, requested)
+                    val note = if (applied != requested) " (ajusté entre 500 et 20000)" else ""
+                    "✅ Mémoire JARVIS limitée à $applied caractère(s)$note. Les entrées les plus anciennes " +
+                        "sont retirées en premier si la limite est dépassée — rien n'est perdu tant que ça tient dedans."
+                }
+            }
+            "get_memory_limit" -> "📊 Limite actuelle de la mémoire JARVIS : ${Prefs.getMaxMemoryChars(context)} caractères (~${Prefs.getMaxMemoryChars(context) / 4} tokens max injectés à chaque message)."
 
             "delete_event" -> {
                 val eventId = json.optLong("eventId", -1)

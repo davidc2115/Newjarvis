@@ -39,6 +39,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var adapter: ChatAdapter
     private lateinit var messageInput: EditText
     private lateinit var statusText: TextView
+    // Nom d'affichage dynamique de l'assistant (voir Prefs.getAssistantDisplayName) — propriété
+    // de classe (pas juste un val local à onCreate) car utilisé aussi depuis sendMessage() et
+    // d'autres méthodes ; rafraîchi dans onCreate ET onResume pour refléter un changement de
+    // mot-clé d'écoute fait dans Réglages sans forcer à tuer/relancer cette Activity.
+    private var assistantName: String = "Jarvis"
     private lateinit var ramUsageText: TextView
     private lateinit var pendingImageBar: View
     private lateinit var pendingImageThumbnail: ImageView
@@ -124,6 +129,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         recyclerView = findViewById(R.id.recyclerView)
         messageInput = findViewById(R.id.messageInput)
         statusText = findViewById(R.id.statusText)
+        // Nom d'affichage dynamique (voir Prefs.getAssistantDisplayName, dérivé du mot-clé
+        // d'écoute) — demande utilisateur : "même si je change le nom de l'écoute, ça écrit
+        // toujours JARVIS partout". Titre et hint du champ de saisie (fixes jusqu'ici, "J A R
+        // V I S" en dur dans le layout XML et hint_message dans strings.xml) sont désormais
+        // dérivés du réglage, avec le même style espacé/majuscule que l'ancien titre statique.
+        assistantName = Prefs.getAssistantDisplayName(this)
+        findViewById<TextView>(R.id.titleText).text = assistantName.uppercase().toCharArray().joinToString(" ")
+        messageInput.hint = "Parlez ou écrivez à $assistantName…"
         ramUsageText = findViewById(R.id.ramUsageText)
         refreshRamUsage()
         pendingImageBar = findViewById(R.id.pendingImageBar)
@@ -179,8 +192,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
 
         if (ConversationStore.messages.isEmpty()) {
+            // BUG RÉEL CORRIGÉ (signalement utilisateur : "le premier message de conversation
+            // écrit toujours Monsieur au lieu du nom que j'ai donné à JARVIS") : "Bonjour
+            // Monsieur" était figé en dur, sans lien avec le nom configuré -- remplacé par un
+            // "Bonjour" neutre (aucun titre/civilité n'est configurable par ailleurs, mieux
+            // vaut ne rien présumer que d'imposer "Monsieur") suivi du nom dynamique.
             addMessage(
-                "Bonjour Monsieur. Je suis JARVIS, votre assistant personnel avec contrôle complet du smartphone. " +
+                "Bonjour. Je suis $assistantName, votre assistant personnel avec contrôle complet du smartphone. " +
                     "Je peux passer des appels, envoyer des SMS, lire vos emails, gérer vos médias, votre agenda et vos fichiers. " +
                     "Que souhaitez-vous faire ?",
                 isUser = false,
@@ -334,6 +352,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
+        assistantName = Prefs.getAssistantDisplayName(this)
+        findViewById<TextView>(R.id.titleText).text = assistantName.uppercase().toCharArray().joinToString(" ")
+        messageInput.hint = "Parlez ou écrivez à $assistantName…"
         Prefs.getChatBackgroundColor(this).let { bg ->
             recyclerView.setBackgroundColor(if (bg != 0) bg else android.graphics.Color.TRANSPARENT)
         }
@@ -523,7 +544,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             attachments = allAttachments
         )
         clearPendingImage()
-        statusText.text = "● JARVIS réfléchit…"
+        statusText.text = "● $assistantName réfléchit…"
 
         // — Interception Obsidian Second Brain —
         val obsidianReply = ObsidianController.handleVoiceCommand(this, text)
@@ -631,11 +652,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("⚠️ JARVIS a planté au dernier lancement")
+            .setTitle("⚠️ $assistantName a planté au dernier lancement")
             .setMessage(report)
             .setPositiveButton("Copier") { _, _ ->
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Crash JARVIS", report))
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Crash $assistantName", report))
                 Toast.makeText(this, "Rapport copié dans le presse-papier", Toast.LENGTH_SHORT).show()
                 crashFile.delete()
             }

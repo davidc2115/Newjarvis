@@ -37,6 +37,10 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var orbView: OrbView
     private lateinit var statusText: TextView
+    // Nom d'affichage dynamique (voir Prefs.getAssistantDisplayName / MainActivity.assistantName
+    // pour le même mécanisme côté chat texte) -- demande utilisateur : "même si je change le nom
+    // de l'écoute, ça écrit toujours JARVIS partout".
+    private var assistantName: String = "Jarvis"
     private lateinit var transcriptText: TextView
     private lateinit var imageOverlay: ImageView
     private lateinit var ramUsageText: TextView
@@ -60,6 +64,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         orbView = findViewById(R.id.orbView)
         statusText = findViewById(R.id.voiceStatusText)
+        assistantName = Prefs.getAssistantDisplayName(this)
         transcriptText = findViewById(R.id.voiceTranscriptText)
         imageOverlay = findViewById(R.id.voiceImageOverlay)
         ramUsageText = findViewById(R.id.ramUsageText)
@@ -179,7 +184,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onEndOfSpeech() {
                     orbView.state = OrbView.OrbState.THINKING
                     orbView.audioLevel = 0f // le micro n'écoute plus, retombe au repos plutôt que figé au dernier niveau
-                    statusText.text = "JARVIS réfléchit…"
+                    statusText.text = "$assistantName réfléchit…"
                 }
 
                 override fun onError(error: Int) {
@@ -253,7 +258,7 @@ class VoiceModeActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun speak(text: String) {
         stopSpeechAndTts()
         orbView.state = OrbView.OrbState.SPEAKING
-        statusText.text = "JARVIS répond…"
+        statusText.text = "$assistantName répond…"
 
         if (!ttsReady) {
             isBusy = false
