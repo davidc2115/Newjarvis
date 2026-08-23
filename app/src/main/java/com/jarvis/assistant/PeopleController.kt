@@ -584,8 +584,22 @@ object PeopleController {
         return formatFullDetails(contact)
     }
 
+    // Termes génériques décrivant la FONCTIONNALITÉ elle-même plutôt qu'une vraie personne
+    // recherchée -- signalement utilisateur : "quand je demande un contact, il m'affiche les
+    // fiches contenant contact" (l'IA extrait parfois littéralement le mot "contact" de la
+    // phrase de l'utilisateur au lieu du nom réel, ex: "montre-moi le contact de Paul" mal
+    // interprété). Si la requête normalisée EST exactement un de ces mots (pas juste une
+    // note/adresse qui le contiendrait), on redemande une précision plutôt que de renvoyer
+    // (quasi) toutes les fiches par accident.
+    private val GENERIC_CONTACT_QUERIES = setOf(
+        "contact", "contacts", "fiche", "fiches", "personne", "personnes", "carnet"
+    )
+
     fun searchContacts(context: Context, query: String): String {
         if (!PermissionsManager.hasManageStoragePermission()) return ObsidianController.missingStorageAccessMessagePublic()
+        if (normalizeName(query) in GENERIC_CONTACT_QUERIES) {
+            return "❌ « $query » est trop général pour identifier un contact précis — donne un nom, un numéro, un email ou une adresse."
+        }
         val folder = contactsFolder(context)
         val files = folder.listFiles { f -> f.extension == "md" } ?: emptyArray()
         // BUG RÉEL CORRIGÉ (signalement utilisateur : "ne recherche pas non plus dans les

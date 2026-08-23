@@ -450,6 +450,26 @@ object Prefs {
         prefs(context).edit().remove(KEY_LOCATION_PRESENTATION_STYLE).apply()
     }
 
+    // Même principe que ci-dessus mais pour la présentation d'un planning/agenda
+    // (today_events/upcoming_events/week_events/search_event) -- demande utilisateur
+    // explicite, captures d'écran à l'appui : "quand je demande un planning, calendrier,
+    // agenda, que cela s'affiche toujours comme sur l'image". Le format PAR DÉFAUT est déjà
+    // du Kotlin déterministe groupé par jour (voir CalendarController.getEventsTimeRange),
+    // donc utile surtout pour un réglage PERSONNALISÉ différent du défaut ; sans consigne
+    // ici, l'affichage par défaut reste utilisé tel quel.
+    private const val KEY_CALENDAR_PRESENTATION_STYLE = "calendar_presentation_style"
+
+    fun getCalendarPresentationStyle(context: Context): String =
+        prefs(context).getString(KEY_CALENDAR_PRESENTATION_STYLE, "") ?: ""
+
+    fun saveCalendarPresentationStyle(context: Context, style: String) {
+        prefs(context).edit().putString(KEY_CALENDAR_PRESENTATION_STYLE, style.trim()).apply()
+    }
+
+    fun resetCalendarPresentationStyle(context: Context) {
+        prefs(context).edit().remove(KEY_CALENDAR_PRESENTATION_STYLE).apply()
+    }
+
     // ─── Liens cliquables (tel/mail/itinéraire) dans le texte des fiches ──────
     // Désactivé par défaut (false) : à la demande explicite de l'utilisateur, ces liens ne
     // doivent plus apparaître automatiquement dès qu'un numéro/email/adresse est détecté —

@@ -38,9 +38,18 @@ object JarvisCommandParser {
     // QUE si une consigne de présentation (persistée ou ponctuelle) est réellement
     // présente — sinon l'affichage brut de PeopleController reste utilisé tel quel,
     // sans risque de perte/altération de données par un appel IA superflu.
+    // today_events/upcoming_events/search_event RETIRÉS de cette liste (demande utilisateur,
+    // captures d'écran à l'appui : "JARVIS ne conserve jamais cette présentation" pour le
+    // planning) -- passer par summarizeNaturally reformule TOUJOURS en prose SANS mise en
+    // forme (retours à la ligne, sections, emojis structurants), ce qui détruisait le format
+    // déterministe groupé par jour produit par CalendarController.getEventsTimeRange/
+    // searchEvents (voir leur commentaire). Même traitement que search_contact_profile/
+    // list_contacts_by_category : l'affichage brut, déjà bien formaté en Kotlin, s'affiche
+    // maintenant tel quel par défaut, sauf consigne de présentation explicite (voir
+    // CALENDAR_FORMAT_MARKER plus bas) qui passe alors par applyMarkerFormatting.
     private val INFORMATIONAL_ACTIONS = setOf(
         "list_files", "search_files", "read_file", "storage_info",
-        "today_events", "upcoming_events", "search_event", "list_calendars",
+        "list_calendars",
         "read_sms", "read_unread_sms", "search_sms", "recent_calls",
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
@@ -811,6 +820,18 @@ object JarvisCommandParser {
                 Prefs.resetContactPresentationStyle(context)
                 "✅ Style de présentation des fiches contact réinitialisé au format par défaut."
             }
+            "set_calendar_presentation_style" -> {
+                val style = json.optString("style", "")
+                if (style.isBlank()) "❌ Précise comment tu veux que le planning/agenda soit présenté."
+                else {
+                    Prefs.saveCalendarPresentationStyle(context, style)
+                    "✅ Compris, je présenterai désormais toujours le planning/agenda comme ça : « $style ». Dis-moi « reset_calendar_presentation_style » (ou demande-le-moi en langage naturel) pour revenir au format par défaut."
+                }
+            }
+            "reset_calendar_presentation_style" -> {
+                Prefs.resetCalendarPresentationStyle(context)
+                "✅ Style de présentation du planning/agenda réinitialisé au format par défaut."
+            }
             "enable_contact_links" -> {
                 Prefs.setContactLinksEnabled(context, true)
                 "✅ Les numéros de téléphone, emails et adresses affichés dans les fiches sont maintenant cliquables (appel/mail/itinéraire direct)."
@@ -1528,6 +1549,21 @@ object JarvisCommandParser {
         val style = Prefs.getLocationPresentationStyle(context)
         if (style.isBlank()) return rawResult
         return "$rawResult\n\n$LOCATION_FORMAT_MARKER consigne permanente choisie par l'utilisateur pour l'affichage de la localisation : $style"
+    }
+
+    // Même principe que CONTACT_FORMAT_MARKER/LOCATION_FORMAT_MARKER mais pour le planning/
+    // agenda (today_events/upcoming_events/week_events/search_event) -- demande utilisateur
+    // explicite avec captures d'écran : "quand je demande un planning... que cela s'affiche
+    // toujours comme sur l'image". Contrairement aux fiches contact, le format PAR DÉFAUT
+    // (sans aucun style enregistré) est déjà satisfaisant tel quel -- voir
+    // CalendarController.getEventsTimeRange, réécrit en Kotlin déterministe groupé par jour
+    // -- ce marqueur ne sert donc qu'à une personnalisation VOLONTAIRE au-delà de ce défaut.
+    const val CALENDAR_FORMAT_MARKER = "[[CALENDAR_FORMAT_INSTRUCTION]]"
+
+    private fun withCalendarPresentationStyleNote(context: Context, rawResult: String): String {
+        val style = Prefs.getCalendarPresentationStyle(context)
+        if (style.isBlank()) return rawResult
+        return "$rawResult\n\n$CALENDAR_FORMAT_MARKER consigne permanente choisie par l'utilisateur pour l'affichage du planning/agenda : $style"
     }
 
     // Noms de couleurs français courants → hex, pour set_chat_theme — Color.parseColor()

@@ -264,24 +264,44 @@ object CalendarController {
             cursor?.use { c ->
                 if (c.count == 0) return "$title :\n\n  aucun événement trouvé."
 
-                val sb = StringBuilder("$title :\n\n")
-                val sdf = SimpleDateFormat("dd/MM HH:mm", Locale.FRENCH)
-                var idx = 0
-
+                // Présentation groupée par jour (🔹 séparateur, uniquement quand le jour
+                // change), heure bien visible, localisation cliquable via le préfixe 🏠 déjà
+                // utilisé pour les fiches contact -- demande utilisateur explicite (captures
+                // d'écran à l'appui) : un planning doit TOUJOURS s'afficher ainsi, jamais en
+                // prose. Contrairement à l'ancien format (liste numérotée plate), ce
+                // formatage est du Kotlin déterministe, pas une consigne que l'IA doit se
+                // rappeler de respecter à chaque tour -- voir aussi le retrait de
+                // today_events/upcoming_events/search_event de INFORMATIONAL_ACTIONS
+                // (JarvisCommandParser) pour que ce texte ne soit plus jamais réécrit en
+                // réponse orale sans mise en forme.
+                data class Row(val eventId: Long, val eventTitle: String, val dtStart: Long, val location: String, val calendarId: Long)
+                val rows = mutableListOf<Row>()
                 while (c.moveToNext()) {
-                    val eventId = c.getLong(0)
-                    val eventTitle = c.getString(1) ?: "Sans titre"
-                    val dtStart = c.getLong(2)
-                    val location = c.getString(3) ?: ""
-                    val calendarId = c.getLong(4)
-                    val calendarName = calendarNames[calendarId] ?: "Calendrier inconnu"
-                    val timeStr = sdf.format(Date(dtStart))
+                    rows.add(Row(c.getLong(0), c.getString(1) ?: "Sans titre", c.getLong(2), c.getString(3) ?: "", c.getLong(4)))
+                }
+                val distinctCalendarCount = rows.map { it.calendarId }.distinct().size
+                val dayFmt = SimpleDateFormat("dd/MM", Locale.FRENCH)
+                val timeFmt = SimpleDateFormat("HH'h'mm", Locale.FRENCH)
 
-                    sb.append("${idx + 1}. **$eventTitle** — $timeStr (ID: $eventId)\n")
-                    sb.append("   🗓️ Calendrier : $calendarName\n")
-                    if (location.isNotBlank()) sb.append("   📍 $location\n")
+                val sb = StringBuilder("$title\n\n")
+                var lastDay: String? = null
+                rows.forEach { row ->
+                    val day = dayFmt.format(Date(row.dtStart))
+                    if (day != lastDay) {
+                        sb.append("🔹 $day\n")
+                        lastDay = day
+                    }
+                    val timeStr = timeFmt.format(Date(row.dtStart))
+                    sb.append("🕐 $timeStr — ${row.eventTitle} (ID: ${row.eventId})\n")
+                    if (distinctCalendarCount > 1) {
+                        val calendarName = calendarNames[row.calendarId] ?: "Calendrier inconnu"
+                        sb.append("   🗓️ $calendarName\n")
+                    }
+                    if (row.location.isNotBlank()) {
+                        val locationPrefixed = if (row.location.trimStart().startsWith("🏠")) row.location else "🏠 ${row.location}"
+                        sb.append("📍 $locationPrefixed\n")
+                    }
                     sb.append("\n")
-                    idx++
                 }
                 sb.toString().trimEnd()
             } ?: "❌ Échec de l'accès à l'agenda."
@@ -436,9 +456,24 @@ object CalendarController {
         }
     }
 
+    // Termes génériques décrivant la FONCTIONNALITÉ elle-même plutôt qu'un vrai événement
+    // recherché -- même bug que côté contacts (signalement utilisateur : "pareil pour
+    // planning") : l'IA extrait parfois littéralement un mot comme "planning" ou "rendez-vous"
+    // de la phrase de l'utilisateur au lieu du VRAI titre d'événement recherché, ce qui
+    // matchait alors (quasi) tous les événements dont le titre contient ce mot générique.
+    private val GENERIC_EVENT_QUERIES = setOf(
+        "planning", "calendrier", "agenda", "evenement", "evenements", "rendez-vous", "rdv"
+    )
+
     fun searchEvents(context: Context, query: String, calendarRef: String? = null): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture de l'agenda non accordée."
+        }
+        val normalizedQuery = query.trim().lowercase()
+            .replace("é", "e").replace("è", "e").replace("ê", "e")
+            .replace("à", "a").replace("â", "a")
+        if (normalizedQuery in GENERIC_EVENT_QUERIES) {
+            return "❌ « $query » est trop général pour cibler un événement précis — utilise plutôt today_events/upcoming_events/week_events pour voir le planning, ou donne le VRAI titre (même partiel) de l'événement recherché."
         }
 
         var filterCalendarId: Long? = null
@@ -492,7 +527,12 @@ object CalendarController {
                     val location = c.getString(3) ?: ""
 
                     sb.append("${idx + 1}. **$title** — ${sdf.format(Date(date))} (ID: $eventId)\n")
-                    if (location.isNotBlank()) sb.append("   📍 $location\n")
+                    if (location.isNotBlank()) {
+                        // Même préfixe 🏠 que les fiches contact : rend l'adresse cliquable
+                        // (voir la règle "adresses postales toujours cliquables" du prompt).
+                        val locationPrefixed = if (location.trimStart().startsWith("🏠")) location else "🏠 $location"
+                        sb.append("   📍 $locationPrefixed\n")
+                    }
                     sb.append("\n")
                     idx++
                 }
