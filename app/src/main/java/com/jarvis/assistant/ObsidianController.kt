@@ -1007,6 +1007,50 @@ disant à JARVIS « retiens que... » / « oublie que... ».
                 }
             }
 
+            // ── Regroupement hiérarchique "Cerveau" → catégorie → nœuds (demande utilisateur :
+            // "mettre tous les contacts l'un à côté de l'autre... le cerveau puis contact, puis
+            // chaque contact autour de ce point en étoile ; je veux tout relié au cerveau de
+            // base"). Avant ce correctif, le nœud central ("hub") était simplement la note la
+            // plus reliée du vault, et chaque note était placée en spirale de Fibonacci selon
+            // son seul degré de connexion — des fiches contact, sans lien structurel entre elles,
+            // se retrouvaient donc dispersées façon confettis plutôt que groupées. On ajoute ici
+            // un nœud "🧠 Cerveau" synthétique (toujours le hub — degré artificiellement maximal
+            // pour garantir son rang 0 dans le tri par degré utilisé par OrbView et
+            // VaultGraphExplorerView, tous deux réutilisés SANS aucune modification) et, pour
+            // chaque dossier du vault regroupant au moins 2 notes conservées (ex. "Contacts"),
+            // un nœud-ancre synthétique relié au Cerveau d'un côté et à CHAQUE note du dossier de
+            // l'autre — l'ancre agit comme le point central de l'étoile demandée. Les notes
+            // isolées (dossier à une seule note, ou note directement à la racine du vault) et les
+            // têtes de chaîne Mémoire/Génération sont reliées directement au Cerveau, pour qu'
+            // aucun nœud ne reste flottant sans lien.
+            val byCategory = keptIndices.indices.groupBy { newIdx -> files[keptIndices[newIdx]].parentFile?.name ?: "" }
+            val categoryAnchorIdx = HashMap<String, Int>()
+            byCategory.forEach { (category, members) ->
+                if (members.size >= 2 && category.isNotBlank() && category != root.name) {
+                    val anchorIdx = nodes.size
+                    nodes.add(VaultGraphNode("📁 $category", degree = members.size, forceLabel = true))
+                    categoryAnchorIdx[category] = anchorIdx
+                    members.forEach { memberIdx -> edgesSet.add(if (anchorIdx < memberIdx) anchorIdx to memberIdx else memberIdx to anchorIdx) }
+                }
+            }
+
+            val brainIdx = nodes.size
+            nodes.add(VaultGraphNode("🧠 Cerveau", degree = Int.MAX_VALUE / 2, forceLabel = true))
+            categoryAnchorIdx.values.forEach { anchorIdx ->
+                edgesSet.add(if (brainIdx < anchorIdx) brainIdx to anchorIdx else anchorIdx to brainIdx)
+            }
+            val clusteredMembers = byCategory.filterKeys { it in categoryAnchorIdx }.values.flatten().toSet()
+            keptIndices.indices.filterNot { it in clusteredMembers }.forEach { orphanIdx ->
+                edgesSet.add(if (brainIdx < orphanIdx) brainIdx to orphanIdx else orphanIdx to brainIdx)
+            }
+            if (memoryFacts.isNotEmpty()) {
+                val firstMemoryIdx = keptIndices.size
+                edgesSet.add(if (brainIdx < firstMemoryIdx) brainIdx to firstMemoryIdx else firstMemoryIdx to brainIdx)
+            }
+            generationIndices.firstOrNull()?.let { firstGenIdx ->
+                edgesSet.add(if (brainIdx < firstGenIdx) brainIdx to firstGenIdx else firstGenIdx to brainIdx)
+            }
+
             VaultGraph(nodes, edgesSet.toList())
         } catch (e: Exception) {
             null
