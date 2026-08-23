@@ -266,6 +266,13 @@ object ApiClient {
 
     suspend fun sendChat(context: Context, fullHistory: List<HistoryEntry>): ChatResult =
         withContext(Dispatchers.IO) {
+            // Demande utilisateur ("même avec toutes les IA, reste long, alors que je ne
+            // dépasse jamais 7 Go de RAM ni 50 Ko de réseau sur le téléphone") : mesure le
+            // temps RÉEL passé dans la recherche vault/mémoire ci-dessous (pur I/O disque, donc
+            // invisible en RAM/réseau) avant de contacter une IA -- voir le log juste avant
+            // dispatchToProvider plus bas, qui inclut maintenant cette durée pour distinguer
+            // "c'est le scan du vault qui traîne" de "c'est vraiment l'IA qui est lente".
+            val chatStartMs = System.currentTimeMillis()
             val provider = Prefs.getProvider(context)
             val history = trimHistory(fullHistory)
 
@@ -321,7 +328,8 @@ object ApiClient {
             // vault ci-dessus s'est bien terminée et que le dispatch vers le fournisseur actif
             // démarre réellement, pour distinguer un blocage "avant" (vault/mémoire) d'un
             // blocage "dans" l'appel IA lui-même.
-            DiagnosticsLog.log(context, "Chat", "Dispatch vers ${provider.name}")
+            val preDispatchMs = System.currentTimeMillis() - chatStartMs
+            DiagnosticsLog.log(context, "Chat", "Dispatch vers ${provider.name} (recherche vault+mémoire : ${preDispatchMs} ms)")
             val rawResponse = try {
                 dispatchToProvider(context, provider, history, effectiveSystemPrompt)
             } catch (e: Exception) {

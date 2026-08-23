@@ -573,17 +573,31 @@ ${if (linkedContent.isNotBlank()) linkedContent else "— Notes du jour —"}
         // message pour rien (cause probable du signalement "JARVIS très long à répondre" une
         // fois le vault chargé) — exclu de ce scan de contexte automatique. Reste consultable
         // explicitement via list_generations/obsidian_search si vraiment nécessaire.
+        // Demande utilisateur ("même avec toutes les IA, reste long, alors que je ne dépasse
+        // jamais 7 Go de RAM ni 50 Ko de réseau") : ce scan lit jusqu'à 40 Ko de CHAQUE note du
+        // vault, à CHAQUE message, avant même de contacter une IA (cloud ou locale) -- c'est du
+        // pur I/O disque séquentiel, qui n'utilise ni RAM ni réseau de façon notable (donc
+        // invisible dans les indicateurs système que l'utilisateur surveillait), mais dont le
+        // temps total grandit linéairement avec le nombre de notes -- et ce vault accumule des
+        // fichiers en continu depuis des mois (fiches contact, pages Wiki générées par lot de
+        // 5 à 15 par source, mémoire, notes quotidiennes...). Plafond défensif à 400 fichiers
+        // les plus récents : borne le pire cas à un temps constant quel que soit la taille future
+        // du vault, au prix (rare) de manquer une note très ancienne jamais retouchée -- un
+        // compromis raisonnable puisque quickContextSearch n'est qu'un aperçu automatique, pas
+        // la seule voie d'accès aux notes (obsidian_search reste disponible sans cette limite).
+        val maxFilesScanned = 400
         val candidateFiles = root.walkTopDown()
             .filter {
                 it.isFile && it.extension == "md" && !it.path.contains(".obsidian") &&
                     it.parentFile?.name != "Générations"
             }
+            .toList()
+            .let { all -> if (all.size > maxFilesScanned) all.sortedByDescending { f -> f.lastModified() }.take(maxFilesScanned) else all }
 
         if (words.isEmpty()) {
             val recent = candidateFiles
                 .sortedByDescending { it.lastModified() }
                 .take(maxNotes)
-                .toList()
             if (recent.isEmpty()) return null
             return recent.joinToString("\n") { "### ${it.nameWithoutExtension} (récent)" }
         }
