@@ -625,19 +625,31 @@ object ApiClient {
         // journalisé (pas d'entrée dans allErrors ci-dessous, qui reste réservé aux fournisseurs
         // cloud) : ne doit jamais faire échouer tout le mode Auto à lui seul.
         if (Prefs.isOllamaAutoEnabled(context) && Prefs.getOllamaHost(context).isNotBlank()) {
-            val ollamaResult = try {
-                sendOpenAiWithRotation(context, history, Provider.OLLAMA, systemPrompt, fastFailForAutoMode = true)
-            } catch (e: Exception) {
-                "Erreur : ${e.message}"
+            // Coupe-circuit (voir Prefs.isOllamaAutoInCooldown) : évite de refaire subir à
+            // l'utilisateur le délai complet de la sonde rapide (~25s) sur CHAQUE message quand
+            // Ollama vient déjà d'échouer il y a moins de 2 minutes -- logs de diagnostic fournis
+            // par l'utilisateur montrant ce délai répété identique à chaque message qui le
+            // prouvent. Repli direct et silencieux sur le cloud tant que le délai n'est pas
+            // écoulé ; Ollama est retenté automatiquement dès que le coup d'après.
+            if (Prefs.isOllamaAutoInCooldown(context)) {
+                DiagnosticsLog.log(context, "IA-AUTO", "Ollama (réseau local) en coupe-circuit (échec récent) -- repli direct sur le cloud sans nouvel essai")
+            } else {
+                val ollamaResult = try {
+                    sendOpenAiWithRotation(context, history, Provider.OLLAMA, systemPrompt, fastFailForAutoMode = true)
+                } catch (e: Exception) {
+                    "Erreur : ${e.message}"
+                }
+                if (!ollamaResult.startsWith("Erreur") &&
+                    !ollamaResult.startsWith("Connexion impossible") &&
+                    !ollamaResult.startsWith("Format de réponse inattendu") &&
+                    !ollamaResult.startsWith("Aucune clé API")
+                ) {
+                    Prefs.clearOllamaAutoFailure(context)
+                    return ollamaResult
+                }
+                Prefs.setOllamaAutoLastFailureMs(context, System.currentTimeMillis())
+                DiagnosticsLog.log(context, "IA-AUTO", "Ollama (réseau local) indisponible, repli sur le cloud : $ollamaResult")
             }
-            if (!ollamaResult.startsWith("Erreur") &&
-                !ollamaResult.startsWith("Connexion impossible") &&
-                !ollamaResult.startsWith("Format de réponse inattendu") &&
-                !ollamaResult.startsWith("Aucune clé API")
-            ) {
-                return ollamaResult
-            }
-            DiagnosticsLog.log(context, "IA-AUTO", "Ollama (réseau local) indisponible, repli sur le cloud : $ollamaResult")
         }
 
         // Un fournisseur est candidat s'il a au moins une clé configurée, OU s'il ne nécessite

@@ -955,6 +955,41 @@ object Prefs {
         prefs(context).edit().putString("ollama_fallback_models", models.trim()).apply()
     }
 
+    // BUG RÉEL CORRIGÉ (signalement utilisateur, confirmé par logs de diagnostic fournis : "Le
+    // 23/08 à 10:50:31, [IA-AUTO] Ollama (réseau local) indisponible... timeout" répété à
+    // 10:51:23, 10:51:59... EXACTEMENT toutes les ~25s, une fois par message) : en mode
+    // Automatique, sendAuto() retente Ollama en PREMIER sur CHAQUE message, même si l'essai
+    // précédent vient d'échouer il y a quelques secondes -- sur un hôte durablement indisponible
+    // ou trop lent pour ce téléphone (RAM insuffisante côté serveur, CPU faible...), ça impose
+    // le délai complet du sonde rapide (fastFailForAutoMode, ~25s) à CHAQUE message, sans
+    // JAMAIS s'améliorer, avant même de contacter le cloud -- exactement le "reste très lent
+    // même avec les IA cloud" observé, alors que ni la RAM ni le réseau du téléphone n'étaient
+    // sollicités (une requête qui attend une réponse TCP n'utilise ni RAM ni bande passante).
+    // Coupe-circuit simple : mémorise l'horodatage du dernier échec Ollama en mode Auto: tant
+    // que ce délai n'est pas écoulé, sendAuto() saute directement Ollama et va droit au cloud
+    // -- Ollama reste retenté périodiquement (pas désactivé définitivement) au cas où l'hôte
+    // redevienne joignable/rapide entre-temps.
+    private const val OLLAMA_AUTO_COOLDOWN_MS = 120_000L
+
+    fun getOllamaAutoLastFailureMs(context: Context): Long =
+        prefs(context).getLong("ollama_auto_last_failure_ms", 0L)
+
+    fun setOllamaAutoLastFailureMs(context: Context, timestampMs: Long) {
+        prefs(context).edit().putLong("ollama_auto_last_failure_ms", timestampMs).apply()
+    }
+
+    fun clearOllamaAutoFailure(context: Context) {
+        prefs(context).edit().remove("ollama_auto_last_failure_ms").apply()
+    }
+
+    /** true si Ollama a échoué récemment en mode Automatique et devrait être sauté ce
+     *  message-ci (voir OLLAMA_AUTO_COOLDOWN_MS ci-dessus). */
+    fun isOllamaAutoInCooldown(context: Context): Boolean {
+        val last = getOllamaAutoLastFailureMs(context)
+        if (last <= 0L) return false
+        return System.currentTimeMillis() - last < OLLAMA_AUTO_COOLDOWN_MS
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // BOX INTERNET UNIFIÉE (voir RouterController) — un seul système pour piloter
     // Freebox, Livebox (Orange), SFR Box ou Bbox (Bouygues) selon le fournisseur
