@@ -119,7 +119,6 @@ import java.util.concurrent.TimeUnit
  * le modèle chargé en mémoire en permanence, seules les couches activement utilisées à un
  * instant donné sont conservées, le reste étant libéré — réduit nettement le pic de RAM au prix
  * d'une génération plus lente, compromis approprié sur un téléphone plutôt qu'un GPU dédié.
- */
  *
  * CINQUIÈME CAUSE RÉELLE TROUVÉE ET CORRIGÉE (signalement utilisateur : "affiche toujours le
  * même message pour la mémoire insuffisante, même avec au moins 9 Go de RAM libre") : deux
