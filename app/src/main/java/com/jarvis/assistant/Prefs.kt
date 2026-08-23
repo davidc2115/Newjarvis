@@ -1268,9 +1268,14 @@ object Prefs {
     // (ex: "réduis l'historique envoyé à l'IA à 8 messages" en conversation) sans dépendre
     // d'un outil tiers non fiable pour "compresser les prompts" (voir échange sur OmniRoute,
     // écarté pour risques de sécurité réels : code obfusqué signalé, comptes GitHub multiples
-    // quasi-identiques, CVE référencée). 16 reste la valeur par défaut : aucun changement de
-    // comportement tant que l'utilisateur ne réduit pas lui-même cette limite.
-    private const val DEFAULT_MAX_HISTORY_MESSAGES = 16
+    // quasi-identiques, CVE référencée).
+    // Défaut abaissé 16 -> 8 (demande utilisateur répétée : "toujours +4000 tokens par
+    // requête, réduis-les drastiquement") : avec CORE_SYSTEM_PROMPT déjà découpé en modules
+    // à mot-clé, l'historique (dont la longueur de CHAQUE message, sans plafond individuel
+    // avant ce correctif -- voir trimHistory ci-dessous) restait le plus gros poste variable
+    // sur une conversation active. Le chat affiché reste, comme toujours, complet et
+    // inchangé -- seule la fenêtre transmise à l'IA est réduite.
+    private const val DEFAULT_MAX_HISTORY_MESSAGES = 8
     private const val MIN_HISTORY_MESSAGES = 4
     private const val MAX_HISTORY_MESSAGES_CAP = 60
 
@@ -1286,13 +1291,18 @@ object Prefs {
         return clamped
     }
 
-    // Mode compact (demande utilisateur : "~7500 tokens par message, c'est beaucoup trop") :
-    // voir ApiClient.buildSystemPrompt pour le détail de ce que ça change concrètement
-    // (modules alwaysIf GitHub/Home Assistant/Box repassent en pur mot-clé). Désactivé par
-    // défaut, comme tous les réglages de réduction de tokens de cette section -- aucun
-    // changement de comportement tant que l'utilisateur ne l'active pas lui-même.
+    // Mode compact (demande utilisateur : "~7500 tokens par message, c'est beaucoup trop",
+    // puis "toujours +4000 tokens par requête, réduis-les drastiquement") : voir
+    // ApiClient.buildSystemPrompt pour le détail de ce que ça change concrètement (modules
+    // alwaysIf GitHub/Home Assistant/Box repassent en pur mot-clé, ajoutés seulement si le
+    // message en parle). ACTIVÉ par défaut désormais (c'était désactivé par défaut au premier
+    // ajout de ce réglage) : les mots-clés de ces trois modules couvrent déjà largement les
+    // formulations naturelles ("allume la lumière", "github", "freebox"...), donc le risque
+    // réel de rater une intégration pourtant configurée reste faible face au gain systématique
+    // sur CHAQUE message pour qui a une/plusieurs intégrations actives. set_compact_mode{false}
+    // reste disponible pour revenir à l'ancien comportement (toujours inclus) si besoin.
     fun isCompactPromptMode(context: Context): Boolean =
-        prefs(context).getBoolean("compact_prompt_mode", false)
+        prefs(context).getBoolean("compact_prompt_mode", true)
 
     fun setCompactPromptMode(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean("compact_prompt_mode", enabled).apply()
@@ -1302,10 +1312,13 @@ object Prefs {
     // ObsidianController.MAX_MEMORY_CHARS, historiquement figée à 4000 caractères = ~1000
     // tokens systématiquement possibles à CHAQUE message puisque cette note est relue EN
     // ENTIER sans condition de mot-clé). Réglable pour la même raison que l'historique
-    // ci-dessus : 4000 reste la valeur par défaut, aucun changement tant que l'utilisateur ne
-    // réduit pas lui-même cette limite en conversation (ex: "réduis la mémoire à 1500
-    // caractères"). Bornes larges car une "mémoire" trop courte perd vite son utilité.
-    private const val DEFAULT_MAX_MEMORY_CHARS = 4000
+    // ci-dessus (ex: "réduis la mémoire à 1500 caractères"). Bornes larges car une "mémoire"
+    // trop courte perd vite son utilité.
+    // Défaut abaissé 4000 -> 1500 (même demande utilisateur que ci-dessus, "réduis
+    // drastiquement") : ~1000 tokens systématiques à CHAQUE message ramenés à ~375 tokens,
+    // sans rien retirer des faits déjà enregistrés -- seuls les plus ANCIENS (FIFO, voir
+    // ObsidianController) sortent de la fenêtre injectée si la note dépasse la limite.
+    private const val DEFAULT_MAX_MEMORY_CHARS = 1500
     private const val MIN_MEMORY_CHARS = 500
     private const val MAX_MEMORY_CHARS_CAP = 20_000
 
