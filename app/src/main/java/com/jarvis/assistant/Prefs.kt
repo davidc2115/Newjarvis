@@ -413,6 +413,31 @@ object Prefs {
             .apply()
     }
 
+    // BUG RÉEL CORRIGÉ (signalement utilisateur : "chaque fois que je demande une
+    // modification -- ordre, ajout d'une donnée, emoji... -- RIEN N'EST CONSERVÉ, ça change
+    // complètement l'affichage") : les 3 fonctions saveXxxPresentationStyle ci-dessous
+    // ÉCRASAIENT purement et simplement l'ancienne consigne à chaque nouvel appel. Résultat :
+    // demander d'abord "ajoute la date de naissance" puis plus tard "mets le numéro avant
+    // l'email" faisait perdre la première consigne, qui n'était plus jamais appliquée. On
+    // accumule maintenant chaque nouvelle consigne à la suite des précédentes (au lieu de les
+    // remplacer), pour qu'elles s'appliquent TOUTES ensemble à chaque fois. Un plafond de
+    // longueur évite une croissance illimitée du prompt (voir réduction de tokens) : passé
+    // ce plafond, on abandonne les consignes les plus anciennes (les plus susceptibles d'être
+    // déjà couvertes par une consigne plus récente) plutôt que de tout tronquer au hasard.
+    private const val MAX_STYLE_LENGTH = 900
+
+    private fun appendStyleInstruction(existing: String, newInstruction: String): String {
+        val trimmedNew = newInstruction.trim()
+        if (trimmedNew.isBlank()) return existing
+        var combined = if (existing.isBlank()) trimmedNew else "$existing ; puis : $trimmedNew"
+        while (combined.length > MAX_STYLE_LENGTH) {
+            val nextSeparator = combined.indexOf(" ; puis : ")
+            if (nextSeparator < 0) break
+            combined = combined.substring(nextSeparator + " ; puis : ".length)
+        }
+        return combined
+    }
+
     // ─── Style de présentation préféré des fiches contact ─────────────────────
     // Cause réelle du bug "je demande un type de présentation et il ne le reprend pas
     // automatiquement" : le format d'une fiche contact était toujours généré tel quel par
@@ -427,7 +452,7 @@ object Prefs {
         prefs(context).getString(KEY_CONTACT_PRESENTATION_STYLE, "") ?: ""
 
     fun saveContactPresentationStyle(context: Context, style: String) {
-        prefs(context).edit().putString(KEY_CONTACT_PRESENTATION_STYLE, style.trim()).apply()
+        prefs(context).edit().putString(KEY_CONTACT_PRESENTATION_STYLE, appendStyleInstruction(getContactPresentationStyle(context), style)).apply()
     }
 
     fun resetContactPresentationStyle(context: Context) {
@@ -443,7 +468,7 @@ object Prefs {
         prefs(context).getString(KEY_LOCATION_PRESENTATION_STYLE, "") ?: ""
 
     fun saveLocationPresentationStyle(context: Context, style: String) {
-        prefs(context).edit().putString(KEY_LOCATION_PRESENTATION_STYLE, style.trim()).apply()
+        prefs(context).edit().putString(KEY_LOCATION_PRESENTATION_STYLE, appendStyleInstruction(getLocationPresentationStyle(context), style)).apply()
     }
 
     fun resetLocationPresentationStyle(context: Context) {
@@ -463,7 +488,7 @@ object Prefs {
         prefs(context).getString(KEY_CALENDAR_PRESENTATION_STYLE, "") ?: ""
 
     fun saveCalendarPresentationStyle(context: Context, style: String) {
-        prefs(context).edit().putString(KEY_CALENDAR_PRESENTATION_STYLE, style.trim()).apply()
+        prefs(context).edit().putString(KEY_CALENDAR_PRESENTATION_STYLE, appendStyleInstruction(getCalendarPresentationStyle(context), style)).apply()
     }
 
     fun resetCalendarPresentationStyle(context: Context) {

@@ -799,7 +799,7 @@ object PeopleController {
                 append("**Professionnel**\n")
                 if (!c.phonePro.isNullOrBlank()) append("📱 ${c.phonePro}\n")
                 if (!c.company.isNullOrBlank()) append("🏢 ${c.company}\n")
-                if (!c.addressPro.isNullOrBlank()) append("📍 ${c.addressPro}\n")
+                if (!c.addressPro.isNullOrBlank()) append("🏠 ${c.addressPro}\n")
                 if (!c.position.isNullOrBlank()) append("💼 Poste : ${c.position}\n")
                 append("\n")
             }

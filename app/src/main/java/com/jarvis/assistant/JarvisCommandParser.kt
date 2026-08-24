@@ -47,13 +47,25 @@ object JarvisCommandParser {
     // list_contacts_by_category : l'affichage brut, déjà bien formaté en Kotlin, s'affiche
     // maintenant tel quel par défaut, sauf consigne de présentation explicite (voir
     // CALENDAR_FORMAT_MARKER plus bas) qui passe alors par applyMarkerFormatting.
+    // Même liste/normalisation que PeopleController.GENERIC_CONTACT_QUERIES (privée dans ce
+    // fichier-là) -- réutilisée ici pour que le garde-fou anti-requête-trop-générale s'applique
+    // AUSSI au chemin search_contact -> PeopleController.searchContacts, avant même d'appeler
+    // la fonction (évite un message d'erreur générique du contrôleur natif en repli).
+    private val GENERIC_CONTACT_QUERIES = setOf(
+        "contact", "contacts", "fiche", "fiches", "personne", "personnes", "carnet"
+    )
+
+    private fun normalizeGenericQuery(name: String): String =
+        java.text.Normalizer.normalize(name.lowercase().trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+
     private val INFORMATIONAL_ACTIONS = setOf(
         "list_files", "search_files", "read_file", "storage_info",
         "list_calendars",
         "read_sms", "read_unread_sms", "search_sms", "recent_calls",
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
-        "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
+        "web_search", "get_location", "list_contact_labels", "list_contacts_by_label",
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "run_glif",
         "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "token_usage",
@@ -206,10 +218,33 @@ object JarvisCommandParser {
             }
             "read_unread_sms" -> SmsController.readUnreadSms(context)
 
+            // BUG RÉEL CORRIGÉ (signalement utilisateur : affichage incohérent, "il m'affiche les
+            // fiches contenant contact" tantôt bien mises en forme tantôt "en vrac") : cette
+            // action passait TOUJOURS par ContactsController (carnet Android natif, simple liste
+            // plate) au lieu de la fiche riche du vault (PeopleController.formatFullDetails,
+            // identique à search_contact_profile) -- selon que l'IA appelait search_contact ou
+            // search_contact_profile pour une même demande utilisateur, le résultat affiché
+            // n'avait RIEN à voir. On donne maintenant systématiquement la priorité à la fiche
+            // du vault ; le carnet natif ne sert plus que de repli si aucune fiche n'existe.
             "search_contact" -> {
                 val name = json.optString("name", "").ifBlank { json.optString("query", "") }
-                if (name.isBlank()) ContactsController.getContactList(context, json.optInt("count", 100))
-                else ContactsController.searchContacts(context, name)
+                if (name.isBlank()) {
+                    withContactPresentationStyleNote(context, PeopleController.listByCategory(context, ""), "")
+                } else if (normalizeGenericQuery(name) in GENERIC_CONTACT_QUERIES) {
+                    "❌ « $name » est trop général pour identifier un contact précis — donne un nom, un numéro, un email ou une adresse."
+                } else {
+                    val ficheResult = PeopleController.searchContacts(context, name)
+                    val ficheFound = !ficheResult.startsWith("🔍 Aucun") && !ficheResult.startsWith("❌")
+                    if (ficheFound) {
+                        PeopleController.getLatestImageAttachment(context, name)?.let { (b64, mime) ->
+                            pendingImageBase64 = b64
+                            pendingImageMime = mime
+                        }
+                        withContactPresentationStyleNote(context, ficheResult, "")
+                    } else {
+                        ContactsController.searchContacts(context, name)
+                    }
+                }
             }
             "list_contact_labels" -> ContactsController.listAllLabels(context)
             "list_contacts_by_label" -> {
@@ -813,7 +848,7 @@ object JarvisCommandParser {
                 if (style.isBlank()) "❌ Précise comment tu veux que les fiches contact soient présentées."
                 else {
                     Prefs.saveContactPresentationStyle(context, style)
-                    "✅ Compris, je présenterai désormais toujours tes fiches contact comme ça : « $style ». Dis-moi « reset_contact_presentation_style » (ou demande-le-moi en langage naturel) pour revenir au format par défaut."
+                    "✅ Compris, j'ajoute ça à mes consignes permanentes pour tes fiches contact : « $style ». Dis-moi « reset_contact_presentation_style » (ou demande-le-moi en langage naturel) pour tout effacer et revenir au format par défaut."
                 }
             }
             "reset_contact_presentation_style" -> {
@@ -825,7 +860,7 @@ object JarvisCommandParser {
                 if (style.isBlank()) "❌ Précise comment tu veux que le planning/agenda soit présenté."
                 else {
                     Prefs.saveCalendarPresentationStyle(context, style)
-                    "✅ Compris, je présenterai désormais toujours le planning/agenda comme ça : « $style ». Dis-moi « reset_calendar_presentation_style » (ou demande-le-moi en langage naturel) pour revenir au format par défaut."
+                    "✅ Compris, j'ajoute ça à mes consignes permanentes pour le planning/agenda : « $style ». Dis-moi « reset_calendar_presentation_style » (ou demande-le-moi en langage naturel) pour tout effacer et revenir au format par défaut."
                 }
             }
             "reset_calendar_presentation_style" -> {
@@ -1102,7 +1137,7 @@ object JarvisCommandParser {
                 if (style.isBlank()) "❌ Précise comment tu veux que la localisation soit présentée."
                 else {
                     Prefs.saveLocationPresentationStyle(context, style)
-                    "✅ Compris, je présenterai désormais toujours la localisation comme ça : « $style ». Dis-moi « reset_location_presentation_style » (ou demande-le-moi en langage naturel) pour revenir au format par défaut."
+                    "✅ Compris, j'ajoute ça à mes consignes permanentes pour la localisation : « $style ». Dis-moi « reset_location_presentation_style » (ou demande-le-moi en langage naturel) pour tout effacer et revenir au format par défaut."
                 }
             }
             "reset_location_presentation_style" -> {

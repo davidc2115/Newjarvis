@@ -631,10 +631,18 @@ object ApiClient {
         }
 
         val prompt =
-            "Voici un résultat (fiche contact, liste de fiches, ou localisation), avec des données EXACTES " +
-                "et RÉELLES extraites de l'application :\n\n$data\n\n" +
-                "Consigne(s) de présentation à appliquer : $instruction\n\n" +
-                "Réécris ce résultat en respectant ces consignes. Règle absolue : ne change, n'ajoute, " +
+            "Voici un résultat (fiche contact, liste de fiches, planning/agenda, ou localisation), avec des " +
+                "données EXACTES et RÉELLES extraites de l'application :\n\n$data\n\n" +
+                "Consigne(s) de présentation à appliquer (si plusieurs, séparées par « ; puis : » -- ce sont " +
+                "TOUTES des demandes de modification faites par l'utilisateur À DES MOMENTS DIFFÉRENTS, qui " +
+                "s'ajoutent les unes aux autres : applique-les TOUTES ensemble, dans l'ordre donné, sans en " +
+                "oublier ni en ignorer une seule même si une plus récente semble différente) : $instruction\n\n" +
+                "Réécris ce résultat en respectant fidèlement TOUTES ces consignes cumulées. Règle absolue : " +
+                "pour tout ce que ces consignes NE précisent PAS explicitement (emoji utilisés, ordre des " +
+                "champs non mentionnés, libellés, structure), garde EXACTEMENT la présentation par défaut " +
+                "telle qu'elle apparaît ci-dessus -- n'invente et ne varie RIEN de ta propre initiative, le " +
+                "but est un résultat identique à chaque fois pour les mêmes consignes, pas une reformulation " +
+                "créative. Règle absolue supplémentaire : ne change, n'ajoute, " +
                 "ne devine et n'omets AUCUNE donnée (noms, numéros, adresses, dates, notes, historique, " +
                 "coordonnées restent strictement identiques à ceux fournis ci-dessus) — seule la FORME peut " +
                 "changer (ordre, libellés, structure en sections, tableau texte...), jamais le fond. " +
