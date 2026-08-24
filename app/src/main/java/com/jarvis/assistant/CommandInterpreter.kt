@@ -99,6 +99,28 @@ object CommandInterpreter {
         RegexOption.IGNORE_CASE
     )
 
+    // BUG SIGNALÉ : "aucun contact trouvé" alors que le contact existe bien -- cause réelle :
+    // les regex de recherche/appel par nom capturent TOUT ce qui suit ("le contact de Julie",
+    // "adresse de Julie" une fois le "de" déjà consommé par une autre variante, "appelle Julie
+    // maintenant"...) et la préposition ou le mot de politesse en trop finit dans la recherche
+    // ContactsController.findContact (LIKE '%...%'), qui ne matche alors plus rien. cleanName()
+    // retire ces mots parasites AVANT la recherche.
+    private val leadingArticleRegex = Regex("^(?:de|d['’]|le|la|l['’]|du|des)\\s+", RegexOption.IGNORE_CASE)
+    private val trailingFillerRegex = Regex(
+        "\\s+(?:s['’]il\\s+te\\s+pla[iî]t|stp|maintenant|tout\\s+de\\s+suite|merci|please)\\s*$",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun cleanName(raw: String): String {
+        var name = trailingFillerRegex.replace(raw.trim(), "").trim()
+        var match = leadingArticleRegex.find(name)
+        while (match != null) {
+            name = name.substring(match.range.last + 1).trim()
+            match = leadingArticleRegex.find(name)
+        }
+        return name
+    }
+
     fun parse(text: String): Command? {
         val trimmed = text.trim()
         val lower = trimmed.lowercase()
@@ -135,18 +157,18 @@ object CommandInterpreter {
         }
 
         callContactRegex.find(trimmed)?.let { match ->
-            val name = match.groupValues[1].trim()
+            val name = cleanName(match.groupValues[1])
             if (name.isNotBlank()) return Command.CallContact(name)
         }
 
         createContactRegex.find(trimmed)?.let { match ->
-            val name = match.groupValues[1].trim()
+            val name = cleanName(match.groupValues[1])
             val number = match.groupValues[2].filter { it.isDigit() || it == '+' }
             if (name.isNotBlank() && number.length >= 6) return Command.CreateContact(name, number)
         }
 
         findContactRegex.find(trimmed)?.let { match ->
-            val name = match.groupValues[1].trim()
+            val name = cleanName(match.groupValues[1])
             if (name.isNotBlank()) return Command.FindContact(name)
         }
 
