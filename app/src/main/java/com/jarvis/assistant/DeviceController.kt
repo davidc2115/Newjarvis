@@ -39,7 +39,14 @@ object DeviceController {
         }
     }
 
-    fun setTimer(context: Context, seconds: Int, label: String?): Boolean {
+    // BUG SIGNALÉ PERSISTANT : "aucune appli Horloge trouvée" même après le fix <queries>
+    // (voir AndroidManifest.xml) ET réinstallation d'un build à jour -- donc soit un autre
+    // type d'exception que ActivityNotFoundException est en cause (SecurityException,
+    // IllegalStateException...), soit une particularité du téléphone/de l'appli Horloge du
+    // fabricant. Boolean masquait totalement la vraie exception (catch générique -> false ->
+    // message toujours identique) ; Result<Unit> la fait remonter jusqu'au chat pour un vrai
+    // diagnostic au lieu de deviner à l'aveugle.
+    fun setTimer(context: Context, seconds: Int, label: String?): Result<Unit> {
         return try {
             val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
                 putExtra(AlarmClock.EXTRA_LENGTH, seconds)
@@ -48,13 +55,13 @@ object DeviceController {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(intent)
-            true
+            Result.success(Unit)
         } catch (e: Exception) {
-            false
+            Result.failure(e)
         }
     }
 
-    fun setAlarm(context: Context, hour: Int, minute: Int, label: String?): Boolean {
+    fun setAlarm(context: Context, hour: Int, minute: Int, label: String?): Result<Unit> {
         return try {
             val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
                 putExtra(AlarmClock.EXTRA_HOUR, hour)
@@ -64,9 +71,9 @@ object DeviceController {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(intent)
-            true
+            Result.success(Unit)
         } catch (e: Exception) {
-            false
+            Result.failure(e)
         }
     }
 

@@ -335,13 +335,22 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             is CommandInterpreter.Command.Timer -> {
-                val ok = DeviceController.setTimer(this, command.seconds, null)
-                if (ok) "⏱️ Minuteur lancé." else "❌ Impossible de lancer le minuteur (aucune appli Horloge trouvée ?)."
+                val result = DeviceController.setTimer(this, command.seconds, null)
+                if (result.isSuccess) {
+                    "⏱️ Minuteur lancé."
+                } else {
+                    val e = result.exceptionOrNull()
+                    "❌ Impossible de lancer le minuteur -- ${e?.javaClass?.simpleName} : ${e?.message}"
+                }
             }
             is CommandInterpreter.Command.Alarm -> {
-                val ok = DeviceController.setAlarm(this, command.hour, command.minute, null)
-                if (ok) "⏰ Réveil réglé à %02d:%02d.".format(command.hour, command.minute)
-                else "❌ Impossible de régler le réveil (aucune appli Horloge trouvée ?)."
+                val result = DeviceController.setAlarm(this, command.hour, command.minute, null)
+                if (result.isSuccess) {
+                    "⏰ Réveil réglé à %02d:%02d.".format(command.hour, command.minute)
+                } else {
+                    val e = result.exceptionOrNull()
+                    "❌ Impossible de régler le réveil -- ${e?.javaClass?.simpleName} : ${e?.message}"
+                }
             }
             is CommandInterpreter.Command.Sms -> {
                 val ok = DeviceController.sendSms(this, command.phoneNumber, command.message)
