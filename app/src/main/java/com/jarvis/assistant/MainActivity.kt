@@ -260,6 +260,31 @@ class MainActivity : AppCompatActivity() {
             permissionLauncher.launch(arrayOf(requiredPermission))
             return
         }
+
+        // MANAGE_EXTERNAL_STORAGE (Android 10+) n'est PAS une permission runtime classique --
+        // impossible à demander via permissionLauncher. Android impose de passer par un écran
+        // Réglages système dédié que l'utilisateur doit approuver lui-même (voir StorageController).
+        // Sur Android 9 et moins, WRITE_EXTERNAL_STORAGE (permission runtime classique) suffit.
+        val needsAllFilesAccess = command is CommandInterpreter.Command.FindFile ||
+            command is CommandInterpreter.Command.DeleteFile
+        if (needsAllFilesAccess && !StorageController.hasAllFilesAccess(this)) {
+            if (android.os.Build.VERSION.SDK_INT < 30) {
+                pendingCommand = command
+                permissionLauncher.launch(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE))
+                return
+            }
+            // Contrairement au cas ci-dessus, cet écran système ne renvoie pas de résultat
+            // exploitable ici (pas de callback d'ActivityResultContracts branché dessus) --
+            // on redemande donc simplement à l'utilisateur de retaper sa requête une fois
+            // l'autorisation activée, plutôt que de mémoriser pendingCommand pour rien.
+            appendAssistantMessage(
+                "📂 J'ai besoin de l'autorisation \"Accès à tous les fichiers\" pour ça -- " +
+                    "je t'ouvre l'écran Réglages, active le bouton puis retape ta demande."
+            )
+            startActivity(StorageController.allFilesAccessIntent(this))
+            return
+        }
+
         runDeviceCommand(command)
     }
 
@@ -315,6 +340,20 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             CommandInterpreter.Command.GetLocation -> return // géré au-dessus (async)
+            is CommandInterpreter.Command.FindFile -> {
+                val files = StorageController.findFiles(command.query)
+                if (files.isEmpty()) "🔍 Aucun fichier trouvé pour « ${command.query} »."
+                else "📂 ${files.size} résultat(s) :\n" + files.joinToString("\n") { it.absolutePath }
+            }
+            is CommandInterpreter.Command.DeleteFile -> {
+                val files = StorageController.findFiles(command.name)
+                val exactMatch = files.firstOrNull { it.name.equals(command.name, ignoreCase = true) } ?: files.firstOrNull()
+                when {
+                    exactMatch == null -> "🔍 Aucun fichier trouvé pour « ${command.name} »."
+                    StorageController.deleteFile(exactMatch.absolutePath) -> "🗑️ Fichier supprimé : ${exactMatch.absolutePath}"
+                    else -> "❌ Échec de la suppression de ${exactMatch.absolutePath} (dossier non vide ou erreur)."
+                }
+            }
         }
         appendAssistantMessage(reply)
     }

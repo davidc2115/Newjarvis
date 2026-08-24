@@ -22,6 +22,8 @@ object CommandInterpreter {
         data class CreateContact(val name: String, val phoneNumber: String) : Command()
         data class FindContact(val name: String) : Command()
         object GetLocation : Command()
+        data class FindFile(val query: String) : Command()
+        data class DeleteFile(val name: String) : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -50,6 +52,14 @@ object CommandInterpreter {
     )
     private val locationRegex = Regex(
         "(o[uù] (suis|est)-je|o[uù] je suis|ma position|(?:ma )?localisation actuelle)",
+        RegexOption.IGNORE_CASE
+    )
+    private val findFileRegex = Regex(
+        "(?:cherche|trouve)[^.]*fichier\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val deleteFileRegex = Regex(
+        "(?:supprime|efface)[^.]*fichier\\s+(.+)",
         RegexOption.IGNORE_CASE
     )
 
@@ -100,6 +110,16 @@ object CommandInterpreter {
         }
 
         if (locationRegex.containsMatchIn(lower)) return Command.GetLocation
+
+        deleteFileRegex.find(trimmed)?.let { match ->
+            val name = match.groupValues[1].trim()
+            if (name.isNotBlank()) return Command.DeleteFile(name)
+        }
+
+        findFileRegex.find(trimmed)?.let { match ->
+            val query = match.groupValues[1].trim()
+            if (query.isNotBlank()) return Command.FindFile(query)
+        }
 
         return null
     }

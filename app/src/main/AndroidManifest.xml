@@ -24,6 +24,15 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- Lot 5 "contrôle téléphone" : accès complet au stockage partagé (recherche/suppression
+         de fichiers). MANAGE_EXTERNAL_STORAGE (Android 10+) ne peut être accordée que via un
+         écran Réglages dédié (voir StorageController) : WRITE/READ_EXTERNAL_STORAGE couvrent
+         Android 9 et moins (maxSdkVersion 32 : ignorée par le système au-delà, comme il se
+         doit depuis le passage au scoped storage). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+
     <!-- Déclaration facultative : indique qu'on utilise le flash si présent, sans empêcher
          l'installation sur un appareil qui n'en a pas (required="false"). -->
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
