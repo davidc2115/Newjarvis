@@ -115,4 +115,123 @@ object FileGenController {
         .replace(">", "&gt;")
         .replace("\"", "&quot;")
         .replace("'", "&apos;")
+
+    /** Genere un vrai fichier .docx (Word) : titre en gras (optionnel) + un paragraphe par
+     *  ligne du contenu -- OOXML minimal ecrit a la main, s'ouvre normalement dans Word/
+     *  LibreOffice/Google Docs. */
+    fun createDocx(context: Context, fileName: String, title: String, content: String): File? {
+        return try {
+            val body = StringBuilder()
+            if (title.isNotBlank()) {
+                body.append(
+                    "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val=\"36\"/></w:rPr>" +
+                        "<w:t xml:space=\"preserve\">" + escapeXml(title) + "</w:t></w:r></w:p><w:p/>"
+                )
+            }
+            content.split("\n").forEach { paragraph ->
+                if (paragraph.isBlank()) {
+                    body.append("<w:p/>")
+                } else {
+                    body.append("<w:p><w:r><w:t xml:space=\"preserve\">" + escapeXml(paragraph) + "</w:t></w:r></w:p>")
+                }
+            }
+
+            val documentXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>" +
+                body.toString() +
+                "<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1417\" w:right=\"1417\" w:bottom=\"1417\" w:left=\"1417\"/></w:sectPr>" +
+                "</w:body></w:document>"
+
+            val file = File(outputDir(context), fileName)
+            ZipOutputStream(FileOutputStream(file)).use { zos ->
+                writeZipEntry(zos, "[Content_Types].xml", CONTENT_TYPES_DOCX)
+                writeZipEntry(zos, "_rels/.rels", RELS_ROOT_DOCX)
+                writeZipEntry(zos, "word/document.xml", documentXml)
+            }
+            file
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private const val CONTENT_TYPES_DOCX = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+        "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>"
+
+    private const val RELS_ROOT_DOCX = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+        "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>"
+
+    /** Genere un vrai fichier .xlsx (Excel) : une feuille avec les donnees fournies.
+     *  [csvContent] : une ligne par ligne de tableau, colonnes separees par « ; ». Detecte
+     *  automatiquement les nombres (point ou virgule decimale) pour les ecrire comme vraies
+     *  valeurs numeriques Excel, pas du texte. */
+    fun createXlsx(context: Context, fileName: String, sheetTitle: String, csvContent: String): File? {
+        val rows = csvContent.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        if (rows.isEmpty()) return null
+
+        return try {
+            val sheetName = sheetTitle.ifBlank { "Feuille1" }.take(31).replace(Regex("[\\\\/*?\\[\\]:]"), "-")
+            val sheetXml = StringBuilder(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                    "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>"
+            )
+
+            rows.forEachIndexed { rowIdx, rowLine ->
+                val cells = rowLine.split(";").map { it.trim() }
+                sheetXml.append("<row r=\"" + (rowIdx + 1) + "\">")
+                cells.forEachIndexed { colIdx, cellValue ->
+                    val ref = columnLetter(colIdx) + (rowIdx + 1)
+                    val numeric = cellValue.replace(",", ".").toDoubleOrNull()
+                    if (numeric != null && cellValue.isNotBlank()) {
+                        sheetXml.append("<c r=\"" + ref + "\"><v>" + numeric + "</v></c>")
+                    } else {
+                        sheetXml.append("<c r=\"" + ref + "\" t=\"inlineStr\"><is><t xml:space=\"preserve\">" + escapeXml(cellValue) + "</t></is></c>")
+                    }
+                }
+                sheetXml.append("</row>")
+            }
+            sheetXml.append("</sheetData></worksheet>")
+
+            val workbookXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"" +
+                escapeXml(sheetName) + "\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"
+
+            val file = File(outputDir(context), fileName)
+            ZipOutputStream(FileOutputStream(file)).use { zos ->
+                writeZipEntry(zos, "[Content_Types].xml", CONTENT_TYPES_XLSX)
+                writeZipEntry(zos, "_rels/.rels", RELS_ROOT_XLSX)
+                writeZipEntry(zos, "xl/workbook.xml", workbookXml)
+                writeZipEntry(zos, "xl/_rels/workbook.xml.rels", RELS_WORKBOOK_XLSX)
+                writeZipEntry(zos, "xl/worksheets/sheet1.xml", sheetXml.toString())
+            }
+            file
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Convertit un index de colonne (0-based) en reference Excel (0->A, 25->Z, 26->AA...). */
+    private fun columnLetter(index: Int): String {
+        var i = index
+        val sb = StringBuilder()
+        while (i >= 0) {
+            sb.insert(0, ('A' + (i % 26)))
+            i = i / 26 - 1
+        }
+        return sb.toString()
+    }
+
+    private const val CONTENT_TYPES_XLSX = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+        "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/></Types>"
+
+    private const val RELS_ROOT_XLSX = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+        "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>"
+
+    private const val RELS_WORKBOOK_XLSX = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+        "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>"
+
+    private fun writeZipEntry(zos: ZipOutputStream, path: String, content: String) {
+        zos.putNextEntry(ZipEntry(path))
+        zos.write(content.toByteArray(Charsets.UTF_8))
+        zos.closeEntry()
+    }
 }

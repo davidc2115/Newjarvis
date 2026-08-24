@@ -28,6 +28,8 @@ object CommandInterpreter {
         data class OpenMaps(val destination: String?) : Command()
         data class CreatePdf(val name: String, val text: String) : Command()
         data class CreateZip(val name: String) : Command()
+        data class CreateDocx(val name: String, val text: String) : Command()
+        data class CreateXlsx(val name: String, val csv: String) : Command()
         data class CreateKml(val name: String, val label: String?) : Command()
         data class Notify(val text: String) : Command()
         object ShowNotifications : Command()
@@ -96,6 +98,14 @@ object CommandInterpreter {
     )
     private val createZipRegex = Regex(
         "cr[ée]e?[^.]*(?:archive )?zip[^.]*appel[ée]e?\\s+([^\\s]+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val createDocxRegex = Regex(
+        "cr[ée]e?[^.]*(?:word|document)[^.]*appel[ée]e?\\s+([^\\s]+)\\s+(?:avec|contenant)\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val createXlsxRegex = Regex(
+        "cr[ée]e?[^.]*(?:excel|tableur|xlsx)[^.]*appel[ée]e?\\s+([^\\s]+)\\s+(?:avec|contenant)\\s+(.+)",
         RegexOption.IGNORE_CASE
     )
     private val createKmlRegex = Regex(
@@ -245,6 +255,20 @@ object CommandInterpreter {
             var name = match.groupValues[1].trim()
             if (!name.endsWith(".zip", ignoreCase = true)) name += ".zip"
             return Command.CreateZip(name)
+        }
+
+        createDocxRegex.find(trimmed)?.let { match ->
+            var name = match.groupValues[1].trim()
+            if (!name.endsWith(".docx", ignoreCase = true)) name += ".docx"
+            val text = match.groupValues[2].trim()
+            if (text.isNotBlank()) return Command.CreateDocx(name, text)
+        }
+
+        createXlsxRegex.find(trimmed)?.let { match ->
+            var name = match.groupValues[1].trim()
+            if (!name.endsWith(".xlsx", ignoreCase = true)) name += ".xlsx"
+            val csv = match.groupValues[2].trim()
+            if (csv.isNotBlank()) return Command.CreateXlsx(name, csv)
         }
 
         createKmlRegex.find(trimmed)?.let { match ->

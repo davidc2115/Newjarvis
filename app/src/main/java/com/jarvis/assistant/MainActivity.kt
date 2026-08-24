@@ -455,6 +455,14 @@ class MainActivity : AppCompatActivity() {
                 val file = FileGenController.zipOutputDir(this, command.name)
                 if (file != null) "🗜️ ZIP créé : ${file.absolutePath}" else "❌ Échec de la création du ZIP."
             }
+            is CommandInterpreter.Command.CreateDocx -> {
+                val file = FileGenController.createDocx(this, command.name, "", command.text)
+                if (file != null) "📝 Document Word créé : ${file.absolutePath}" else "❌ Échec de la création du document."
+            }
+            is CommandInterpreter.Command.CreateXlsx -> {
+                val file = FileGenController.createXlsx(this, command.name, command.name, command.csv)
+                if (file != null) "📊 Tableur Excel créé : ${file.absolutePath}" else "❌ Échec de la création du tableur."
+            }
             is CommandInterpreter.Command.CreateKml -> return // géré au-dessus (async, comme GetLocation)
             is CommandInterpreter.Command.Notify -> {
                 NotificationController.notify(this, getString(R.string.app_name), command.text)
