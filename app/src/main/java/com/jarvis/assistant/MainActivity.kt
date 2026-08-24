@@ -248,6 +248,8 @@ class MainActivity : AppCompatActivity() {
         val requiredPermission = when (command) {
             is CommandInterpreter.Command.Sms -> Manifest.permission.SEND_SMS
             is CommandInterpreter.Command.Call -> Manifest.permission.CALL_PHONE
+            is CommandInterpreter.Command.CreateContact -> Manifest.permission.WRITE_CONTACTS
+            is CommandInterpreter.Command.FindContact -> Manifest.permission.READ_CONTACTS
             else -> null
         }
         if (requiredPermission != null &&
@@ -287,6 +289,18 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.Call -> {
                 val ok = DeviceController.makeCall(this, command.phoneNumber)
                 if (ok) "📞 Appel en cours vers ${command.phoneNumber}." else "❌ Impossible de lancer l'appel."
+            }
+            is CommandInterpreter.Command.CreateContact -> {
+                val ok = ContactsController.createContact(this, command.name, command.phoneNumber)
+                if (ok) "👤 Contact « ${command.name} » créé (${command.phoneNumber})." else "❌ Échec de la création du contact."
+            }
+            is CommandInterpreter.Command.FindContact -> {
+                val contact = ContactsController.findContact(this, command.name)
+                when {
+                    contact == null -> "🔍 Aucun contact trouvé pour « ${command.name} »."
+                    contact.phoneNumbers.isEmpty() -> "👤 ${contact.name} -- aucun numéro enregistré."
+                    else -> "👤 ${contact.name} : ${contact.phoneNumbers.joinToString(", ")}"
+                }
             }
         }
         appendAssistantMessage(reply)

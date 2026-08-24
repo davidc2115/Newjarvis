@@ -19,6 +19,8 @@ object CommandInterpreter {
         data class Alarm(val hour: Int, val minute: Int) : Command()
         data class Sms(val phoneNumber: String, val message: String) : Command()
         data class Call(val phoneNumber: String) : Command()
+        data class CreateContact(val name: String, val phoneNumber: String) : Command()
+        data class FindContact(val name: String) : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -35,6 +37,14 @@ object CommandInterpreter {
     )
     private val callRegex = Regex(
         "appel(?:le|er)?\\s+(?:le\\s+|au\\s+)?(\\+?[\\d][\\d .-]{5,})",
+        RegexOption.IGNORE_CASE
+    )
+    private val createContactRegex = Regex(
+        "(?:cr[ée]e?|ajoute)[^.]*?contact\\s+([\\p{L} '\\-]+?)\\s+(?:num[ée]ro|t[ée]l[ée]phone|tel)\\s*:?\\s*(\\+?[\\d][\\d .-]{5,})",
+        RegexOption.IGNORE_CASE
+    )
+    private val findContactRegex = Regex(
+        "(?:num[ée]ro de|cherche(?: le)? contact|trouve(?: le)? contact)\\s+([\\p{L} '\\-]+)",
         RegexOption.IGNORE_CASE
     )
 
@@ -71,6 +81,17 @@ object CommandInterpreter {
         callRegex.find(trimmed)?.let { match ->
             val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
             if (number.length >= 6) return Command.Call(number)
+        }
+
+        createContactRegex.find(trimmed)?.let { match ->
+            val name = match.groupValues[1].trim()
+            val number = match.groupValues[2].filter { it.isDigit() || it == '+' }
+            if (name.isNotBlank() && number.length >= 6) return Command.CreateContact(name, number)
+        }
+
+        findContactRegex.find(trimmed)?.let { match ->
+            val name = match.groupValues[1].trim()
+            if (name.isNotBlank()) return Command.FindContact(name)
         }
 
         return null
