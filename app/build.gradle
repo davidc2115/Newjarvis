@@ -54,4 +54,13 @@ dependencies {
     // Écran de chat : liste de messages + sidebar rétractable des conversations.
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
     implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
+
+    // Coroutines (lifecycleScope) pour les appels IA asynchrones sans bloquer l'UI.
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.6'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+
+    // Backend IA on-device : Gemini Nano via AICore (ML Kit GenAI Prompt API, gratuit, sans
+    // clé, aucune donnée envoyée à un serveur). API level 26+ requis (déjà notre minSdk).
+    // Uniquement fonctionnel sur les appareils compatibles AICore (voir GeminiNanoController).
+    implementation 'com.google.mlkit:genai-prompt:1.0.0-beta2'
 }

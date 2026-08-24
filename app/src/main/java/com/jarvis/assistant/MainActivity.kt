@@ -8,16 +8,18 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.mlkit.genai.common.FeatureStatus
 import com.jarvis.assistant.databinding.ActivityMainBinding
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 /**
  * Écran de chat : liste de messages + barre de saisie, sidebar rétractable pour changer de
- * conversation, bouton réglages en haut à droite (couleur d'accent). Pas encore de backend IA
- * reconstruit (voir README) — l'envoi d'un message ajoute une réponse d'attente, pour que
- * l'interface reste testable pendant qu'on reconstruit le reste fonctionnalité par
- * fonctionnalité.
+ * conversation, bouton réglages en haut à droite (couleur d'accent). Backend IA : Gemini Nano
+ * on-device via AICore (voir GeminiNanoController) — gratuit, sans clé, mais seulement
+ * disponible sur les appareils compatibles AICore (Pixel 8/9, Galaxy S24...).
  */
 class MainActivity : AppCompatActivity() {
 
@@ -166,11 +168,52 @@ class MainActivity : AppCompatActivity() {
             activeConversation.title = text.take(30)
         }
         activeConversation.messages.add(Message(text, isUser = true))
-        // Pas encore de backend IA reconstruit — réponse d'attente pour garder le chat testable.
-        activeConversation.messages.add(Message(getString(R.string.placeholder_assistant_reply), isUser = false))
-
         Prefs.saveConversations(this, conversations)
         binding.messageInput.setText("")
+        refreshChat()
+        refreshSidebar()
+
+        requestGeminiNanoReply(text)
+    }
+
+    /**
+     * Backend IA : Gemini Nano on-device via AICore (voir GeminiNanoController). Aucune clé,
+     * aucun réseau une fois le modèle téléchargé -- mais uniquement disponible sur les
+     * appareils compatibles AICore. Si l'appareil ne l'est pas, on l'explique clairement au
+     * lieu d'échouer silencieusement.
+     */
+    private fun requestGeminiNanoReply(prompt: String) {
+        lifecycleScope.launch {
+            try {
+                when (GeminiNanoController.checkStatus()) {
+                    FeatureStatus.AVAILABLE -> {
+                        val reply = GeminiNanoController.generateReply(prompt)
+                        appendAssistantMessage(reply)
+                    }
+                    FeatureStatus.DOWNLOADABLE -> {
+                        appendAssistantMessage(getString(R.string.gemini_nano_downloading))
+                        GeminiNanoController.downloadModel(
+                            onFailed = { error -> appendAssistantMessage("❌ Échec du téléchargement de Gemini Nano : $error") },
+                            onCompleted = {
+                                lifecycleScope.launch {
+                                    val reply = GeminiNanoController.generateReply(prompt)
+                                    appendAssistantMessage(reply)
+                                }
+                            }
+                        )
+                    }
+                    FeatureStatus.DOWNLOADING -> appendAssistantMessage(getString(R.string.gemini_nano_still_downloading))
+                    else -> appendAssistantMessage(getString(R.string.gemini_nano_unavailable))
+                }
+            } catch (e: Exception) {
+                appendAssistantMessage("❌ Erreur Gemini Nano : ${e.message}")
+            }
+        }
+    }
+
+    private fun appendAssistantMessage(text: String) {
+        activeConversation.messages.add(Message(text, isUser = false))
+        Prefs.saveConversations(this, conversations)
         refreshChat()
         refreshSidebar()
     }
