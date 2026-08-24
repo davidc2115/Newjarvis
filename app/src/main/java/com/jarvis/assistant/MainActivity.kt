@@ -53,6 +53,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Filet de sécurité pour le bug "titre/réglages caché sous la barre de statut" : si
+        // requestApplyInsets() appelé dans onCreate() n'a rien fait parce que la vue n'était
+        // pas encore attachée à la fenêtre à ce moment précis (cas documenté où l'appel est
+        // silencieusement ignoré), on le retente ici -- onResume() garantit que la fenêtre
+        // est bien attachée. Sans coût si les insets étaient déjà corrects.
+        ViewCompat.requestApplyInsets(binding.root)
+
         // La couleur a pu changer dans Réglages entre-temps (activité séparée).
         val current = Prefs.getAccentColor(this)
         if (current != accentColor) {
@@ -78,6 +85,14 @@ class MainActivity : AppCompatActivity() {
             binding.mainContent.setPadding(0, 0, 0, maxOf(bars.bottom, ime.bottom))
             insets
         }
+        // Signalement utilisateur persistant (bouton réglages/titre toujours caché sous la
+        // barre de statut malgré le listener ci-dessus) : sur certains appareils/versions,
+        // le tout premier passage d'insets a lieu AVANT que ce listener soit attaché (la
+        // fenêtre a déjà reçu ses insets initiaux au moment où onCreate() s'exécute), donc
+        // le callback ne se déclenche jamais tout seul. requestApplyInsets() force un nouveau
+        // passage explicite juste après l'avoir attaché -- fix documenté officiellement pour
+        // ce cas précis (voir developer.android.com/develop/ui/views/layout/edge-to-edge).
+        ViewCompat.requestApplyInsets(binding.root)
     }
 
     private fun loadState() {

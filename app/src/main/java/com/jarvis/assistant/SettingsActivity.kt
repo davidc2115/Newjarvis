@@ -72,6 +72,9 @@ class SettingsActivity : AppCompatActivity() {
             )
             insets
         }
+        // Voir MainActivity.applyWindowInsets pour pourquoi cet appel est nécessaire (cas où
+        // le tout premier passage d'insets a lieu avant l'attachement du listener).
+        ViewCompat.requestApplyInsets(binding.root)
     }
 
     /**

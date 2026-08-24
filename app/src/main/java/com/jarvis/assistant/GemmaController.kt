@@ -95,7 +95,14 @@ object GemmaController {
             // Backend CPU : le plus universellement compatible (GPU/NPU demandent des
             // bibliothèques natives supplémentaires selon l'appareil -- non activé pour
             // l'instant afin de garantir un fonctionnement partout).
-            val config = EngineConfig(modelPath = modelFile(context).absolutePath, backend = Backend.CPU())
+            // cacheDir : dossier interne de l'appli (context.cacheDir), améliore le temps de
+            // chargement des lancements suivants (voir doc EngineConfig -- sans ça, le moteur
+            // utilise par défaut le dossier du modèle, qui n'est pas forcément inscriptible).
+            val config = EngineConfig(
+                modelPath = modelFile(context).absolutePath,
+                backend = Backend.CPU(),
+                cacheDir = context.cacheDir.path
+            )
             Engine(config).also {
                 it.initialize()
                 engine = it
@@ -106,8 +113,10 @@ object GemmaController {
     suspend fun generateReply(context: Context, prompt: String): String = withContext(Dispatchers.IO) {
         val eng = ensureEngine(context)
         eng.createConversation().use { conversation ->
-            conversation.sendMessage(prompt).text?.takeIf { it.isNotBlank() }
-                ?: "🤖 Gemma n'a renvoyé aucune réponse exploitable."
+            // Message n'expose pas de propriété .text -- le texte de la réponse se récupère
+            // via toString() (délègue à Contents.toString(), qui concatène les Content.Text).
+            val text = conversation.sendMessage(prompt).toString()
+            if (text.isBlank()) "🤖 Gemma n'a renvoyé aucune réponse exploitable." else text
         }
     }
 }
