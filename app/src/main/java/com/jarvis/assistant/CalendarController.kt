@@ -109,13 +109,50 @@ object CalendarController {
         return getEventsTimeRange(context, startOfDay, endOfDay, title, calendarRef)
     }
 
-    fun getUpcomingEvents(context: Context, days: Int = 7, calendarRef: String? = null): String {
-        val start = Calendar.getInstance().timeInMillis
+    // BUG RÉEL CORRIGÉ (signalement utilisateur : "demain", "à partir de demain" mal
+    // compris) : avant ce paramètre, la seule façon d'interroger l'agenda était aujourd'hui
+    // (today_events), une plage de N jours à partir de MAINTENANT (upcoming_events), ou une
+    // semaine calendaire entière (week_events) -- aucune action ne permettait de cibler "demain"
+    // seul ni "à partir de demain" : l'IA n'avait aucun moyen fiable de répondre à ces
+    // demandes sans calculer elle-même une date (ce qu'on évite volontairement partout ailleurs
+    // dans ce fichier, voir getEventsForWeek). [offsetDays] décale simplement le début de la
+    // plage en JOURS CALENDAIRES ENTIERS (0 = aujourd'hui à partir de maintenant, 1 = demain
+    // à partir de 00h00, 2 = après-demain...), toujours calculé côté Kotlin depuis l'horloge
+    // réelle de l'appareil.
+    fun getUpcomingEvents(context: Context, days: Int = 7, calendarRef: String? = null, offsetDays: Int = 0): String {
+        val start = if (offsetDays == 0) {
+            Calendar.getInstance().timeInMillis
+        } else {
+            Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, offsetDays)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
         val end = Calendar.getInstance().apply {
+            if (offsetDays != 0) {
+                add(Calendar.DAY_OF_YEAR, offsetDays)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
             add(Calendar.DAY_OF_YEAR, days)
         }.timeInMillis
 
-        val title = "📅 **Événements des $days prochains jours**" + calendarLabelSuffix(context, calendarRef)
+        val period = when {
+            offsetDays == 0 -> "des $days prochains jours"
+            offsetDays == 1 && days == 1 -> "prévus demain"
+            offsetDays == 2 && days == 1 -> "prévus après-demain"
+            offsetDays >= 1 && days == 1 -> "prévus dans $offsetDays jours"
+            else -> {
+                val fromLabel = SimpleDateFormat("dd/MM", Locale.FRENCH).format(Date(start))
+                "des $days jours à partir du $fromLabel"
+            }
+        }
+        val title = "📅 **Événements $period**" + calendarLabelSuffix(context, calendarRef)
         return getEventsTimeRange(context, start, end, title, calendarRef)
     }
 

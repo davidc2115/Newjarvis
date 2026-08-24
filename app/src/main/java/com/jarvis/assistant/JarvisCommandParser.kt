@@ -273,9 +273,19 @@ object JarvisCommandParser {
                 MediaController.setVolume(context, level)
             }
 
-            "today_events" -> CalendarController.getTodayEvents(context, json.optString("calendar", "").ifBlank { null })
-            "upcoming_events" -> CalendarController.getUpcomingEvents(context, json.optInt("days", 7), json.optString("calendar", "").ifBlank { null })
-            "week_events" -> CalendarController.getEventsForWeek(context, json.optInt("offset", 0), json.optString("calendar", "").ifBlank { null })
+            // BUG RÉEL CORRIGÉ : withCalendarPresentationStyleNote existait déjà (constante
+            // CALENDAR_FORMAT_MARKER, Prefs, action set_calendar_presentation_style...) mais
+            // n'était en fait JAMAIS appelée ici -- un style personnalisé enregistré par
+            // l'utilisateur pour son planning n'avait donc strictement aucun effet.
+            "today_events" -> withCalendarPresentationStyleNote(context, CalendarController.getTodayEvents(context, json.optString("calendar", "").ifBlank { null }))
+            // offsetDays (nouveau) : décale le DÉBUT de la plage en jours calendaires entiers
+            // par rapport à aujourd'hui -- 0=aujourd'hui (défaut, comportement inchangé),
+            // 1=demain, 2=après-demain... BUG RÉEL CORRIGÉ (signalement utilisateur : "demain",
+            // "à partir de demain" mal compris) : sans ce paramètre, aucune action ne permettait
+            // de cibler un jour précis autre qu'aujourd'hui ; l'IA n'avait alors aucun moyen
+            // fiable de répondre à ces demandes.
+            "upcoming_events" -> withCalendarPresentationStyleNote(context, CalendarController.getUpcomingEvents(context, json.optInt("days", 7), json.optString("calendar", "").ifBlank { null }, json.optInt("offsetDays", 0)))
+            "week_events" -> withCalendarPresentationStyleNote(context, CalendarController.getEventsForWeek(context, json.optInt("offset", 0), json.optString("calendar", "").ifBlank { null }))
             "create_event" -> {
                 val title = json.optString("title", "Événement")
                 val dateStr = json.optString("date", "")
@@ -567,7 +577,7 @@ object JarvisCommandParser {
             }
             "search_event" -> {
                 val query = json.optString("query", "")
-                CalendarController.searchEvents(context, query, json.optString("calendar", "").ifBlank { null })
+                withCalendarPresentationStyleNote(context, CalendarController.searchEvents(context, query, json.optString("calendar", "").ifBlank { null }))
             }
 
             "create_client_from_event" -> {
