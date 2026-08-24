@@ -5,12 +5,18 @@
          réajoutées au fur et à mesure de la reconstruction de chaque fonctionnalité. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Demande un tas mémoire plus grand au système : utile pour les modèles IA
+         embarqués (Gemini Nano/AICore tourne dans un processus système séparé et n'est pas
+         concerné, mais de futurs modèles chargés directement dans le processus de l'appli,
+         type MediaPipe/ONNX Runtime, en ont besoin). Ne garantit pas une RAM illimitée : la
+         limite réelle dépend toujours de l'appareil (Android l'accorde au mieux). -->
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_launcher"
         android:theme="@style/Theme.Jarvis"
+        android:largeHeap="true"
         android:supportsRtl="true">
 
         <activity

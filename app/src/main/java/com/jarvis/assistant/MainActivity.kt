@@ -7,6 +7,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -30,6 +31,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // BUG RÉEL CORRIGÉ (signalement utilisateur : titre/bouton réglages cachés sous la
+        // barre de statut) : sans cet appel EXPLICITE, le comportement edge-to-edge (contenu
+        // qui dessine sous les barres système, à charge pour l'appli de compenser via des
+        // insets) varie selon la version d'Android/le fabricant au lieu d'être garanti --
+        // sur certains appareils le système compense déjà tout seul (aucun souci), sur
+        // d'autres non, et notre propre compensation manuelle (applyWindowInsets) ne suffit
+        // alors plus puisqu'elle recevait des insets à zéro. Forcer explicitement le mode
+        // edge-to-edge rend applyWindowInsets() fiable sur TOUS les appareils.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -52,12 +62,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Évite que le contenu passe sous la barre de statut/navigation (edge-to-edge, cible SDK 35). */
+    /**
+     * Compense le mode edge-to-edge (activé explicitement ci-dessus) : pousse la barre du
+     * haut sous la barre de statut, ET pousse le bas du contenu (donc la barre de saisie,
+     * tout en bas) au-dessus de la barre de navigation OU du clavier, selon lequel des deux
+     * est le plus grand -- corrige aussi le signalement utilisateur "la barre de saisie doit
+     * rester affichée au-dessus du clavier quand on tape" : en edge-to-edge, adjustResize
+     * (AndroidManifest) seul ne suffit plus, il faut lire explicitement l'inset IME.
+     */
     private fun applyWindowInsets() {
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             binding.topBar.setPadding(binding.topBar.paddingLeft, bars.top, binding.topBar.paddingRight, binding.topBar.paddingBottom)
-            binding.mainContent.setPadding(0, 0, 0, bars.bottom)
+            binding.mainContent.setPadding(0, 0, 0, maxOf(bars.bottom, ime.bottom))
             insets
         }
     }
