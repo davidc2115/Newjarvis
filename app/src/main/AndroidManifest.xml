@@ -90,6 +90,21 @@
             android:exported="false"
             android:label="@string/settings_title" />
 
+        <!-- Lot 8 "contrôle téléphone" : lecture des notifications système des autres applis
+             (voir JarvisNotificationListenerService). BIND_NOTIFICATION_LISTENER_SERVICE est un
+             permission "signature" détenue par le système : exported="false" + cette valeur
+             android:permission garantissent que seul le système peut lier ce service, jamais
+             une autre appli tierce. -->
+        <service
+            android:name=".JarvisNotificationListenerService"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>

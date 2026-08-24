@@ -247,21 +247,41 @@ class MainActivity : AppCompatActivity() {
      * (ou non) à faire du function-calling.
      */
     private fun executeDeviceCommand(command: CommandInterpreter.Command) {
-        val requiredPermission = when (command) {
-            is CommandInterpreter.Command.Sms -> Manifest.permission.SEND_SMS
-            is CommandInterpreter.Command.Call -> Manifest.permission.CALL_PHONE
-            is CommandInterpreter.Command.CreateContact -> Manifest.permission.WRITE_CONTACTS
-            is CommandInterpreter.Command.FindContact -> Manifest.permission.READ_CONTACTS
-            is CommandInterpreter.Command.GetLocation -> Manifest.permission.ACCESS_FINE_LOCATION
+        // Liste (pas juste une seule permission) depuis l'ajout de CallContact, qui a besoin
+        // à la fois de READ_CONTACTS (chercher le contact) et CALL_PHONE (composer le numéro).
+        val requiredPermissions = when (command) {
+            is CommandInterpreter.Command.Sms -> listOf(Manifest.permission.SEND_SMS)
+            is CommandInterpreter.Command.Call -> listOf(Manifest.permission.CALL_PHONE)
+            is CommandInterpreter.Command.CallContact ->
+                listOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE)
+            is CommandInterpreter.Command.CreateContact -> listOf(Manifest.permission.WRITE_CONTACTS)
+            is CommandInterpreter.Command.FindContact -> listOf(Manifest.permission.READ_CONTACTS)
+            is CommandInterpreter.Command.GetLocation -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
             is CommandInterpreter.Command.Notify ->
-                if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null
-            else -> null
+                if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
+            else -> emptyList()
         }
-        if (requiredPermission != null &&
-            ContextCompat.checkSelfPermission(this, requiredPermission) != PackageManager.PERMISSION_GRANTED
-        ) {
+        val missingPermissions = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isNotEmpty()) {
             pendingCommand = command
-            permissionLauncher.launch(arrayOf(requiredPermission))
+            permissionLauncher.launch(missingPermissions.toTypedArray())
+            return
+        }
+
+        // Accès aux notifications (JarvisNotificationListenerService) : comme
+        // MANAGE_EXTERNAL_STORAGE ci-dessous, ce n'est pas une permission runtime classique --
+        // seul un écran Réglages dédié permet de l'activer, aucun callback exploitable ici non
+        // plus donc on redemande simplement de retaper la requête une fois l'accès activé.
+        if (command is CommandInterpreter.Command.ShowNotifications &&
+            !JarvisNotificationListenerService.isEnabled(this)
+        ) {
+            appendAssistantMessage(
+                "🔔 J'ai besoin de l'autorisation \"Accès aux notifications\" pour ça -- " +
+                    "je t'ouvre l'écran Réglages, active JARVIS puis retape ta demande."
+            )
+            startActivity(JarvisNotificationListenerService.settingsIntent())
             return
         }
 
@@ -339,8 +359,27 @@ class MainActivity : AppCompatActivity() {
                 val contact = ContactsController.findContact(this, command.name)
                 when {
                     contact == null -> "🔍 Aucun contact trouvé pour « ${command.name} »."
-                    contact.phoneNumbers.isEmpty() -> "👤 ${contact.name} -- aucun numéro enregistré."
-                    else -> "👤 ${contact.name} : ${contact.phoneNumbers.joinToString(", ")}"
+                    else -> buildString {
+                        append("👤 ${contact.name}")
+                        if (contact.phoneNumbers.isNotEmpty()) {
+                            append("\n📞 ${contact.phoneNumbers.joinToString(", ")}")
+                        } else {
+                            append("\n📞 aucun numéro enregistré")
+                        }
+                        if (!contact.address.isNullOrBlank()) append("\n🏠 ${contact.address}")
+                    }
+                }
+            }
+            is CommandInterpreter.Command.CallContact -> {
+                val contact = ContactsController.findContact(this, command.name)
+                val number = contact?.phoneNumbers?.firstOrNull()
+                when {
+                    contact == null -> "🔍 Aucun contact trouvé pour « ${command.name} »."
+                    number == null -> "👤 ${contact.name} -- aucun numéro enregistré, impossible d'appeler."
+                    else -> {
+                        val ok = DeviceController.makeCall(this, number)
+                        if (ok) "📞 Appel de ${contact.name} ($number) en cours." else "❌ Impossible de lancer l'appel."
+                    }
                 }
             }
             CommandInterpreter.Command.GetLocation -> return // géré au-dessus (async)
@@ -369,6 +408,13 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.Notify -> {
                 NotificationController.notify(this, getString(R.string.app_name), command.text)
                 "🔔 Notification envoyée."
+            }
+            CommandInterpreter.Command.ShowNotifications -> {
+                val notifications = JarvisNotificationListenerService.recent(10)
+                if (notifications.isEmpty()) "🔔 Aucune notification récente."
+                else "🔔 Notifications récentes :\n" + notifications.joinToString("\n") {
+                    "• [${it.appLabel}] ${it.title} -- ${it.text}"
+                }
             }
         }
         appendAssistantMessage(reply)

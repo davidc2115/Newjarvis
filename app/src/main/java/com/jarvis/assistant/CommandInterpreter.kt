@@ -19,6 +19,7 @@ object CommandInterpreter {
         data class Alarm(val hour: Int, val minute: Int) : Command()
         data class Sms(val phoneNumber: String, val message: String) : Command()
         data class Call(val phoneNumber: String) : Command()
+        data class CallContact(val name: String) : Command()
         data class CreateContact(val name: String, val phoneNumber: String) : Command()
         data class FindContact(val name: String) : Command()
         object GetLocation : Command()
@@ -27,6 +28,7 @@ object CommandInterpreter {
         data class OpenMaps(val destination: String?) : Command()
         data class CreatePdf(val name: String, val text: String) : Command()
         data class Notify(val text: String) : Command()
+        object ShowNotifications : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -45,12 +47,19 @@ object CommandInterpreter {
         "appel(?:le|er)?\\s+(?:le\\s+|au\\s+)?(\\+?[\\d][\\d .-]{5,})",
         RegexOption.IGNORE_CASE
     )
+
+    // Distinct du regex ci-dessus : "appelle Julie" (nom, pas un numéro) -- cherche dans les
+    // contacts natifs puis compose avec le premier numéro trouvé (voir MainActivity.CallContact).
+    private val callContactRegex = Regex(
+        "appel(?:le|er)?\\s+(?:le\\s+|au\\s+)?([\\p{L} '\\-]{2,})",
+        RegexOption.IGNORE_CASE
+    )
     private val createContactRegex = Regex(
         "(?:cr[ée]e?|ajoute)[^.]*?contact\\s+([\\p{L} '\\-]+?)\\s+(?:num[ée]ro|t[ée]l[ée]phone|tel)\\s*:?\\s*(\\+?[\\d][\\d .-]{5,})",
         RegexOption.IGNORE_CASE
     )
     private val findContactRegex = Regex(
-        "(?:num[ée]ro de|cherche(?: le)? contact|trouve(?: le)? contact)\\s+([\\p{L} '\\-]+)",
+        "(?:num[ée]ro de|cherche(?: le)? contact|trouve(?: le)? contact|affiche(?: le)? contact|adresse de|o[uù] habite)\\s+([\\p{L} '\\-]+)",
         RegexOption.IGNORE_CASE
     )
     private val locationRegex = Regex(
@@ -79,6 +88,14 @@ object CommandInterpreter {
     )
     private val notifyRegex = Regex(
         "(?:envoie|affiche)[^.]*notification\\s+(?:disant|qui dit|:)?\\s*(.+)",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Lecture des notifications système des AUTRES applis (JarvisNotificationListenerService),
+    // distinct de notifyRegex ci-dessus qui ENVOIE une notification créée par JARVIS lui-même.
+    private val showNotificationsRegex = Regex(
+        "mes notifications|notifications r[ée]centes|derni[èe]res notifications|" +
+            "lis(?:-moi)? mes notifications|montre(?:-moi)? mes notifications",
         RegexOption.IGNORE_CASE
     )
 
@@ -117,6 +134,11 @@ object CommandInterpreter {
             if (number.length >= 6) return Command.Call(number)
         }
 
+        callContactRegex.find(trimmed)?.let { match ->
+            val name = match.groupValues[1].trim()
+            if (name.isNotBlank()) return Command.CallContact(name)
+        }
+
         createContactRegex.find(trimmed)?.let { match ->
             val name = match.groupValues[1].trim()
             val number = match.groupValues[2].filter { it.isDigit() || it == '+' }
@@ -153,6 +175,8 @@ object CommandInterpreter {
             val text = match.groupValues[2].trim()
             if (text.isNotBlank()) return Command.CreatePdf(name, text)
         }
+
+        if (showNotificationsRegex.containsMatchIn(lower)) return Command.ShowNotifications
 
         notifyRegex.find(trimmed)?.let { match ->
             val text = match.groupValues[1].trim()

@@ -10,7 +10,7 @@ import android.provider.ContactsContract
  */
 object ContactsController {
 
-    data class ContactInfo(val name: String, val phoneNumbers: List<String>)
+    data class ContactInfo(val name: String, val phoneNumbers: List<String>, val address: String? = null)
 
     /** Recherche par nom (correspondance partielle, insensible à la casse). */
     fun findContact(context: Context, query: String): ContactInfo? {
@@ -40,7 +40,26 @@ object ContactsController {
                     phones.add(phoneCursor.getString(phoneCursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)))
                 }
             }
-            return ContactInfo(name, phones)
+
+            // Adresse postale (StructuredPostal) -- demandée par l'utilisateur en plus du
+            // numéro pour "affiche un contact" ; READ_CONTACTS couvre déjà cette table, pas
+            // besoin d'une permission supplémentaire.
+            var address: String? = null
+            resolver.query(
+                ContactsContract.CommonDataKinds.StructuredPostal.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.StructuredPostal.FORMATTED_ADDRESS),
+                "${ContactsContract.CommonDataKinds.StructuredPostal.CONTACT_ID} = ?",
+                arrayOf(contactId.toString()),
+                null
+            )?.use { addressCursor ->
+                if (addressCursor.moveToFirst()) {
+                    address = addressCursor.getString(
+                        addressCursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.StructuredPostal.FORMATTED_ADDRESS)
+                    )
+                }
+            }
+
+            return ContactInfo(name, phones, address)
         }
     }
 
