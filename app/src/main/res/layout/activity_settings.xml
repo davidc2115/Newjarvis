@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_app_gradient">
+
+    <RelativeLayout
+        android:id="@+id/settingsTopBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <ImageButton
+            android:id="@+id/backButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerVertical="true"
+            android:layout_alignParentStart="true"
+            android:background="@drawable/bg_icon_button"
+            android:src="@drawable/ic_back"
+            android:contentDescription="@string/settings_title"
+            android:padding="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:text="@string/settings_title"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+    </RelativeLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/settings_color_label"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp"
+        android:layout_marginStart="20dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginStart="12dp">
+
+        <FrameLayout android:id="@+id/swatchCyan" android:layout_width="48dp" android:layout_height="48dp" android:layout_margin="8dp">
+            <View android:id="@+id/swatchCyanCircle" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_color_swatch" />
+            <ImageView android:id="@+id/swatchCyanCheck" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_check" android:visibility="gone" android:contentDescription="@null" />
+        </FrameLayout>
+
+        <FrameLayout android:id="@+id/swatchViolet" android:layout_width="48dp" android:layout_height="48dp" android:layout_margin="8dp">
+            <View android:id="@+id/swatchVioletCircle" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_color_swatch" />
+            <ImageView android:id="@+id/swatchVioletCheck" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_check" android:visibility="gone" android:contentDescription="@null" />
+        </FrameLayout>
+
+        <FrameLayout android:id="@+id/swatchRose" android:layout_width="48dp" android:layout_height="48dp" android:layout_margin="8dp">
+            <View android:id="@+id/swatchRoseCircle" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_color_swatch" />
+            <ImageView android:id="@+id/swatchRoseCheck" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_check" android:visibility="gone" android:contentDescription="@null" />
+        </FrameLayout>
+
+        <FrameLayout android:id="@+id/swatchVert" android:layout_width="48dp" android:layout_height="48dp" android:layout_margin="8dp">
+            <View android:id="@+id/swatchVertCircle" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_color_swatch" />
+            <ImageView android:id="@+id/swatchVertCheck" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_check" android:visibility="gone" android:contentDescription="@null" />
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginStart="12dp">
+
+        <FrameLayout android:id="@+id/swatchOrange" android:layout_width="48dp" android:layout_height="48dp" android:layout_margin="8dp">
+            <View android:id="@+id/swatchOrangeCircle" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_color_swatch" />
+            <ImageView android:id="@+id/swatchOrangeCheck" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_check" android:visibility="gone" android:contentDescription="@null" />
+        </FrameLayout>
+
+        <FrameLayout android:id="@+id/swatchRouge" android:layout_width="48dp" android:layout_height="48dp" android:layout_margin="8dp">
+            <View android:id="@+id/swatchRougeCircle" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_color_swatch" />
+            <ImageView android:id="@+id/swatchRougeCheck" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_check" android:visibility="gone" android:contentDescription="@null" />
+        </FrameLayout>
+
+        <FrameLayout android:id="@+id/swatchBleu" android:layout_width="48dp" android:layout_height="48dp" android:layout_margin="8dp">
+            <View android:id="@+id/swatchBleuCircle" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_color_swatch" />
+            <ImageView android:id="@+id/swatchBleuCheck" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_check" android:visibility="gone" android:contentDescription="@null" />
+        </FrameLayout>
+
+        <FrameLayout android:id="@+id/swatchBlanc" android:layout_width="48dp" android:layout_height="48dp" android:layout_margin="8dp">
+            <View android:id="@+id/swatchBlancCircle" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_color_swatch" />
+            <ImageView android:id="@+id/swatchBlancCheck" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_check" android:visibility="gone" android:contentDescription="@null" />
+        </FrameLayout>
+
+    </LinearLayout>
+
+</LinearLayout>

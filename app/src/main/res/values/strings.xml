@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Veridian</string>
-    <string name="reset_placeholder">Projet remis à zéro — prêt à reconstruire.</string>
+    <string name="hint_message">Écris un message…</string>
+    <string name="new_conversation">+ Nouvelle conversation</string>
+    <string name="conversations_title">Conversations</string>
+    <string name="settings_title">Réglages</string>
+    <string name="settings_color_label">Couleur d\'accent</string>
+    <string name="placeholder_assistant_reply">🛠️ Le backend IA n\'est pas encore reconstruit — cette réponse est un espace réservé en attendant.</string>
 </resources>

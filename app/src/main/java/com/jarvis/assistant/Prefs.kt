@@ -1,0 +1,79 @@
+package com.jarvis.assistant
+
+import android.content.Context
+import androidx.core.content.ContextCompat
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * Stockage local minimal (SharedPreferences) : couleur d'accent choisie dans Réglages +
+ * conversations du chat. Pas de base de données pour l'instant (projet reconstruit depuis
+ * zéro, voir MainActivity) — un simple JSON suffit tant que le volume reste raisonnable ;
+ * à remplacer par une vraie base si le nombre de conversations/messages grossit beaucoup.
+ */
+object Prefs {
+
+    private const val PREFS_NAME = "jarvis_prefs"
+    private const val KEY_ACCENT_COLOR = "accent_color"
+    private const val KEY_CONVERSATIONS = "conversations_json"
+    private const val KEY_ACTIVE_CONVERSATION_ID = "active_conversation_id"
+
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    fun getAccentColor(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_ACCENT_COLOR, Int.MIN_VALUE)
+        return if (stored == Int.MIN_VALUE) ContextCompat.getColor(context, R.color.accent_default) else stored
+    }
+
+    fun setAccentColor(context: Context, color: Int) {
+        prefs(context).edit().putInt(KEY_ACCENT_COLOR, color).apply()
+    }
+
+    fun getActiveConversationId(context: Context): String? =
+        prefs(context).getString(KEY_ACTIVE_CONVERSATION_ID, null)
+
+    fun setActiveConversationId(context: Context, id: String) {
+        prefs(context).edit().putString(KEY_ACTIVE_CONVERSATION_ID, id).apply()
+    }
+
+    fun loadConversations(context: Context): MutableList<Conversation> {
+        val raw = prefs(context).getString(KEY_CONVERSATIONS, null) ?: return mutableListOf()
+        return try {
+            val array = JSONArray(raw)
+            val result = mutableListOf<Conversation>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val messages = mutableListOf<Message>()
+                val msgArray = obj.optJSONArray("messages") ?: JSONArray()
+                for (j in 0 until msgArray.length()) {
+                    val m = msgArray.getJSONObject(j)
+                    messages.add(Message(m.optString("text", ""), m.optBoolean("isUser", true), m.optLong("timestamp", 0L)))
+                }
+                result.add(Conversation(obj.getString("id"), obj.optString("title", "Conversation"), messages))
+            }
+            result
+        } catch (_: Exception) {
+            mutableListOf()
+        }
+    }
+
+    fun saveConversations(context: Context, conversations: List<Conversation>) {
+        val array = JSONArray()
+        conversations.forEach { conv ->
+            val obj = JSONObject()
+            obj.put("id", conv.id)
+            obj.put("title", conv.title)
+            val msgArray = JSONArray()
+            conv.messages.forEach { msg ->
+                val m = JSONObject()
+                m.put("text", msg.text)
+                m.put("isUser", msg.isUser)
+                m.put("timestamp", msg.timestamp)
+                msgArray.put(m)
+            }
+            obj.put("messages", msgArray)
+            array.put(obj)
+        }
+        prefs(context).edit().putString(KEY_CONVERSATIONS, array.toString()).apply()
+    }
+}
