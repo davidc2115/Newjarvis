@@ -1,10 +1,14 @@
 package com.jarvis.assistant
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -28,6 +32,26 @@ class MainActivity : AppCompatActivity() {
     private lateinit var conversations: MutableList<Conversation>
     private lateinit var activeConversation: Conversation
     private var accentColor: Int = 0
+
+    // Lot 2 "contrôle téléphone" (SMS/appels) : SEND_SMS et CALL_PHONE sont des permissions
+    // "dangereuses", il faut les demander à l'exécution. On mémorise la commande en attente
+    // pendant la durée du dialogue système, pour l'exécuter dès que l'utilisateur accepte
+    // (ou expliquer clairement si il refuse).
+    private var pendingCommand: CommandInterpreter.Command? = null
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val command = pendingCommand
+        pendingCommand = null
+        if (command != null) {
+            if (results.values.all { it }) {
+                runDeviceCommand(command)
+            } else {
+                appendAssistantMessage("❌ Permission refusée -- impossible d'exécuter cette action sans elle.")
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -221,6 +245,23 @@ class MainActivity : AppCompatActivity() {
      * (ou non) à faire du function-calling.
      */
     private fun executeDeviceCommand(command: CommandInterpreter.Command) {
+        val requiredPermission = when (command) {
+            is CommandInterpreter.Command.Sms -> Manifest.permission.SEND_SMS
+            is CommandInterpreter.Command.Call -> Manifest.permission.CALL_PHONE
+            else -> null
+        }
+        if (requiredPermission != null &&
+            ContextCompat.checkSelfPermission(this, requiredPermission) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingCommand = command
+            permissionLauncher.launch(arrayOf(requiredPermission))
+            return
+        }
+        runDeviceCommand(command)
+    }
+
+    /** Exécute la commande une fois qu'on sait que les permissions nécessaires sont accordées. */
+    private fun runDeviceCommand(command: CommandInterpreter.Command) {
         val reply = when (command) {
             is CommandInterpreter.Command.Flashlight -> {
                 val ok = DeviceController.setFlashlight(this, command.on)
@@ -238,6 +279,14 @@ class MainActivity : AppCompatActivity() {
                 val ok = DeviceController.setAlarm(this, command.hour, command.minute, null)
                 if (ok) "⏰ Réveil réglé à %02d:%02d.".format(command.hour, command.minute)
                 else "❌ Impossible de régler le réveil (aucune appli Horloge trouvée ?)."
+            }
+            is CommandInterpreter.Command.Sms -> {
+                val ok = DeviceController.sendSms(this, command.phoneNumber, command.message)
+                if (ok) "📩 SMS envoyé à ${command.phoneNumber}." else "❌ Échec de l'envoi du SMS."
+            }
+            is CommandInterpreter.Command.Call -> {
+                val ok = DeviceController.makeCall(this, command.phoneNumber)
+                if (ok) "📞 Appel en cours vers ${command.phoneNumber}." else "❌ Impossible de lancer l'appel."
             }
         }
         appendAssistantMessage(reply)

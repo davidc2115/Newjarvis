@@ -10,6 +10,11 @@
          l'écran de confirmation (EXTRA_SKIP_UI) : voir DeviceController. -->
     <uses-permission android:name="android.permission.SET_ALARM" />
 
+    <!-- Lot 2 "contrôle téléphone" : permissions dangereuses, demandées à l'exécution
+         (voir MainActivity.permissionLauncher) avant tout envoi de SMS ou appel. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+
     <!-- Déclaration facultative : indique qu'on utilise le flash si présent, sans empêcher
          l'installation sur un appareil qui n'en a pas (required="false"). -->
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />

@@ -17,6 +17,8 @@ object CommandInterpreter {
         data class Flashlight(val on: Boolean) : Command()
         data class Timer(val seconds: Int) : Command()
         data class Alarm(val hour: Int, val minute: Int) : Command()
+        data class Sms(val phoneNumber: String, val message: String) : Command()
+        data class Call(val phoneNumber: String) : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -24,8 +26,21 @@ object CommandInterpreter {
     private val timerRegex = Regex("minuteur[^.\\d]*?(\\d+)\\s*(heure|minute|seconde)")
     private val alarmRegex = Regex("(réveil|reveil|alarme)[^.\\d]*?(\\d{1,2})\\s*[h:]\\s*(\\d{0,2})")
 
+    // Ces deux-là tournent sur le texte ORIGINAL (pas lower-case) avec IGNORE_CASE, pour
+    // préserver la casse du corps du SMS : lower-caser tout aurait aussi lower-casé le
+    // message à envoyer.
+    private val smsRegex = Regex(
+        "(?:sms|texto|message texte)[^\\d]{0,20}(\\+?[\\d ]{6,})\\D*?(?:disant|qui dit|:)\\s*(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val callRegex = Regex(
+        "appel(?:le|er)?\\s+(?:le\\s+|au\\s+)?(\\+?[\\d][\\d .-]{5,})",
+        RegexOption.IGNORE_CASE
+    )
+
     fun parse(text: String): Command? {
-        val lower = text.lowercase().trim()
+        val trimmed = text.trim()
+        val lower = trimmed.lowercase()
 
         if (flashlightOnRegex.containsMatchIn(lower)) return Command.Flashlight(true)
         if (flashlightOffRegex.containsMatchIn(lower)) return Command.Flashlight(false)
@@ -45,6 +60,17 @@ object CommandInterpreter {
             val hour = match.groupValues[2].toIntOrNull() ?: return@let
             val minute = match.groupValues[3].toIntOrNull() ?: 0
             if (hour in 0..23 && minute in 0..59) return Command.Alarm(hour, minute)
+        }
+
+        smsRegex.find(trimmed)?.let { match ->
+            val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
+            val body = match.groupValues[2].trim()
+            if (number.length >= 6 && body.isNotBlank()) return Command.Sms(number, body)
+        }
+
+        callRegex.find(trimmed)?.let { match ->
+            val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
+            if (number.length >= 6) return Command.Call(number)
         }
 
         return null
