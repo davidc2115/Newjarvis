@@ -82,7 +82,7 @@ object DeviceController {
      * SEND_SMS, demandée à l'exécution par MainActivity avant d'appeler cette fonction. Découpe
      * automatiquement en plusieurs parties si le message dépasse la taille d'un SMS simple.
      */
-    fun sendSms(context: Context, phoneNumber: String, message: String): Boolean {
+    fun sendSms(context: Context, phoneNumber: String, message: String): Result<Unit> {
         return try {
             val smsManager = if (Build.VERSION.SDK_INT >= 31) {
                 context.getSystemService(SmsManager::class.java)
@@ -96,9 +96,9 @@ object DeviceController {
             } else {
                 smsManager.sendTextMessage(phoneNumber, null, message, null, null)
             }
-            true
+            Result.success(Unit)
         } catch (e: Exception) {
-            false
+            Result.failure(e)
         }
     }
 
@@ -106,15 +106,15 @@ object DeviceController {
      * Lance un appel directement (sans passer par le composeur) -- nécessite la permission
      * CALL_PHONE, demandée à l'exécution par MainActivity avant d'appeler cette fonction.
      */
-    fun makeCall(context: Context, phoneNumber: String): Boolean {
+    fun makeCall(context: Context, phoneNumber: String): Result<Unit> {
         return try {
             val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phoneNumber")).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(intent)
-            true
+            Result.success(Unit)
         } catch (e: Exception) {
-            false
+            Result.failure(e)
         }
     }
 

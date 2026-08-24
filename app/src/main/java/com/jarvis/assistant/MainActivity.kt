@@ -257,6 +257,7 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.CreateContact -> listOf(Manifest.permission.WRITE_CONTACTS)
             is CommandInterpreter.Command.FindContact -> listOf(Manifest.permission.READ_CONTACTS)
             is CommandInterpreter.Command.GetLocation -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            is CommandInterpreter.Command.CreateKml -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
             is CommandInterpreter.Command.Notify ->
                 if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
             else -> emptyList()
@@ -325,6 +326,21 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
+        if (command is CommandInterpreter.Command.CreateKml) {
+            // Comme GetLocation ci-dessus : async, donc géré à part avant le "when" synchrone.
+            LocationController.getCurrentLocation(
+                this,
+                onResult = { lat, lon ->
+                    val placemark = FileGenController.KmlPlacemark(command.label ?: "Position", lat, lon)
+                    val file = FileGenController.createKml(this, command.name, listOf(placemark))
+                    appendAssistantMessage(
+                        if (file != null) "🗺️ KML créé : ${file.absolutePath}" else "❌ Échec de la création du KML."
+                    )
+                },
+                onError = { error -> appendAssistantMessage("❌ $error") }
+            )
+            return
+        }
         val reply = when (command) {
             is CommandInterpreter.Command.Flashlight -> {
                 val ok = DeviceController.setFlashlight(this, command.on)
@@ -353,12 +369,22 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             is CommandInterpreter.Command.Sms -> {
-                val ok = DeviceController.sendSms(this, command.phoneNumber, command.message)
-                if (ok) "📩 SMS envoyé à ${command.phoneNumber}." else "❌ Échec de l'envoi du SMS."
+                val result = DeviceController.sendSms(this, command.phoneNumber, command.message)
+                if (result.isSuccess) {
+                    "📩 SMS envoyé à ${command.phoneNumber}."
+                } else {
+                    val e = result.exceptionOrNull()
+                    "❌ Échec de l'envoi du SMS -- ${e?.javaClass?.simpleName} : ${e?.message}"
+                }
             }
             is CommandInterpreter.Command.Call -> {
-                val ok = DeviceController.makeCall(this, command.phoneNumber)
-                if (ok) "📞 Appel en cours vers ${command.phoneNumber}." else "❌ Impossible de lancer l'appel."
+                val result = DeviceController.makeCall(this, command.phoneNumber)
+                if (result.isSuccess) {
+                    "📞 Appel en cours vers ${command.phoneNumber}."
+                } else {
+                    val e = result.exceptionOrNull()
+                    "❌ Impossible de lancer l'appel -- ${e?.javaClass?.simpleName} : ${e?.message}"
+                }
             }
             is CommandInterpreter.Command.CreateContact -> {
                 val ok = ContactsController.createContact(this, command.name, command.phoneNumber)
@@ -386,8 +412,13 @@ class MainActivity : AppCompatActivity() {
                     contact == null -> "🔍 Aucun contact trouvé pour « ${command.name} »."
                     number == null -> "👤 ${contact.name} -- aucun numéro enregistré, impossible d'appeler."
                     else -> {
-                        val ok = DeviceController.makeCall(this, number)
-                        if (ok) "📞 Appel de ${contact.name} ($number) en cours." else "❌ Impossible de lancer l'appel."
+                        val result = DeviceController.makeCall(this, number)
+                        if (result.isSuccess) {
+                            "📞 Appel de ${contact.name} ($number) en cours."
+                        } else {
+                            val e = result.exceptionOrNull()
+                            "❌ Impossible de lancer l'appel -- ${e?.javaClass?.simpleName} : ${e?.message}"
+                        }
                     }
                 }
             }
@@ -414,6 +445,11 @@ class MainActivity : AppCompatActivity() {
                 val file = FileGenController.createPdf(this, command.name, listOf(command.text))
                 if (file != null) "📄 PDF créé : ${file.absolutePath}" else "❌ Échec de la création du PDF."
             }
+            is CommandInterpreter.Command.CreateZip -> {
+                val file = FileGenController.zipOutputDir(this, command.name)
+                if (file != null) "🗜️ ZIP créé : ${file.absolutePath}" else "❌ Échec de la création du ZIP."
+            }
+            is CommandInterpreter.Command.CreateKml -> return // géré au-dessus (async, comme GetLocation)
             is CommandInterpreter.Command.Notify -> {
                 NotificationController.notify(this, getString(R.string.app_name), command.text)
                 "🔔 Notification envoyée."

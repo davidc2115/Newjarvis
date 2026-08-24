@@ -27,6 +27,8 @@ object CommandInterpreter {
         data class DeleteFile(val name: String) : Command()
         data class OpenMaps(val destination: String?) : Command()
         data class CreatePdf(val name: String, val text: String) : Command()
+        data class CreateZip(val name: String) : Command()
+        data class CreateKml(val name: String, val label: String?) : Command()
         data class Notify(val text: String) : Command()
         object ShowNotifications : Command()
     }
@@ -84,6 +86,14 @@ object CommandInterpreter {
     )
     private val createPdfRegex = Regex(
         "cr[ée]e?[^.]*pdf[^.]*appel[ée]\\s+([^\\s]+)\\s+(?:avec|contenant)\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val createZipRegex = Regex(
+        "cr[ée]e?[^.]*(?:archive )?zip[^.]*appel[ée]e?\\s+([^\\s]+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val createKmlRegex = Regex(
+        "cr[ée]e?[^.]*kml[^.]*appel[ée]e?\\s+([^\\s]+)(?:\\s+(?:avec|pour)\\s+(.+))?",
         RegexOption.IGNORE_CASE
     )
     private val notifyRegex = Regex(
@@ -196,6 +206,19 @@ object CommandInterpreter {
             if (!name.endsWith(".pdf", ignoreCase = true)) name += ".pdf"
             val text = match.groupValues[2].trim()
             if (text.isNotBlank()) return Command.CreatePdf(name, text)
+        }
+
+        createZipRegex.find(trimmed)?.let { match ->
+            var name = match.groupValues[1].trim()
+            if (!name.endsWith(".zip", ignoreCase = true)) name += ".zip"
+            return Command.CreateZip(name)
+        }
+
+        createKmlRegex.find(trimmed)?.let { match ->
+            var name = match.groupValues[1].trim()
+            if (!name.endsWith(".kml", ignoreCase = true)) name += ".kml"
+            val label = match.groupValues[2].trim().ifBlank { null }
+            return Command.CreateKml(name, label)
         }
 
         if (showNotificationsRegex.containsMatchIn(lower)) return Command.ShowNotifications

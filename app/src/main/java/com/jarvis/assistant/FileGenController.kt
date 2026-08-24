@@ -21,7 +21,7 @@ import java.util.zip.ZipOutputStream
  */
 object FileGenController {
 
-    private fun outputDir(context: Context): File =
+    fun outputDir(context: Context): File =
         (context.getExternalFilesDir(null) ?: context.filesDir).also { it.mkdirs() }
 
     /** Génère un PDF simple : une page par élément de [pages] (texte multi-lignes). */
@@ -50,6 +50,17 @@ object FileGenController {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** Zippe TOUT le contenu actuel du dossier de sortie de l'appli (hors .zip existants, pour
+     *  ne pas se zipper soi-même) -- commande vocale "crée un zip appelé X" (voir
+     *  CommandInterpreter.Command.CreateZip), plus simple pour l'utilisateur que de devoir
+     *  lister les fichiers un par un. */
+    fun zipOutputDir(context: Context, fileName: String): File? {
+        val files = outputDir(context).listFiles()
+            ?.filter { it.isFile && !it.name.endsWith(".zip", ignoreCase = true) }
+            ?: emptyList()
+        return createZip(context, fileName, files)
     }
 
     /** Zippe une liste de fichiers existants en un seul fichier .zip. */
