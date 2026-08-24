@@ -250,6 +250,7 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.Call -> Manifest.permission.CALL_PHONE
             is CommandInterpreter.Command.CreateContact -> Manifest.permission.WRITE_CONTACTS
             is CommandInterpreter.Command.FindContact -> Manifest.permission.READ_CONTACTS
+            is CommandInterpreter.Command.GetLocation -> Manifest.permission.ACCESS_FINE_LOCATION
             else -> null
         }
         if (requiredPermission != null &&
@@ -264,6 +265,17 @@ class MainActivity : AppCompatActivity() {
 
     /** Exécute la commande une fois qu'on sait que les permissions nécessaires sont accordées. */
     private fun runDeviceCommand(command: CommandInterpreter.Command) {
+        if (command is CommandInterpreter.Command.GetLocation) {
+            LocationController.getCurrentLocation(
+                this,
+                onResult = { lat, lon ->
+                    val mapsLink = "https://maps.google.com/?q=$lat,$lon"
+                    appendAssistantMessage("📍 Position actuelle : %.6f, %.6f\n$mapsLink".format(lat, lon))
+                },
+                onError = { error -> appendAssistantMessage("❌ $error") }
+            )
+            return
+        }
         val reply = when (command) {
             is CommandInterpreter.Command.Flashlight -> {
                 val ok = DeviceController.setFlashlight(this, command.on)
@@ -302,6 +314,7 @@ class MainActivity : AppCompatActivity() {
                     else -> "👤 ${contact.name} : ${contact.phoneNumbers.joinToString(", ")}"
                 }
             }
+            CommandInterpreter.Command.GetLocation -> return // géré au-dessus (async)
         }
         appendAssistantMessage(reply)
     }

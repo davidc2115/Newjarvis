@@ -21,6 +21,7 @@ object CommandInterpreter {
         data class Call(val phoneNumber: String) : Command()
         data class CreateContact(val name: String, val phoneNumber: String) : Command()
         data class FindContact(val name: String) : Command()
+        object GetLocation : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -45,6 +46,10 @@ object CommandInterpreter {
     )
     private val findContactRegex = Regex(
         "(?:num[ée]ro de|cherche(?: le)? contact|trouve(?: le)? contact)\\s+([\\p{L} '\\-]+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val locationRegex = Regex(
+        "(o[uù] (suis|est)-je|o[uù] je suis|ma position|(?:ma )?localisation actuelle)",
         RegexOption.IGNORE_CASE
     )
 
@@ -93,6 +98,8 @@ object CommandInterpreter {
             val name = match.groupValues[1].trim()
             if (name.isNotBlank()) return Command.FindContact(name)
         }
+
+        if (locationRegex.containsMatchIn(lower)) return Command.GetLocation
 
         return null
     }

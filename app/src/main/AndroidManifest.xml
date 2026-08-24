@@ -20,6 +20,10 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 
+    <!-- Lot 4 "contrôle téléphone" : position GPS/réseau, demandée à l'exécution. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <!-- Déclaration facultative : indique qu'on utilise le flash si présent, sans empêcher
          l'installation sur un appareil qui n'en a pas (required="false"). -->
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
