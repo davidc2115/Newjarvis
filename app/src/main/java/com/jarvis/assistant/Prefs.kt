@@ -17,8 +17,30 @@ object Prefs {
     private const val KEY_ACCENT_COLOR = "accent_color"
     private const val KEY_CONVERSATIONS = "conversations_json"
     private const val KEY_ACTIVE_CONVERSATION_ID = "active_conversation_id"
+    private const val KEY_SELECTED_MODEL = "selected_ai_model"
+    private const val KEY_HF_TOKEN = "huggingface_token"
+
+    /** Identifiants des backends IA supportés (voir GeminiNanoController / GemmaController). */
+    const val MODEL_GEMINI_NANO = "gemini_nano"
+    const val MODEL_GEMMA = "gemma"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    fun getSelectedModel(context: Context): String =
+        prefs(context).getString(KEY_SELECTED_MODEL, MODEL_GEMINI_NANO) ?: MODEL_GEMINI_NANO
+
+    fun setSelectedModel(context: Context, model: String) {
+        prefs(context).edit().putString(KEY_SELECTED_MODEL, model).apply()
+    }
+
+    /** Jeton d'accès personnel Hugging Face (huggingface.co/settings/tokens), requis pour
+     *  télécharger le modèle Gemma car son dépôt est soumis à l'acceptation de la licence
+     *  Gemma. Jamais codé en dur dans le dépôt public -- saisi par l'utilisateur uniquement. */
+    fun getHfToken(context: Context): String? = prefs(context).getString(KEY_HF_TOKEN, null)
+
+    fun setHfToken(context: Context, token: String) {
+        prefs(context).edit().putString(KEY_HF_TOKEN, token).apply()
+    }
 
     fun getAccentColor(context: Context): Int {
         val stored = prefs(context).getInt(KEY_ACCENT_COLOR, Int.MIN_VALUE)

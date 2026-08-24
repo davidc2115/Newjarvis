@@ -191,7 +191,20 @@ class MainActivity : AppCompatActivity() {
         refreshChat()
         refreshSidebar()
 
-        requestGeminiNanoReply(text)
+        requestAiReply(text)
+    }
+
+    /**
+     * Route la requête vers le backend IA choisi dans Réglages (voir Prefs.getSelectedModel) :
+     * Gemini Nano via AICore, ou Gemma 3 1B en local via LiteRT-LM (voir GemmaController).
+     * Les deux sont indépendants -- changer de modèle dans Réglages change le backend utilisé
+     * dès le message suivant, sans redémarrer l'appli.
+     */
+    private fun requestAiReply(prompt: String) {
+        when (Prefs.getSelectedModel(this)) {
+            Prefs.MODEL_GEMMA -> requestGemmaReply(prompt)
+            else -> requestGeminiNanoReply(prompt)
+        }
     }
 
     /**
@@ -225,6 +238,26 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 appendAssistantMessage("❌ Erreur Gemini Nano : ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Backend IA : Gemma 3 1B en local via LiteRT-LM (voir GemmaController). Ne passe pas par
+     * AICore -- fonctionne sur tout appareil suffisamment puissant, mais le modèle doit avoir
+     * été téléchargé au préalable dans Réglages (jeton Hugging Face requis, licence Gemma).
+     */
+    private fun requestGemmaReply(prompt: String) {
+        if (!GemmaController.isDownloaded(this)) {
+            appendAssistantMessage(getString(R.string.gemma_not_downloaded_chat))
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val reply = GemmaController.generateReply(this@MainActivity, prompt)
+                appendAssistantMessage(reply)
+            } catch (e: Exception) {
+                appendAssistantMessage("❌ Erreur Gemma : ${e.message}")
             }
         }
     }

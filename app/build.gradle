@@ -63,4 +63,13 @@ dependencies {
     // clé, aucune donnée envoyée à un serveur). API level 26+ requis (déjà notre minSdk).
     // Uniquement fonctionnel sur les appareils compatibles AICore (voir GeminiNanoController).
     implementation 'com.google.mlkit:genai-prompt:1.0.0-beta2'
+
+    // Backend IA on-device : Gemma 3 1B via LiteRT-LM (API Kotlin officielle et activement
+    // maintenue de Google AI Edge -- l'ancienne API MediaPipe "tasks-genai" est en mode
+    // maintenance seule depuis 2026 et n'est plus recommandée pour un nouveau projet).
+    // Contrairement à Gemini Nano, ne passe PAS par AICore : le modèle (.litertlm, ~555 Mo)
+    // est téléchargé séparément depuis Hugging Face et tourne dans le processus de l'appli
+    // (voir GemmaController + android:largeHeap ci-dessus). Fonctionne sur tout appareil
+    // Android suffisamment puissant, pas seulement les appareils compatibles AICore.
+    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.16.1'
 }

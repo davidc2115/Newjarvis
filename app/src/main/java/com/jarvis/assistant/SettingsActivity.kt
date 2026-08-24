@@ -3,12 +3,15 @@ package com.jarvis.assistant
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import com.jarvis.assistant.databinding.ActivitySettingsBinding
+import kotlinx.coroutines.launch
 
 /** Réglages : choix de la couleur d'accent du thème (bulles utilisateur, bouton d'envoi...). */
 class SettingsActivity : AppCompatActivity() {
@@ -47,6 +50,8 @@ class SettingsActivity : AppCompatActivity() {
         updateSelection(Prefs.getAccentColor(this))
 
         binding.backButton.setOnClickListener { finish() }
+
+        setupModelSelection()
     }
 
     private fun selectColor(color: Int) {
@@ -66,6 +71,107 @@ class SettingsActivity : AppCompatActivity() {
                 binding.settingsTopBar.paddingRight, binding.settingsTopBar.paddingBottom
             )
             insets
+        }
+    }
+
+    /**
+     * Choix du backend IA (Gemini Nano via AICore, ou Gemma 3 1B en local via LiteRT-LM --
+     * voir GemmaController). Gemma nécessite un jeton Hugging Face + le téléchargement du
+     * modèle (~555 Mo), donc la section correspondante n'apparaît que quand Gemma est
+     * sélectionné.
+     */
+    private fun setupModelSelection() {
+        binding.hfTokenInput.setText(Prefs.getHfToken(this).orEmpty())
+        binding.hfTokenInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) Prefs.setHfToken(this, binding.hfTokenInput.text?.toString().orEmpty().trim())
+        }
+
+        binding.modelGeminiNanoRow.setOnClickListener { selectModel(Prefs.MODEL_GEMINI_NANO) }
+        binding.modelGemmaRow.setOnClickListener { selectModel(Prefs.MODEL_GEMMA) }
+
+        binding.downloadModelButton.setOnClickListener { confirmAndDownloadGemma() }
+        binding.deleteModelButton.setOnClickListener {
+            GemmaController.deleteModel(this)
+            refreshModelUi()
+        }
+
+        refreshModelSelectionUi()
+        refreshModelUi()
+    }
+
+    private fun selectModel(model: String) {
+        Prefs.setSelectedModel(this, model)
+        refreshModelSelectionUi()
+    }
+
+    private fun refreshModelSelectionUi() {
+        val selected = Prefs.getSelectedModel(this)
+        val isGemma = selected == Prefs.MODEL_GEMMA
+
+        binding.modelGeminiNanoRow.background = ContextCompat.getDrawable(
+            this, if (isGemma) R.drawable.bg_model_row else R.drawable.bg_model_row_selected
+        )
+        binding.modelGeminiNanoCheck.visibility = if (isGemma) View.GONE else View.VISIBLE
+
+        binding.modelGemmaRow.background = ContextCompat.getDrawable(
+            this, if (isGemma) R.drawable.bg_model_row_selected else R.drawable.bg_model_row
+        )
+        binding.modelGemmaCheck.visibility = if (isGemma) View.VISIBLE else View.GONE
+
+        val gemmaSectionVisibility = if (isGemma) View.VISIBLE else View.GONE
+        binding.gemmaConfigSection.visibility = gemmaSectionVisibility
+        binding.hfTokenInput.visibility = gemmaSectionVisibility
+        binding.hfTokenHelpText.visibility = gemmaSectionVisibility
+        binding.modelStatusText.visibility = gemmaSectionVisibility
+        refreshModelUi()
+    }
+
+    private fun refreshModelUi() {
+        if (Prefs.getSelectedModel(this) != Prefs.MODEL_GEMMA) return
+        val downloaded = GemmaController.isDownloaded(this)
+        binding.modelStatusText.text = getString(
+            if (downloaded) R.string.model_downloaded_status else R.string.model_not_downloaded_status
+        )
+        binding.downloadModelButton.visibility = if (downloaded) View.GONE else View.VISIBLE
+        binding.deleteModelButton.visibility = if (downloaded) View.VISIBLE else View.GONE
+    }
+
+    private fun confirmAndDownloadGemma() {
+        val token = binding.hfTokenInput.text?.toString()?.trim().orEmpty()
+        if (token.isBlank()) {
+            binding.modelStatusText.text = getString(R.string.hf_token_missing)
+            return
+        }
+        Prefs.setHfToken(this, token)
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.model_download_confirm_title)
+            .setMessage(R.string.model_download_confirm_message)
+            .setPositiveButton(R.string.download_model_button) { _, _ -> startGemmaDownload(token) }
+            .setNegativeButton("Annuler", null)
+            .show()
+    }
+
+    private fun startGemmaDownload(token: String) {
+        binding.downloadModelButton.visibility = View.GONE
+        binding.modelDownloadProgress.visibility = View.VISIBLE
+        binding.modelDownloadProgress.progress = 0
+
+        lifecycleScope.launch {
+            try {
+                GemmaController.download(this@SettingsActivity, token) { downloaded, total ->
+                    if (total > 0) {
+                        val percent = ((downloaded * 100) / total).toInt()
+                        runOnUiThread { binding.modelDownloadProgress.progress = percent }
+                    }
+                }
+                binding.modelDownloadProgress.visibility = View.GONE
+                refreshModelUi()
+            } catch (e: Exception) {
+                binding.modelDownloadProgress.visibility = View.GONE
+                binding.downloadModelButton.visibility = View.VISIBLE
+                binding.modelStatusText.text = "❌ ${e.message}"
+            }
         }
     }
 }
