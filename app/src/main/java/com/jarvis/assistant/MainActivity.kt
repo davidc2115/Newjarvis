@@ -236,8 +236,57 @@ class MainActivity : AppCompatActivity() {
         if (command != null) {
             executeDeviceCommand(command)
         } else {
-            requestAiReply(text)
+            classifyThenReply(text)
         }
+    }
+
+    /**
+     * Tool-calling IA (demande explicite utilisateur : "TOOLCALLING") : aucune regex de
+     * CommandInterpreter n'a matché, mais le message peut quand même être une demande d'action
+     * formulée différemment ("est-ce que tu peux prévenir Julie par téléphone" par exemple).
+     * On demande au backend IA actif de classifier l'intention en JSON strict (voir
+     * CommandInterpreter.buildClassificationPrompt) avant d'abandonner vers une réponse
+     * conversationnelle classique -- ainsi le modèle ne répond plus jamais "je suis un grand
+     * modèle linguistique..." à une demande d'action juste parce que la formulation exacte
+     * n'était pas dans la liste des regex.
+     */
+    private fun classifyThenReply(text: String) {
+        lifecycleScope.launch {
+            val aiCommand = try {
+                classifyIntent(text)
+            } catch (e: Exception) {
+                null
+            }
+            if (aiCommand != null) {
+                executeDeviceCommand(aiCommand)
+            } else {
+                requestAiReply(text)
+            }
+        }
+    }
+
+    /**
+     * Envoie le prompt de classification au même backend que celui actif pour la conversation
+     * (voir Prefs.getSelectedModel) -- ni Gemini Nano ni Gemma n'exposent de function-calling
+     * natif sur Android, donc ceci reproduit le comportement par un prompt structuré demandant
+     * un JSON en sortie (voir CommandInterpreter.fromAiJson pour le parsing, tolérant aux
+     * erreurs). Renvoie null (jamais d'exception) si le backend n'est pas disponible/téléchargé,
+     * ou si la réponse n'est pas un JSON d'action reconnu -- dans tous les cas le message part
+     * alors normalement vers une réponse conversationnelle classique.
+     */
+    private suspend fun classifyIntent(text: String): CommandInterpreter.Command? {
+        val prompt = CommandInterpreter.buildClassificationPrompt(text)
+        val raw = when (Prefs.getSelectedModel(this)) {
+            Prefs.MODEL_GEMMA -> {
+                if (!GemmaController.isDownloaded(this)) return null
+                GemmaController.generateReply(this, prompt)
+            }
+            else -> {
+                if (GeminiNanoController.checkStatus() != FeatureStatus.AVAILABLE) return null
+                GeminiNanoController.generateReply(prompt)
+            }
+        }
+        return CommandInterpreter.fromAiJson(raw)
     }
 
     /**

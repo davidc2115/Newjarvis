@@ -1,5 +1,7 @@
 package com.jarvis.assistant
 
+import org.json.JSONObject
+
 /**
  * Interpréteur de commandes très simple, à base de mots-clés/regex sur ce que l'utilisateur
  * tape dans le chat -- utilisé pour déclencher une vraie action téléphone (lampe, minuteur,
@@ -314,5 +316,149 @@ object CommandInterpreter {
         }
 
         return null
+    }
+
+    // --- Tool-calling IA (demande explicite utilisateur : "TOOLCALLING") ---------------------
+    // Le système ci-dessus est volontairement basique (regex/mots-clés) : si aucune formulation
+    // reconnue ne correspond, on ne veut plus abandonner directement vers une réponse générique
+    // de l'IA ("je suis un grand modèle linguistique...") -- on demande d'abord au modèle actif
+    // (Gemini Nano ou Gemma, peu importe -- voir MainActivity.classifyIntent) de classifier
+    // l'intention lui-même, sous forme d'un unique objet JSON strict, qu'on retraduit ici en
+    // Command exécutable par le même pipeline (executeDeviceCommand/runDeviceCommand) que les
+    // commandes reconnues par regex. Ni Gemini Nano (ML Kit GenAI Prompt API) ni Gemma via
+    // LiteRT-LM n'exposent de function-calling natif sur Android à ce jour -- ceci reproduit le
+    // comportement par prompt structuré, seule option disponible on-device pour les deux backends.
+
+    /**
+     * Prompt de classification envoyé au backend IA actif quand aucune regex n'a matché.
+     * Répond uniquement par un objet JSON sur une seule ligne (schéma détaillé ci-dessous), ou
+     * {"action":"none"} si le message est une simple question/conversation sans action associée.
+     */
+    fun buildClassificationPrompt(userText: String): String {
+        val safeText = userText.replace("\"", "'").replace("\n", " ").trim()
+        return """
+Tu es un classifieur d'intentions pour un assistant qui contrôle un téléphone Android. Lis le message de l'utilisateur et réponds UNIQUEMENT par un objet JSON sur une seule ligne, sans aucun texte ni explication autour, correspondant à UNE SEULE des actions ci-dessous si le message correspond clairement à une demande d'action sur le téléphone. Si le message est une question générale, une conversation, ou ne correspond à AUCUNE de ces actions, réponds EXACTEMENT {"action":"none"} -- ne devine jamais une action au hasard.
+
+Actions possibles (respecte exactement les noms des champs, JSON valide, une seule ligne) :
+{"action":"flashlight","on":true}
+{"action":"flashlight","on":false}
+{"action":"set_timer","seconds":300}
+{"action":"set_alarm","hour":7,"minute":30}
+{"action":"send_sms","number":"0612345678","message":"texte du sms"}
+{"action":"call_number","number":"0612345678"}
+{"action":"call_contact","name":"Julie"}
+{"action":"create_contact","name":"Julie","number":"0612345678"}
+{"action":"find_contact","name":"Julie"}
+{"action":"get_location"}
+{"action":"find_file","query":"facture"}
+{"action":"delete_file","name":"facture.pdf"}
+{"action":"open_maps","destination":"Tour Eiffel"}
+{"action":"create_pdf","name":"notes","text":"contenu"}
+{"action":"create_zip","name":"archive"}
+{"action":"create_docx","name":"rapport","text":"contenu"}
+{"action":"create_xlsx","name":"tableau","csv":"a,b\n1,2"}
+{"action":"create_kml","name":"trajet","label":"maison"}
+{"action":"notify","text":"texte de la notification"}
+{"action":"show_notifications"}
+{"action":"today_events"}
+{"action":"week_events","offset":0}
+{"action":"upcoming_events"}
+{"action":"list_calendars"}
+{"action":"create_event","title":"dentiste","date":"25/08","time":"14h30"}
+{"action":"delete_event","query":"dentiste"}
+{"action":"none"}
+
+Message de l'utilisateur : "$safeText"
+JSON :"""
+    }
+
+    /**
+     * Retraduit la réponse JSON du modèle (voir buildClassificationPrompt) en Command exécutable.
+     * Robuste par nature : un petit modèle on-device peut ajouter du texte autour du JSON, mal
+     * fermer une accolade, ou halluciner un champ -- toute erreur de parsing ou action inconnue
+     * renvoie simplement null (fallback normal vers une réponse conversationnelle), jamais de
+     * plantage.
+     */
+    fun fromAiJson(raw: String): Command? {
+        val start = raw.indexOf('{')
+        val end = raw.lastIndexOf('}')
+        if (start == -1 || end == -1 || end < start) return null
+        val obj = try {
+            JSONObject(raw.substring(start, end + 1))
+        } catch (e: Exception) {
+            return null
+        }
+        val action = obj.optString("action", "none").trim().lowercase()
+
+        fun str(key: String): String = obj.optString(key, "").trim()
+        fun strOrNull(key: String): String? = str(key).ifBlank { null }
+        fun withExt(name: String, ext: String): String {
+            var n = name
+            if (!n.endsWith(ext, ignoreCase = true)) n += ext
+            return n
+        }
+
+        return when (action) {
+            "flashlight" -> Command.Flashlight(obj.optBoolean("on", true))
+            "set_timer" -> {
+                val seconds = obj.optInt("seconds", -1)
+                if (seconds > 0) Command.Timer(seconds) else null
+            }
+            "set_alarm" -> {
+                val hour = obj.optInt("hour", -1)
+                val minute = obj.optInt("minute", 0)
+                if (hour in 0..23 && minute in 0..59) Command.Alarm(hour, minute) else null
+            }
+            "send_sms" -> {
+                val number = str("number").filter { it.isDigit() || it == '+' }
+                val message = str("message")
+                if (number.length >= 6 && message.isNotBlank()) Command.Sms(number, message) else null
+            }
+            "call_number" -> {
+                val number = str("number").filter { it.isDigit() || it == '+' }
+                if (number.length >= 6) Command.Call(number) else null
+            }
+            "call_contact" -> str("name").ifBlank { null }?.let { Command.CallContact(cleanName(it)) }
+            "create_contact" -> {
+                val name = cleanName(str("name"))
+                val number = str("number").filter { it.isDigit() || it == '+' }
+                if (name.isNotBlank() && number.length >= 6) Command.CreateContact(name, number) else null
+            }
+            "find_contact" -> str("name").ifBlank { null }?.let { Command.FindContact(cleanName(it)) }
+            "get_location" -> Command.GetLocation
+            "find_file" -> str("query").ifBlank { null }?.let { Command.FindFile(it) }
+            "delete_file" -> str("name").ifBlank { null }?.let { Command.DeleteFile(it) }
+            "open_maps" -> Command.OpenMaps(strOrNull("destination"))
+            "create_pdf" -> {
+                val text = str("text")
+                if (text.isBlank()) null else Command.CreatePdf(withExt(str("name").ifBlank { "document" }, ".pdf"), text)
+            }
+            "create_zip" -> Command.CreateZip(withExt(str("name").ifBlank { "archive" }, ".zip"))
+            "create_docx" -> {
+                val text = str("text")
+                if (text.isBlank()) null else Command.CreateDocx(withExt(str("name").ifBlank { "document" }, ".docx"), text)
+            }
+            "create_xlsx" -> {
+                val csv = str("csv")
+                if (csv.isBlank()) null else Command.CreateXlsx(withExt(str("name").ifBlank { "tableau" }, ".xlsx"), csv)
+            }
+            "create_kml" -> Command.CreateKml(withExt(str("name").ifBlank { "trajet" }, ".kml"), strOrNull("label"))
+            "notify" -> str("text").ifBlank { null }?.let { Command.Notify(it) }
+            "show_notifications" -> Command.ShowNotifications
+            "today_events" -> Command.TodayEvents
+            "week_events" -> {
+                val offset = obj.optInt("offset", 0).coerceIn(-1, 1)
+                Command.WeekEvents(offset)
+            }
+            "upcoming_events" -> Command.UpcomingEvents
+            "list_calendars" -> Command.ListCalendars
+            "create_event" -> {
+                val title = str("title")
+                val date = str("date")
+                if (title.isBlank() || date.isBlank()) null else Command.CreateEvent(title, date, strOrNull("time"))
+            }
+            "delete_event" -> str("query").ifBlank { null }?.let { Command.DeleteEvent(cleanName(it)) }
+            else -> null
+        }
     }
 }
