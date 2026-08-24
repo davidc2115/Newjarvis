@@ -19,6 +19,8 @@ object Prefs {
     private const val KEY_ACTIVE_CONVERSATION_ID = "active_conversation_id"
     private const val KEY_SELECTED_MODEL = "selected_ai_model"
     private const val KEY_HF_TOKEN = "huggingface_token"
+    private const val KEY_GOOGLE_WEB_CLIENT_ID = "google_web_client_id"
+    private const val KEY_GOOGLE_ACCOUNTS = "google_linked_accounts_json"
 
     /** Identifiants des backends IA supportés (voir GeminiNanoController / GemmaController). */
     const val MODEL_GEMINI_NANO = "gemini_nano"
@@ -97,5 +99,46 @@ object Prefs {
             array.put(obj)
         }
         prefs(context).edit().putString(KEY_CONVERSATIONS, array.toString()).apply()
+    }
+
+    /** ID client OAuth "Web application" (Google Cloud Console -- voir GoogleAccountController),
+     *  requis comme serverClientId par Credential Manager. Jamais codé en dur, saisi par
+     *  l'utilisateur dans Réglages, comme le jeton Hugging Face ci-dessus. */
+    fun getGoogleWebClientId(context: Context): String? = prefs(context).getString(KEY_GOOGLE_WEB_CLIENT_ID, null)
+
+    fun setGoogleWebClientId(context: Context, id: String) {
+        prefs(context).edit().putString(KEY_GOOGLE_WEB_CLIENT_ID, id).apply()
+    }
+
+    /** Comptes Google liés (email + nom affiché) -- voir GoogleAccountController.LinkedAccount. */
+    fun loadGoogleAccounts(context: Context): MutableList<GoogleAccountController.LinkedAccount> {
+        val raw = prefs(context).getString(KEY_GOOGLE_ACCOUNTS, null) ?: return mutableListOf()
+        return try {
+            val array = JSONArray(raw)
+            val result = mutableListOf<GoogleAccountController.LinkedAccount>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                result.add(
+                    GoogleAccountController.LinkedAccount(
+                        obj.getString("email"),
+                        obj.optString("displayName", "")
+                    )
+                )
+            }
+            result
+        } catch (_: Exception) {
+            mutableListOf()
+        }
+    }
+
+    fun saveGoogleAccounts(context: Context, accounts: List<GoogleAccountController.LinkedAccount>) {
+        val array = JSONArray()
+        accounts.forEach { acc ->
+            val obj = JSONObject()
+            obj.put("email", acc.email)
+            obj.put("displayName", acc.displayName)
+            array.put(obj)
+        }
+        prefs(context).edit().putString(KEY_GOOGLE_ACCOUNTS, array.toString()).apply()
     }
 }

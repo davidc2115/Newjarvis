@@ -72,4 +72,20 @@ dependencies {
     // (voir GemmaController + android:largeHeap ci-dessus). Fonctionne sur tout appareil
     // Android suffisamment puissant, pas seulement les appareils compatibles AICore.
     implementation 'com.google.ai.edge.litertlm:litertlm-android:0.16.1'
+
+    // Connexion Google DIRECTEMENT depuis l'appli (demande explicite de l'utilisateur) : accès
+    // complet au compte Google configuré sur le téléphone (mail/agenda), avec possibilité de
+    // lier PLUSIEURS comptes Google différents. Deux briques distinctes, toutes deux
+    // officiellement recommandées par Google (l'ancienne GoogleSignInClient est dépréciée) :
+    //  - Credential Manager = AUTHENTIFICATION (qui est l'utilisateur, sélecteur de compte
+    //    natif du système).
+    //  - play-services-auth (AuthorizationClient) = AUTORISATION (accès aux données Gmail/
+    //    Agenda -- distinct de l'authentification, demande un consentement séparé par scope).
+    // Un ID client OAuth (Google Cloud Console, créé par l'utilisateur lui-même -- voir
+    // GoogleAccountController) reste indispensable dans les deux cas : c'est une exigence de
+    // l'infrastructure OAuth de Google elle-même, pas quelque chose que ce code peut contourner.
+    implementation 'androidx.credentials:credentials:1.6.0'
+    implementation 'androidx.credentials:credentials-play-services-auth:1.6.0'
+    implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.0'
+    implementation 'com.google.android.gms:play-services-auth:21.6.0'
 }
