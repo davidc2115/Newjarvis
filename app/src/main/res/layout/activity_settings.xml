@@ -308,67 +308,6 @@
         android:layout_marginTop="8dp"
         android:visibility="gone" />
 
-    <!-- Connexion Google directement depuis l'appli (demande explicite de l'utilisateur),
-         multi-comptes : voir GoogleAccountController. L'ID client Web (Google Cloud Console)
-         reste une saisie manuelle obligatoire, comme le jeton Hugging Face ci-dessus : jamais
-         codé en dur dans le dépôt public. -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/google_account_section_label"
-        android:textColor="@color/text_secondary"
-        android:textSize="14sp"
-        android:layout_marginStart="20dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginBottom="8dp" />
-
-    <EditText
-        android:id="@+id/googleWebClientIdInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@drawable/bg_hf_token_input"
-        android:hint="@string/google_web_client_id_hint"
-        android:textColorHint="@color/text_hint"
-        android:textColor="@color/text_primary"
-        android:textSize="14sp"
-        android:inputType="textNoSuggestions"
-        android:maxLines="1"
-        android:padding="14dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/google_web_client_id_help"
-        android:textColor="@color/text_hint"
-        android:textSize="12sp"
-        android:layout_marginStart="20dp"
-        android:layout_marginEnd="20dp"
-        android:layout_marginTop="8dp" />
-
-    <LinearLayout
-        android:id="@+id/googleAccountsContainer"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:layout_marginTop="14dp" />
-
-    <TextView
-        android:id="@+id/addGoogleAccountButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/google_add_account_button"
-        android:textColor="@color/accent_default"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:gravity="center"
-        android:background="@drawable/bg_new_conversation"
-        android:padding="12dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginTop="10dp" />
-
     </LinearLayout>
     </ScrollView>
 
