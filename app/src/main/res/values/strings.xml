@@ -26,4 +26,5 @@
     <string name="model_download_confirm_message">Ce téléchargement fait environ 555 Mo et utilisera ta connexion internet (Wi-Fi recommandé). Continuer ?</string>
     <string name="hf_token_missing">Renseigne d\'abord ton jeton Hugging Face ci-dessus.</string>
     <string name="gemma_not_downloaded_chat">🤖 Le modèle Gemma n\'est pas encore téléchargé. Va dans Réglages → Modèle IA pour le télécharger.</string>
+    <string name="notification_channel_name">Notifications JARVIS</string>
 </resources>

@@ -33,9 +33,33 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 
+    <!-- Lot 7 "contrôle téléphone" : notifications, permission dangereuse depuis Android 13
+         (API 33), demandée à l'exécution (sans objet sur les versions antérieures). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Déclaration facultative : indique qu'on utilise le flash si présent, sans empêcher
          l'installation sur un appareil qui n'en a pas (required="false"). -->
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
+    <!-- BUG SIGNALÉ : réveil/minuteur répondaient "aucune appli Horloge trouvée" alors que
+         l'appli existe bien sur l'appareil. Cause réelle : depuis Android 11 (API 30), le
+         "package visibility" empêche par défaut une appli de résoudre un intent implicite
+         vers une autre appli tant qu'elle ne l'a pas explicitement déclaré ici. targetSdk 35
+         est largement concerné. Sans ce bloc, startActivity() sur ACTION_SET_ALARM/
+         ACTION_SET_TIMER/geo: peut lever ActivityNotFoundException même si une appli
+         Horloge/Cartes est bien installée. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_TIMER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+    </queries>
 
     <!-- Demande un tas mémoire plus grand au système : utile pour les modèles IA
          embarqués (Gemini Nano/AICore tourne dans un processus système séparé et n'est pas

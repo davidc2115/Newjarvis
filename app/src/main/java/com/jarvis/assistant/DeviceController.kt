@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.AlarmClock
 import android.telephony.SmsManager
+import java.net.URLEncoder
 
 /**
  * Contrôle direct de fonctions matérielles/système du téléphone (lot 1 du "contrôle complet"
@@ -101,6 +102,29 @@ object DeviceController {
     fun makeCall(context: Context, phoneNumber: String): Boolean {
         return try {
             val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phoneNumber")).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Ouvre une appli Cartes (Google Maps ou équivalent) : sur la position actuelle si
+     * [destination] est nul, ou en recherche/itinéraire vers [destination] sinon. Passe par
+     * l'URI standard "geo:" (n'importe quelle appli Cartes installée peut la gérer), pas
+     * spécifiquement Google Maps.
+     */
+    fun openMaps(context: Context, destination: String?): Boolean {
+        return try {
+            val uri = if (destination.isNullOrBlank()) {
+                Uri.parse("geo:0,0?z=16")
+            } else {
+                Uri.parse("geo:0,0?q=" + URLEncoder.encode(destination, "UTF-8"))
+            }
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(intent)

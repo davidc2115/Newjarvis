@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -73,6 +74,7 @@ class MainActivity : AppCompatActivity() {
         setupSidebar()
         setupTopBar()
         setupInputBar()
+        NotificationController.ensureChannel(this)
     }
 
     override fun onResume() {
@@ -251,6 +253,8 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.CreateContact -> Manifest.permission.WRITE_CONTACTS
             is CommandInterpreter.Command.FindContact -> Manifest.permission.READ_CONTACTS
             is CommandInterpreter.Command.GetLocation -> Manifest.permission.ACCESS_FINE_LOCATION
+            is CommandInterpreter.Command.Notify ->
+                if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null
             else -> null
         }
         if (requiredPermission != null &&
@@ -353,6 +357,18 @@ class MainActivity : AppCompatActivity() {
                     StorageController.deleteFile(exactMatch.absolutePath) -> "🗑️ Fichier supprimé : ${exactMatch.absolutePath}"
                     else -> "❌ Échec de la suppression de ${exactMatch.absolutePath} (dossier non vide ou erreur)."
                 }
+            }
+            is CommandInterpreter.Command.OpenMaps -> {
+                val ok = DeviceController.openMaps(this, command.destination)
+                if (ok) "🗺️ Ouverture de Cartes..." else "❌ Impossible d'ouvrir une appli Cartes (aucune installée ?)."
+            }
+            is CommandInterpreter.Command.CreatePdf -> {
+                val file = FileGenController.createPdf(this, command.name, listOf(command.text))
+                if (file != null) "📄 PDF créé : ${file.absolutePath}" else "❌ Échec de la création du PDF."
+            }
+            is CommandInterpreter.Command.Notify -> {
+                NotificationController.notify(this, getString(R.string.app_name), command.text)
+                "🔔 Notification envoyée."
             }
         }
         appendAssistantMessage(reply)

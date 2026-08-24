@@ -24,6 +24,9 @@ object CommandInterpreter {
         object GetLocation : Command()
         data class FindFile(val query: String) : Command()
         data class DeleteFile(val name: String) : Command()
+        data class OpenMaps(val destination: String?) : Command()
+        data class CreatePdf(val name: String, val text: String) : Command()
+        data class Notify(val text: String) : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -60,6 +63,22 @@ object CommandInterpreter {
     )
     private val deleteFileRegex = Regex(
         "(?:supprime|efface)[^.]*fichier\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val navigateRegex = Regex(
+        "(?:navigue|itin[ée]raire|indique-moi le chemin)\\s+(?:vers|jusqu'?[àa])\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val openMapsRegex = Regex(
+        "ouvre[^.]*(?:le )?gps|ouvre[^.]*(?:le )?(?:la )?carte",
+        RegexOption.IGNORE_CASE
+    )
+    private val createPdfRegex = Regex(
+        "cr[ée]e?[^.]*pdf[^.]*appel[ée]\\s+([^\\s]+)\\s+(?:avec|contenant)\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val notifyRegex = Regex(
+        "(?:envoie|affiche)[^.]*notification\\s+(?:disant|qui dit|:)?\\s*(.+)",
         RegexOption.IGNORE_CASE
     )
 
@@ -119,6 +138,25 @@ object CommandInterpreter {
         findFileRegex.find(trimmed)?.let { match ->
             val query = match.groupValues[1].trim()
             if (query.isNotBlank()) return Command.FindFile(query)
+        }
+
+        navigateRegex.find(trimmed)?.let { match ->
+            val destination = match.groupValues[1].trim()
+            if (destination.isNotBlank()) return Command.OpenMaps(destination)
+        }
+
+        if (openMapsRegex.containsMatchIn(lower)) return Command.OpenMaps(null)
+
+        createPdfRegex.find(trimmed)?.let { match ->
+            var name = match.groupValues[1].trim()
+            if (!name.endsWith(".pdf", ignoreCase = true)) name += ".pdf"
+            val text = match.groupValues[2].trim()
+            if (text.isNotBlank()) return Command.CreatePdf(name, text)
+        }
+
+        notifyRegex.find(trimmed)?.let { match ->
+            val text = match.groupValues[1].trim()
+            if (text.isNotBlank()) return Command.Notify(text)
         }
 
         return null
