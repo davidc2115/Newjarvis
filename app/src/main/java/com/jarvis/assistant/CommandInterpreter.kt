@@ -31,6 +31,12 @@ object CommandInterpreter {
         data class CreateKml(val name: String, val label: String?) : Command()
         data class Notify(val text: String) : Command()
         object ShowNotifications : Command()
+        object TodayEvents : Command()
+        data class WeekEvents(val offset: Int) : Command()
+        object UpcomingEvents : Command()
+        object ListCalendars : Command()
+        data class CreateEvent(val title: String, val dateStr: String, val timeStr: String?) : Command()
+        data class DeleteEvent(val query: String) : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -96,6 +102,33 @@ object CommandInterpreter {
         "cr[ée]e?[^.]*kml[^.]*appel[ée]e?\\s+([^\\s]+)(?:\\s+(?:avec|pour)\\s+(.+))?",
         RegexOption.IGNORE_CASE
     )
+    // Agenda (voir CalendarController -- accès via CalendarContract, sans OAuth ni Google
+    // Cloud Console, voir son commentaire d'en-tête pour le pourquoi).
+    private val todayEventsRegex = Regex(
+        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*aujourd'?hui",
+        RegexOption.IGNORE_CASE
+    )
+    private val weekEventsRegex = Regex(
+        "(?:planning|agenda|[ée]v[ée]nements?)[^.]*(cette semaine|semaine prochaine|semaine derni[èe]re)",
+        RegexOption.IGNORE_CASE
+    )
+    private val upcomingEventsRegex = Regex(
+        "(?:prochains? )?[ée]v[ée]nements? [àa] venir|planning[^.]*[àa] venir",
+        RegexOption.IGNORE_CASE
+    )
+    private val listCalendarsRegex = Regex(
+        "liste[^.]*calendriers|quels? calendriers|mes calendriers",
+        RegexOption.IGNORE_CASE
+    )
+    private val createEventRegex = Regex(
+        "(?:ajoute|cr[ée]e?)[^.]*(?:[ée]v[ée]nement|rendez-vous|rdv)[^.]*appel[ée]e?\\s+(.+?)\\s+le\\s+(\\S+)(?:\\s+[àa]\\s+([\\dh:]+))?\\s*$",
+        RegexOption.IGNORE_CASE
+    )
+    private val deleteEventRegex = Regex(
+        "(?:supprime|annule|efface)[^.]*(?:[ée]v[ée]nement|rendez-vous|rdv)\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+
     private val notifyRegex = Regex(
         "(?:envoie|affiche)[^.]*notification\\s+(?:disant|qui dit|:)?\\s*(.+)",
         RegexOption.IGNORE_CASE
@@ -219,6 +252,34 @@ object CommandInterpreter {
             if (!name.endsWith(".kml", ignoreCase = true)) name += ".kml"
             val label = match.groupValues[2].trim().ifBlank { null }
             return Command.CreateKml(name, label)
+        }
+
+        if (todayEventsRegex.containsMatchIn(lower)) return Command.TodayEvents
+
+        weekEventsRegex.find(lower)?.let { match ->
+            val phrase = match.groupValues[1]
+            val offset = when {
+                phrase.contains("prochaine") -> 1
+                phrase.contains("derni") -> -1
+                else -> 0
+            }
+            return Command.WeekEvents(offset)
+        }
+
+        if (upcomingEventsRegex.containsMatchIn(lower)) return Command.UpcomingEvents
+
+        if (listCalendarsRegex.containsMatchIn(lower)) return Command.ListCalendars
+
+        createEventRegex.find(trimmed)?.let { match ->
+            val title = match.groupValues[1].trim()
+            val dateStr = match.groupValues[2].trim()
+            val timeStr = match.groupValues[3].trim().ifBlank { null }
+            if (title.isNotBlank()) return Command.CreateEvent(title, dateStr, timeStr)
+        }
+
+        deleteEventRegex.find(trimmed)?.let { match ->
+            val query = cleanName(match.groupValues[1])
+            if (query.isNotBlank()) return Command.DeleteEvent(query)
         }
 
         if (showNotificationsRegex.containsMatchIn(lower)) return Command.ShowNotifications

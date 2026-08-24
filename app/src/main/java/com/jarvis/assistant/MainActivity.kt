@@ -260,6 +260,12 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.CreateKml -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
             is CommandInterpreter.Command.Notify ->
                 if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
+            CommandInterpreter.Command.TodayEvents,
+            is CommandInterpreter.Command.WeekEvents,
+            CommandInterpreter.Command.UpcomingEvents,
+            CommandInterpreter.Command.ListCalendars -> listOf(Manifest.permission.READ_CALENDAR)
+            is CommandInterpreter.Command.CreateEvent,
+            is CommandInterpreter.Command.DeleteEvent -> listOf(Manifest.permission.WRITE_CALENDAR)
             else -> emptyList()
         }
         val missingPermissions = requiredPermissions.filter {
@@ -461,6 +467,18 @@ class MainActivity : AppCompatActivity() {
                     "• [${it.appLabel}] ${it.title} -- ${it.text}"
                 }
             }
+            CommandInterpreter.Command.TodayEvents -> CalendarController.getTodayEvents(this)
+            is CommandInterpreter.Command.WeekEvents -> CalendarController.getEventsForWeek(this, command.offset)
+            CommandInterpreter.Command.UpcomingEvents -> CalendarController.getUpcomingEvents(this)
+            CommandInterpreter.Command.ListCalendars -> CalendarController.getCalendarList(this)
+            is CommandInterpreter.Command.CreateEvent -> {
+                val dateCal = CalendarController.resolveDate(command.dateStr)
+                CalendarController.resolveTime(command.timeStr ?: "", dateCal, defaultHour = 9, defaultMinute = 0)
+                val start = dateCal.timeInMillis
+                val end = start + 60 * 60 * 1000 // durée par défaut : 1h
+                CalendarController.createEvent(this, command.title, start, end)
+            }
+            is CommandInterpreter.Command.DeleteEvent -> CalendarController.deleteEventByTitle(this, command.query)
         }
         appendAssistantMessage(reply)
     }

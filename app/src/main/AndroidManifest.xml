@@ -37,6 +37,14 @@
          (API 33), demandée à l'exécution (sans objet sur les versions antérieures). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Agenda (voir CalendarController) : lecture/écriture du calendrier LOCAL Android
+         (CalendarContract), synchronisé avec Google Agenda par le système lui-même si le
+         compte Google du téléphone a la synchro Agenda active : ce n'est PAS l'API Google
+         Calendar en ligne, donc aucun ID client OAuth requis pour ça (voir le commentaire
+         d'en-tête de CalendarController.kt). -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+
     <!-- Déclaration facultative : indique qu'on utilise le flash si présent, sans empêcher
          l'installation sur un appareil qui n'en a pas (required="false"). -->
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
