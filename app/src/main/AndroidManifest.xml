@@ -5,6 +5,15 @@
          réajoutées au fur et à mesure de la reconstruction de chaque fonctionnalité. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Lot 1 "contrôle téléphone" : permission "normale" (accordée automatiquement, pas de
+         dialogue runtime) qui permet à AlarmClock.ACTION_SET_ALARM/ACTION_SET_TIMER de sauter
+         l'écran de confirmation (EXTRA_SKIP_UI) : voir DeviceController. -->
+    <uses-permission android:name="android.permission.SET_ALARM" />
+
+    <!-- Déclaration facultative : indique qu'on utilise le flash si présent, sans empêcher
+         l'installation sur un appareil qui n'en a pas (required="false"). -->
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
     <!-- Demande un tas mémoire plus grand au système : utile pour les modèles IA
          embarqués (Gemini Nano/AICore tourne dans un processus système séparé et n'est pas
          concerné, mais de futurs modèles chargés directement dans le processus de l'appli,

@@ -206,7 +206,41 @@ class MainActivity : AppCompatActivity() {
         refreshChat()
         refreshSidebar()
 
-        requestAiReply(text)
+        val command = CommandInterpreter.parse(text)
+        if (command != null) {
+            executeDeviceCommand(command)
+        } else {
+            requestAiReply(text)
+        }
+    }
+
+    /**
+     * Lot 1 "contrôle téléphone" (lampe/réveil/minuteur) : si le message tapé correspond à une
+     * commande reconnue (voir CommandInterpreter), on exécute directement l'action système au
+     * lieu d'appeler l'IA -- réponse immédiate, sans dépendre du modèle actif ni de sa capacité
+     * (ou non) à faire du function-calling.
+     */
+    private fun executeDeviceCommand(command: CommandInterpreter.Command) {
+        val reply = when (command) {
+            is CommandInterpreter.Command.Flashlight -> {
+                val ok = DeviceController.setFlashlight(this, command.on)
+                when {
+                    !ok -> "❌ Impossible d'accéder au flash de cet appareil."
+                    command.on -> "🔦 Lampe torche allumée."
+                    else -> "🔦 Lampe torche éteinte."
+                }
+            }
+            is CommandInterpreter.Command.Timer -> {
+                val ok = DeviceController.setTimer(this, command.seconds, null)
+                if (ok) "⏱️ Minuteur lancé." else "❌ Impossible de lancer le minuteur (aucune appli Horloge trouvée ?)."
+            }
+            is CommandInterpreter.Command.Alarm -> {
+                val ok = DeviceController.setAlarm(this, command.hour, command.minute, null)
+                if (ok) "⏰ Réveil réglé à %02d:%02d.".format(command.hour, command.minute)
+                else "❌ Impossible de régler le réveil (aucune appli Horloge trouvée ?)."
+            }
+        }
+        appendAssistantMessage(reply)
     }
 
     /**
