@@ -45,6 +45,18 @@ android {
     buildFeatures { viewBinding true }
 }
 
+// FIX CI : une dépendance transitive (play-services-auth 21.6.0 ou googleid 1.2.0) tire
+// androidx.credentials en 1.6.0-beta01 malgré la version 1.5.0 déclarée explicitement
+// ci-dessous (résolution Gradle = plus haute version demandée, directe OU transitive gagne).
+// 1.6.x exige AGP 8.6.0 (ce projet est en 8.5.2, voir plus haut) -- on force donc la
+// résolution sur 1.5.0 pour toute la config, peu importe qui la redemande en interne.
+configurations.all {
+    resolutionStrategy {
+        force 'androidx.credentials:credentials:1.5.0'
+        force 'androidx.credentials:credentials-play-services-auth:1.5.0'
+    }
+}
+
 dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
