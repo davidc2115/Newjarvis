@@ -84,8 +84,10 @@ dependencies {
     // Un ID client OAuth (Google Cloud Console, créé par l'utilisateur lui-même -- voir
     // GoogleAccountController) reste indispensable dans les deux cas : c'est une exigence de
     // l'infrastructure OAuth de Google elle-même, pas quelque chose que ce code peut contourner.
-    implementation 'androidx.credentials:credentials:1.6.0'
-    implementation 'androidx.credentials:credentials-play-services-auth:1.6.0'
+    // 1.6.0+ exige AGP 8.6.0 (CI a échoué dessus -- ce projet utilise AGP 8.5.2, voir plus
+    // haut) ; 1.5.0 est la dernière version stable compatible avec l'AGP actuel.
+    implementation 'androidx.credentials:credentials:1.5.0'
+    implementation 'androidx.credentials:credentials-play-services-auth:1.5.0'
     implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.0'
     implementation 'com.google.android.gms:play-services-auth:21.6.0'
 }
