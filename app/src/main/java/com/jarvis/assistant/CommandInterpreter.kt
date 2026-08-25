@@ -140,19 +140,30 @@ object CommandInterpreter {
     )
     // Agenda (voir CalendarController -- accès via CalendarContract, sans OAuth ni Google
     // Cloud Console, voir son commentaire d'en-tête pour le pourquoi).
+    // Groupe de synonymes partagé par les 3 regex ci-dessous : au-delà du nom explicite
+    // ("planning"/"agenda"/...), couvre les tournures naturelles très courantes en français
+    // pour demander son emploi du temps SANS jamais dire ces mots ("qu'est-ce que j'ai demain
+    // ?", "je suis libre demain ?", "j'ai quoi cette semaine ?") -- demande explicite de
+    // l'utilisateur d'améliorer la compréhension des requêtes en restant 100% local (sans IA
+    // cloud) : élargie ici au niveau le plus fiable possible, la détection déterministe.
+    private const val SCHEDULE_KEYWORDS =
+        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous|" +
+            "qu['’ ]est[- ]ce que j['’]ai|j['’]ai quoi|je fais quoi|qu['’]est[- ]ce que je fais|" +
+            "j['’]ai (?:quelque chose|un truc)|suis[- ]je (?:libre|occup[ée]e?)|je suis (?:libre|occup[ée]e?))"
     private val todayEventsRegex = Regex(
-        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*aujourd'?hui",
+        "$SCHEDULE_KEYWORDS[^.]*aujourd'?hui",
         RegexOption.IGNORE_CASE
     )
     private val weekEventsRegex = Regex(
-        "(?:planning|agenda|[ée]v[ée]nements?)[^.]*(cette semaine|semaine prochaine|semaine derni[èe]re|la semaine)",
+        "$SCHEDULE_KEYWORDS[^.]*(cette semaine|semaine prochaine|semaine derni[èe]re|la semaine)",
         RegexOption.IGNORE_CASE
     )
-    // Planning d'un jour precis ("planning de demain", "agenda du 15 septembre"...) --
-    // capture large volontaire (groupe 1), CalendarController.resolveLocalDate se charge de
-    // l'interpretation exacte de la chaine capturee, comme pour createEventRegex.
+    // Planning d'un jour precis ("planning de demain", "agenda du 15 septembre", "qu'est-ce
+    // que j'ai demain"...) -- capture large volontaire (groupe 1), CalendarController.
+    // resolveLocalDate se charge de l'interpretation exacte de la chaine capturee, comme pour
+    // createEventRegex.
     private val eventsForDateRegex = Regex(
-        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*?\\b(?:pour|de|du|d['\u2019])?\\s*" +
+        "$SCHEDULE_KEYWORDS[^.]*?\\b(?:pour|de|du|d['’])?\\s*" +
             "(demain|apr[èe]s-demain|hier|avant-hier|" +
             "(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?:\\s+prochaine?)?|" +
             "\\d{1,2}(?:er)?\\s+\\p{L}+(?:\\s+\\d{4})?|" +
