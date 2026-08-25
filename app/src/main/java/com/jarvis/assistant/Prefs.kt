@@ -24,6 +24,7 @@ object Prefs {
     private const val KEY_EMAIL_ACCOUNTS = "email_accounts_json"
     private const val KEY_GOOGLE_ACCESS_TOKEN = "google_oauth_access_token"
     private const val KEY_GOOGLE_ACCESS_TOKEN_EXPIRY = "google_oauth_access_token_expiry_millis"
+    private const val KEY_OBSIDIAN_VAULT_URI = "obsidian_vault_tree_uri"
 
     /** Identifiants des backends IA supportés (voir GeminiNanoController / GemmaController). */
     const val MODEL_GEMINI_NANO = "gemini_nano"
@@ -274,5 +275,19 @@ object Prefs {
     fun removeEmailAccount(context: Context, id: String) {
         val list = getEmailAccounts(context).filter { it.id != id }
         saveEmailAccounts(context, list)
+    }
+
+    /**
+     * URI de l'arborescence (SAF -- Storage Access Framework, DocumentsContract.Document tree)
+     * choisie par l'utilisateur comme vault Obsidian réel sur son téléphone (voir
+     * ObsidianController). Stockée en String (Uri.toString()) -- la permission d'accès
+     * persistante est prise séparément via ContentResolver.takePersistableUriPermission() au
+     * moment du choix (voir SettingsActivity), sans quoi elle ne survivrait pas à un redémarrage
+     * de l'appli/du téléphone.
+     */
+    fun getObsidianVaultUri(context: Context): String? = prefs(context).getString(KEY_OBSIDIAN_VAULT_URI, null)
+
+    fun setObsidianVaultUri(context: Context, uri: String?) {
+        prefs(context).edit().putString(KEY_OBSIDIAN_VAULT_URI, uri).apply()
     }
 }
