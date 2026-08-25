@@ -409,9 +409,10 @@ class MainActivity : AppCompatActivity() {
     private suspend fun classifyIntent(text: String): CommandInterpreter.Command? {
         val prompt = CommandInterpreter.buildClassificationPrompt(text)
         val raw = when (Prefs.getSelectedModel(this)) {
-            Prefs.MODEL_GEMMA -> {
-                if (!GemmaController.isDownloaded(this)) return null
-                GemmaController.generateReply(this, prompt)
+            Prefs.MODEL_LOCAL_LLM -> {
+                val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
+                if (!LocalLlmController.isDownloaded(this, model)) return null
+                LocalLlmController.generateReply(this, model, prompt)
             }
             else -> {
                 if (GeminiNanoController.checkStatus() != FeatureStatus.AVAILABLE) return null
@@ -819,13 +820,14 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Route la requête vers le backend IA choisi dans Réglages (voir Prefs.getSelectedModel) :
-     * Gemini Nano via AICore, ou Gemma 3 1B en local via LiteRT-LM (voir GemmaController).
-     * Les deux sont indépendants -- changer de modèle dans Réglages change le backend utilisé
-     * dès le message suivant, sans redémarrer l'appli.
+     * Gemini Nano via AICore, ou un modèle local via LiteRT-LM (voir LocalLlmController --
+     * Qwen3/Qwen2.5, aucun compte Hugging Face requis). Les deux sont indépendants -- changer
+     * de modèle dans Réglages change le backend utilisé dès le message suivant, sans
+     * redémarrer l'appli.
      */
     private fun requestAiReply(prompt: String) {
         when (Prefs.getSelectedModel(this)) {
-            Prefs.MODEL_GEMMA -> requestGemmaReply(prompt)
+            Prefs.MODEL_LOCAL_LLM -> requestLocalLlmReply(prompt)
             else -> requestGeminiNanoReply(prompt)
         }
     }
@@ -866,21 +868,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Backend IA : Gemma 3 1B en local via LiteRT-LM (voir GemmaController). Ne passe pas par
-     * AICore -- fonctionne sur tout appareil suffisamment puissant, mais le modèle doit avoir
-     * été téléchargé au préalable dans Réglages (jeton Hugging Face requis, licence Gemma).
+     * Backend IA : modèle local (Qwen3/Qwen2.5) via LiteRT-LM (voir LocalLlmController). Ne
+     * passe pas par AICore -- fonctionne sur tout appareil suffisamment puissant (y compris
+     * Xiaomi/Redmi/Poco), et ne nécessite aucun compte ni jeton Hugging Face. Le modèle choisi
+     * dans Réglages doit avoir été téléchargé au préalable.
      */
-    private fun requestGemmaReply(prompt: String) {
-        if (!GemmaController.isDownloaded(this)) {
-            appendAssistantMessage(getString(R.string.gemma_not_downloaded_chat))
+    private fun requestLocalLlmReply(prompt: String) {
+        val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
+        if (!LocalLlmController.isDownloaded(this, model)) {
+            appendAssistantMessage(getString(R.string.local_llm_not_downloaded_chat))
             return
         }
         lifecycleScope.launch {
             try {
-                val reply = GemmaController.generateReply(this@MainActivity, prompt)
+                val reply = LocalLlmController.generateReply(this@MainActivity, model, prompt)
                 appendAssistantMessage(reply)
             } catch (e: Exception) {
-                appendAssistantMessage("❌ Erreur Gemma : ${e.message}")
+                appendAssistantMessage("❌ Erreur IA locale : ${e.message}")
             }
         }
     }

@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.util.Log
 import android.widget.Toast
@@ -119,28 +120,17 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * Choix du backend IA (Gemini Nano via AICore, ou Gemma 3 1B en local via LiteRT-LM --
-     * voir GemmaController). Gemma nécessite un jeton Hugging Face + le téléchargement du
-     * modèle (~555 Mo), donc la section correspondante n'apparaît que quand Gemma est
-     * sélectionné.
+     * Choix du backend IA (Gemini Nano via AICore, ou un modèle local via LiteRT-LM -- voir
+     * LocalLlmController). Les modèles locaux (Qwen3/Qwen2.5) sont publics sur Hugging Face
+     * (licence Apache 2.0) : aucun compte ni jeton requis, contrairement à l'ancien Gemma qui
+     * imposait une licence acceptée manuellement. La liste des modèles disponibles n'apparaît
+     * que quand le backend "IA locale" est sélectionné.
      */
     private fun setupModelSelection() {
-        binding.hfTokenInput.setText(Prefs.getHfToken(this).orEmpty())
-        binding.hfTokenInput.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) Prefs.setHfToken(this, binding.hfTokenInput.text?.toString().orEmpty().trim())
-        }
-
         binding.modelGeminiNanoRow.setOnClickListener { selectModel(Prefs.MODEL_GEMINI_NANO) }
-        binding.modelGemmaRow.setOnClickListener { selectModel(Prefs.MODEL_GEMMA) }
-
-        binding.downloadModelButton.setOnClickListener { confirmAndDownloadGemma() }
-        binding.deleteModelButton.setOnClickListener {
-            GemmaController.deleteModel(this)
-            refreshModelUi()
-        }
+        binding.modelGemmaRow.setOnClickListener { selectModel(Prefs.MODEL_LOCAL_LLM) }
 
         refreshModelSelectionUi()
-        refreshModelUi()
     }
 
     private fun selectModel(model: String) {
@@ -150,71 +140,161 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun refreshModelSelectionUi() {
         val selected = Prefs.getSelectedModel(this)
-        val isGemma = selected == Prefs.MODEL_GEMMA
+        val isLocalLlm = selected == Prefs.MODEL_LOCAL_LLM
 
         binding.modelGeminiNanoRow.background = ContextCompat.getDrawable(
-            this, if (isGemma) R.drawable.bg_model_row else R.drawable.bg_model_row_selected
+            this, if (isLocalLlm) R.drawable.bg_model_row else R.drawable.bg_model_row_selected
         )
-        binding.modelGeminiNanoCheck.visibility = if (isGemma) View.GONE else View.VISIBLE
+        binding.modelGeminiNanoCheck.visibility = if (isLocalLlm) View.GONE else View.VISIBLE
 
         binding.modelGemmaRow.background = ContextCompat.getDrawable(
-            this, if (isGemma) R.drawable.bg_model_row_selected else R.drawable.bg_model_row
+            this, if (isLocalLlm) R.drawable.bg_model_row_selected else R.drawable.bg_model_row
         )
-        binding.modelGemmaCheck.visibility = if (isGemma) View.VISIBLE else View.GONE
+        binding.modelGemmaCheck.visibility = if (isLocalLlm) View.VISIBLE else View.GONE
 
-        val gemmaSectionVisibility = if (isGemma) View.VISIBLE else View.GONE
-        binding.gemmaConfigSection.visibility = gemmaSectionVisibility
-        binding.hfTokenInput.visibility = gemmaSectionVisibility
-        binding.hfTokenHelpText.visibility = gemmaSectionVisibility
-        binding.modelStatusText.visibility = gemmaSectionVisibility
-        refreshModelUi()
+        val localSectionVisibility = if (isLocalLlm) View.VISIBLE else View.GONE
+        binding.gemmaConfigSection.visibility = localSectionVisibility
+        binding.localModelsContainer.visibility = localSectionVisibility
+        refreshLocalModelsList()
     }
 
-    private fun refreshModelUi() {
-        if (Prefs.getSelectedModel(this) != Prefs.MODEL_GEMMA) return
-        val downloaded = GemmaController.isDownloaded(this)
-        binding.modelStatusText.text = getString(
-            if (downloaded) R.string.model_downloaded_status else R.string.model_not_downloaded_status
-        )
-        binding.downloadModelButton.visibility = if (downloaded) View.GONE else View.VISIBLE
-        binding.deleteModelButton.visibility = if (downloaded) View.VISIBLE else View.GONE
-    }
+    /**
+     * Rend une rangée par modèle local disponible (voir LocalLlmController.AVAILABLE_MODELS),
+     * même schéma dynamique que refreshGoogleAccountsList : un modèle non téléchargé affiche
+     * un bouton "Télécharger" + une barre de progression pendant le transfert, un modèle déjà
+     * téléchargé affiche "Supprimer". Le modèle actif (Prefs.getLocalLlmModelId) est marqué.
+     */
+    private fun refreshLocalModelsList() {
+        if (Prefs.getSelectedModel(this) != Prefs.MODEL_LOCAL_LLM) return
+        binding.localModelsContainer.removeAllViews()
+        val activeModelId = Prefs.getLocalLlmModelId(this)
 
-    private fun confirmAndDownloadGemma() {
-        val token = binding.hfTokenInput.text?.toString()?.trim().orEmpty()
-        if (token.isBlank()) {
-            binding.modelStatusText.text = getString(R.string.hf_token_missing)
-            return
+        LocalLlmController.AVAILABLE_MODELS.forEach { model ->
+            val downloaded = LocalLlmController.isDownloaded(this, model)
+            val isActive = model.id == activeModelId
+
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(if (isActive) R.drawable.bg_model_row_selected else R.drawable.bg_model_row)
+                setPadding(dpToPx(14), dpToPx(14), dpToPx(14), dpToPx(14))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(dpToPx(16), 0, dpToPx(16), dpToPx(8)) }
+            }
+
+            val headerRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val label = TextView(this).apply {
+                text = "${if (isActive) "✅ " else ""}${model.displayName}\n${model.description}"
+                setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.text_primary))
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            headerRow.addView(label)
+            row.addView(headerRow)
+
+            val statusText = TextView(this).apply {
+                text = getString(
+                    if (downloaded) R.string.model_downloaded_status else R.string.model_not_downloaded_status
+                )
+                setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.text_secondary))
+                textSize = 12f
+                setPadding(0, dpToPx(6), 0, 0)
+            }
+            row.addView(statusText)
+
+            val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 100
+                progress = 0
+                visibility = View.GONE
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dpToPx(6) }
+            }
+            row.addView(progress)
+
+            val actionsRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dpToPx(8), 0, 0)
+            }
+            if (!isActive) {
+                val useButton = TextView(this).apply {
+                    text = "Utiliser"
+                    setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.accent_default))
+                    textSize = 12f
+                    setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                    setOnClickListener {
+                        Prefs.setLocalLlmModelId(this@SettingsActivity, model.id)
+                        refreshLocalModelsList()
+                    }
+                }
+                actionsRow.addView(useButton)
+            }
+            if (downloaded) {
+                val deleteButton = TextView(this).apply {
+                    text = getString(R.string.delete_model_button)
+                    setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.accent_rouge))
+                    textSize = 12f
+                    setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                    setOnClickListener {
+                        LocalLlmController.deleteModel(this@SettingsActivity, model)
+                        refreshLocalModelsList()
+                    }
+                }
+                actionsRow.addView(deleteButton)
+            } else {
+                val downloadButton = TextView(this).apply {
+                    text = getString(R.string.download_model_button)
+                    setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.accent_default))
+                    textSize = 12f
+                    setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                    setOnClickListener { confirmAndDownloadLocalModel(model, this, progress) }
+                }
+                actionsRow.addView(downloadButton)
+            }
+            row.addView(actionsRow)
+
+            binding.localModelsContainer.addView(row)
         }
-        Prefs.setHfToken(this, token)
+    }
 
+    private fun confirmAndDownloadLocalModel(
+        model: LocalLlmController.LocalModel,
+        downloadButton: TextView,
+        progress: ProgressBar
+    ) {
         AlertDialog.Builder(this)
             .setTitle(R.string.model_download_confirm_title)
             .setMessage(R.string.model_download_confirm_message)
-            .setPositiveButton(R.string.download_model_button) { _, _ -> startGemmaDownload(token) }
+            .setPositiveButton(R.string.download_model_button) { _, _ -> startLocalModelDownload(model, downloadButton, progress) }
             .setNegativeButton("Annuler", null)
             .show()
     }
 
-    private fun startGemmaDownload(token: String) {
-        binding.downloadModelButton.visibility = View.GONE
-        binding.modelDownloadProgress.visibility = View.VISIBLE
-        binding.modelDownloadProgress.progress = 0
+    private fun startLocalModelDownload(
+        model: LocalLlmController.LocalModel,
+        downloadButton: TextView,
+        progress: ProgressBar
+    ) {
+        downloadButton.visibility = View.GONE
+        progress.visibility = View.VISIBLE
+        progress.progress = 0
 
         lifecycleScope.launch {
             try {
-                GemmaController.download(this@SettingsActivity, token) { downloaded, total ->
+                LocalLlmController.download(this@SettingsActivity, model) { downloaded, total ->
                     if (total > 0) {
                         val percent = ((downloaded * 100) / total).toInt()
-                        runOnUiThread { binding.modelDownloadProgress.progress = percent }
+                        runOnUiThread { progress.progress = percent }
                     }
                 }
-                binding.modelDownloadProgress.visibility = View.GONE
-                refreshModelUi()
+                refreshLocalModelsList()
             } catch (e: Exception) {
-                binding.modelDownloadProgress.visibility = View.GONE
-                binding.downloadModelButton.visibility = View.VISIBLE
-                binding.modelStatusText.text = "❌ ${e.message}"
+                progress.visibility = View.GONE
+                downloadButton.visibility = View.VISIBLE
+                Toast.makeText(this@SettingsActivity, "❌ ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }

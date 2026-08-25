@@ -18,7 +18,7 @@ object Prefs {
     private const val KEY_CONVERSATIONS = "conversations_json"
     private const val KEY_ACTIVE_CONVERSATION_ID = "active_conversation_id"
     private const val KEY_SELECTED_MODEL = "selected_ai_model"
-    private const val KEY_HF_TOKEN = "huggingface_token"
+    private const val KEY_LOCAL_LLM_MODEL_ID = "local_llm_model_id"
     private const val KEY_GOOGLE_WEB_CLIENT_ID = "google_web_client_id"
     private const val KEY_GOOGLE_ACCOUNTS = "google_linked_accounts_json"
     private const val KEY_EMAIL_ACCOUNTS = "email_accounts_json"
@@ -28,9 +28,13 @@ object Prefs {
     private const val KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL = "google_active_account_email"
     private const val KEY_GOOGLE_ACCOUNT_TOKENS = "google_account_tokens_json"
 
-    /** Identifiants des backends IA supportés (voir GeminiNanoController / GemmaController). */
+    /** Identifiants des backends IA supportés (voir GeminiNanoController / LocalLlmController).
+     *  MODEL_LOCAL_LLM garde la valeur "gemma" (pas "local_llm") pour ne pas casser la
+     *  préférence déjà enregistrée sur les téléphones où Gemma était sélectionné avant ce
+     *  changement -- seul le NOM du backend a changé (Gemma -> registre Qwen), pas son rôle
+     *  ni sa position dans l'UI (2e ligne, "IA locale"). */
     const val MODEL_GEMINI_NANO = "gemini_nano"
-    const val MODEL_GEMMA = "gemma"
+    const val MODEL_LOCAL_LLM = "gemma"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -41,13 +45,15 @@ object Prefs {
         prefs(context).edit().putString(KEY_SELECTED_MODEL, model).apply()
     }
 
-    /** Jeton d'accès personnel Hugging Face (huggingface.co/settings/tokens), requis pour
-     *  télécharger le modèle Gemma car son dépôt est soumis à l'acceptation de la licence
-     *  Gemma. Jamais codé en dur dans le dépôt public -- saisi par l'utilisateur uniquement. */
-    fun getHfToken(context: Context): String? = prefs(context).getString(KEY_HF_TOKEN, null)
+    /** Quel modèle du registre LocalLlmController.AVAILABLE_MODELS est actif pour le
+     *  backend "IA locale" -- voir LocalLlmController.modelById (retombe sur QWEN3_0_6B si
+     *  la valeur enregistrée ne correspond à aucun modèle connu, ex. après suppression d'un
+     *  modèle du registre). */
+    fun getLocalLlmModelId(context: Context): String =
+        prefs(context).getString(KEY_LOCAL_LLM_MODEL_ID, null) ?: LocalLlmController.QWEN3_0_6B.id
 
-    fun setHfToken(context: Context, token: String) {
-        prefs(context).edit().putString(KEY_HF_TOKEN, token).apply()
+    fun setLocalLlmModelId(context: Context, modelId: String) {
+        prefs(context).edit().putString(KEY_LOCAL_LLM_MODEL_ID, modelId).apply()
     }
 
     fun getAccentColor(context: Context): Int {
