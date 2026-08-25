@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_GOOGLE_ACCESS_TOKEN = "google_oauth_access_token"
     private const val KEY_GOOGLE_ACCESS_TOKEN_EXPIRY = "google_oauth_access_token_expiry_millis"
     private const val KEY_OBSIDIAN_VAULT_URI = "obsidian_vault_tree_uri"
+    private const val KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL = "google_active_account_email"
 
     /** Identifiants des backends IA supportés (voir GeminiNanoController / GemmaController). */
     const val MODEL_GEMINI_NANO = "gemini_nano"
@@ -289,5 +290,21 @@ object Prefs {
 
     fun setObsidianVaultUri(context: Context, uri: String?) {
         prefs(context).edit().putString(KEY_OBSIDIAN_VAULT_URI, uri).apply()
+    }
+
+    /**
+     * Email du compte Google dont le jeton est actuellement en cache (voir
+     * getGoogleAccessToken/setGoogleAccessToken -- UN SEUL jeton à la fois, pas un par compte
+     * lié). Sert uniquement à AFFICHER clairement à l'utilisateur quel compte parmi ceux liés
+     * est actif pour Agenda/Mail -- voir developer.android.com/identity/authorization
+     * ("Authorization from a non-default account") : l'API Google elle-même n'autorise qu'un
+     * seul "compte par défaut" à la fois pour AuthorizationClient, il faut re-choisir un compte
+     * dans le sélecteur système pour en activer un autre, ce n'est pas une limite de JARVIS.
+     */
+    fun getActiveGoogleAccountEmail(context: Context): String? =
+        prefs(context).getString(KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL, null)
+
+    fun setActiveGoogleAccountEmail(context: Context, email: String) {
+        prefs(context).edit().putString(KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL, email).apply()
     }
 }

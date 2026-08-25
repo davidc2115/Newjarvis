@@ -296,6 +296,11 @@ class SettingsActivity : AppCompatActivity() {
                 pendingIntentLauncher = googleAuthorizationLauncher,
                 onGranted = { accessToken ->
                     if (accessToken != null) Prefs.setGoogleAccessToken(this, accessToken)
+                    // Voir Prefs.getActiveGoogleAccountEmail -- un seul jeton en cache à la fois
+                    // (contrainte de l'API Google elle-même, pas de JARVIS), ce compte devient
+                    // donc celui utilisé pour Agenda/Mail jusqu'au prochain changement.
+                    Prefs.setActiveGoogleAccountEmail(this, email)
+                    refreshGoogleAccountsList()
                     Toast.makeText(
                         this,
                         getString(R.string.google_account_linked, email),
@@ -381,7 +386,14 @@ class SettingsActivity : AppCompatActivity() {
             return
         }
 
+        // Voir Prefs.getActiveGoogleAccountEmail -- l'API Google n'autorise qu'un seul jeton
+        // "par défaut" à la fois (voir developer.android.com/identity/authorization,
+        // "Authorization from a non-default account"), donc parmi les comptes LIÉS, un seul
+        // est réellement utilisé pour Agenda/Mail à un instant donné -- ce label rend ça visible
+        // au lieu de laisser croire que tous les comptes sont interrogés simultanément.
+        val activeEmail = Prefs.getActiveGoogleAccountEmail(this)
         accounts.forEach { account ->
+            val isActive = account.email == activeEmail
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -392,14 +404,26 @@ class SettingsActivity : AppCompatActivity() {
                 ).apply { setMargins(dpToPx(16), 0, dpToPx(16), dpToPx(8)) }
             }
             val label = TextView(this).apply {
-                text = if (account.displayName.isNotBlank() && account.displayName != account.email) {
+                val identity = if (account.displayName.isNotBlank() && account.displayName != account.email) {
                     "${account.displayName}\n${account.email}"
                 } else {
                     account.email
                 }
+                text = if (isActive) "✅ $identity\n(actif pour Agenda/Mail)" else identity
                 setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.text_primary))
                 textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            if (!isActive) {
+                val activate = TextView(this).apply {
+                    text = "Activer"
+                    setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.accent_default))
+                    textSize = 12f
+                    setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                    setOnClickListener { activateGoogleAccount(account) }
+                }
+                buttons.addView(activate)
             }
             val unlink = TextView(this).apply {
                 text = getString(R.string.google_unlink_button)
@@ -408,9 +432,36 @@ class SettingsActivity : AppCompatActivity() {
                 setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
                 setOnClickListener { unlinkGoogleAccount(account) }
             }
+            buttons.addView(unlink)
             row.addView(label)
-            row.addView(unlink)
+            row.addView(buttons)
             binding.googleAccountsContainer.addView(row)
+        }
+    }
+
+    /**
+     * Relance le sélecteur de compte système pour que l'utilisateur choisisse [account] --
+     * l'API Google (AuthorizationClient) ne permet pas de "basculer" silencieusement vers un
+     * compte déjà lié sans repasser par ce sélecteur (voir commentaire de refreshGoogleAccountsList
+     * ci-dessus). Réutilise exactement le même mécanisme que l'ajout d'un nouveau compte.
+     */
+    private fun activateGoogleAccount(account: GoogleAccountController.LinkedAccount) {
+        val webClientId = Prefs.getGoogleWebClientId(this).orEmpty()
+        if (webClientId.isBlank()) {
+            Toast.makeText(this, getString(R.string.google_web_client_id_missing), Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "Choisis « ${account.email} » dans le sélecteur pour l'activer.", Toast.LENGTH_LONG).show()
+        try {
+            GoogleAccountController.signOutThenGetLegacySignInIntent(this, webClientId) { intent ->
+                googleLegacySignInLauncher.launch(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("JarvisGoogleAuth", "Impossible de lancer l'écran de connexion Google", e)
+            showCopyableErrorDialog(
+                getString(R.string.google_signin_error, ""),
+                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+            )
         }
     }
 
