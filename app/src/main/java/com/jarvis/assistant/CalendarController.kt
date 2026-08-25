@@ -11,6 +11,8 @@ import java.text.SimpleDateFormat
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import java.util.Calendar
 import java.util.Date
@@ -127,6 +129,16 @@ object CalendarController {
             set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
         }.timeInMillis
         return getEventsTimeRange(context, startOfDay, endOfDay, "📅 Événements aujourd'hui")
+    }
+
+    /** Planning d'une date précise (ex. "demain", "15 septembre") -- voir [resolveLocalDate]. */
+    fun getEventsForDate(context: Context, date: LocalDate): String {
+        val zone = ZoneId.systemDefault()
+        val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
+        val formatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
+        val label = "📅 " + date.format(formatter).replaceFirstChar { it.uppercase() }
+        return getEventsTimeRange(context, start, end, label)
     }
 
     fun getUpcomingEvents(context: Context, days: Int = 7): String {

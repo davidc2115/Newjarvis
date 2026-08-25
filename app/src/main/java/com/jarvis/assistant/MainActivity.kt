@@ -442,10 +442,22 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.CreateKml -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
             is CommandInterpreter.Command.Notify ->
                 if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
-            // Agenda + Mail : plus de permission runtime Android depuis le passage à l'API
-            // Google OAuth (Calendar API/Gmail API, voir GoogleCalendarApiController/
-            // GmailApiController) -- le "consentement" équivalent est géré par
-            // ensureGoogleToken() (écran d'autorisation Google, pas une permission système).
+            // Lecture du planning (TodayEvents/WeekEvents/EventsForDate/UpcomingEvents/
+            // ListCalendars) : lue directement depuis le calendrier LOCAL synchronisé du
+            // téléphone (voir CalendarController) pour une réponse instantanée, sans appel
+            // réseau -- demande explicite de l'utilisateur ("coupler à l'agenda synchronisé
+            // sur le téléphone pour une réponse plus rapide"). READ_CALENDAR est donc à
+            // nouveau une permission runtime nécessaire pour CES commandes précisément
+            // (création/suppression d'événement restent sur l'API Google OAuth, voir plus bas).
+            is CommandInterpreter.Command.TodayEvents,
+            is CommandInterpreter.Command.WeekEvents,
+            is CommandInterpreter.Command.EventsForDate,
+            is CommandInterpreter.Command.UpcomingEvents,
+            is CommandInterpreter.Command.ListCalendars -> listOf(Manifest.permission.READ_CALENDAR)
+            // Mail + création/suppression d'événement : toujours via l'API Google OAuth (voir
+            // GoogleCalendarApiController/GmailApiController) -- le "consentement" équivalent
+            // est géré par ensureGoogleToken()/ensureGoogleTokensForAllAccounts() (écran
+            // d'autorisation Google, pas une permission système).
             else -> emptyList()
         }
         val missingPermissions = requiredPermissions.filter {
@@ -527,42 +539,60 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
-        // Agenda + Mail (voir GoogleCalendarApiController/GmailApiController) : appels REST
-        // OAuth, donc async comme GetLocation/CreateKml ci-dessus -- ensureGoogleToken() gère
-        // l'obtention/le cache du jeton d'accès (voir sa doc) avant d'appeler l'API Google.
+        // Lecture du planning : lue directement sur le calendrier LOCAL du téléphone (voir
+        // CalendarController/android.provider.CalendarContract), la même base de données que
+        // consulte l'appli Google Agenda -- synchronisée en arrière-plan par Android lui-même
+        // pour TOUS les comptes Google du téléphone à la fois (pas besoin de fusionner
+        // manuellement plusieurs jetons comme avant). Ni réseau ni jeton OAuth à attendre :
+        // réponse quasi instantanée. Repli sur l'API Google OAuth (mergeAcrossAccounts) UNIQUEMENT
+        // si la lecture locale échoue (permission refusée malgré la demande, ou aucun calendrier
+        // synchronisé sur l'appareil) -- pour ne jamais régresser par rapport à avant.
         if (command is CommandInterpreter.Command.TodayEvents) {
+            val local = CalendarController.getTodayEvents(this)
+            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
             ensureGoogleTokensForAllAccounts { tokens ->
                 lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getTodayEvents(it) }) }
             }
             return
         }
         if (command is CommandInterpreter.Command.WeekEvents) {
+            val local = CalendarController.getEventsForWeek(this, command.offset)
+            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
             ensureGoogleTokensForAllAccounts { tokens ->
                 lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getEventsForWeek(it, command.offset) }) }
             }
             return
         }
         if (command is CommandInterpreter.Command.EventsForDate) {
+            val date = CalendarController.resolveLocalDate(command.dateStr)
+            val local = CalendarController.getEventsForDate(this, date)
+            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
             ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch {
-                    val date = CalendarController.resolveLocalDate(command.dateStr)
-                    appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getEventsForDate(it, date) })
-                }
+                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getEventsForDate(it, date) }) }
             }
             return
         }
         if (command is CommandInterpreter.Command.UpcomingEvents) {
+            val local = CalendarController.getUpcomingEvents(this)
+            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
             ensureGoogleTokensForAllAccounts { tokens ->
                 lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getUpcomingEvents(it) }) }
             }
             return
         }
         if (command is CommandInterpreter.Command.ListCalendars) {
+            val local = CalendarController.getCalendarList(this)
+            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
             ensureGoogleTokensForAllAccounts { tokens ->
                 lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getCalendarList(it) }) }
             }
             return
         }
+        // Agenda + Mail (création/suppression d'événement, lecture des mails) : toujours via
+        // l'API Google OAuth officielle (voir GoogleCalendarApiController/GmailApiController),
+        // async -- ensureGoogleToken() gère l'obtention/le cache du jeton d'accès avant d'appeler
+        // l'API Google. Choix conservé pour les ÉCRITURES (contrairement à la lecture ci-dessus) :
+        // demande explicite antérieure de l'utilisateur de repasser sur l'API officielle.
         if (command is CommandInterpreter.Command.CreateEvent) {
             ensureGoogleToken { token ->
                 lifecycleScope.launch {
