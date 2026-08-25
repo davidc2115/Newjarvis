@@ -48,9 +48,17 @@ android {
     // propres JARs -- sans cette exclusion, l'assemblage échoue avec "More than one file was
     // found with OS independent path 'META-INF/...'" (conflit bien connu et documenté de cette
     // lib sur Android, pas spécifique à ce projet).
+    // CI #2 a échoué malgré les excludes ci-dessus : le conflit réel était sur les variantes
+    // .md (META-INF/NOTICE.md), pas seulement .txt -- android-mail ET android-activation
+    // embarquent chacun leur propre copie identique de ces fichiers. Liste élargie à toutes
+    // les variantes usuelles pour éviter une 3e itération sur le même problème.
     packagingOptions {
         resources {
-            excludes += ['META-INF/LICENSE.txt', 'META-INF/LICENSE', 'META-INF/NOTICE.txt', 'META-INF/NOTICE', 'META-INF/DEPENDENCIES']
+            excludes += [
+                'META-INF/LICENSE.txt', 'META-INF/LICENSE.md', 'META-INF/LICENSE',
+                'META-INF/NOTICE.txt', 'META-INF/NOTICE.md', 'META-INF/NOTICE',
+                'META-INF/DEPENDENCIES'
+            ]
         }
     }
 }
