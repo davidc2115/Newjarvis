@@ -19,11 +19,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 import com.jarvis.assistant.databinding.ActivitySettingsBinding
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
 
 /** Réglages : choix de la couleur d'accent du thème (bulles utilisateur, bouton d'envoi...). */
 class SettingsActivity : AppCompatActivity() {
@@ -52,6 +51,14 @@ class SettingsActivity : AppCompatActivity() {
             ).show()
         }
     }
+
+    // Écran de sélection de compte via l'ancienne API GoogleSignInClient (voir
+    // GoogleAccountController.getLegacySignInIntent) -- remplace le Credential Manager suspendu
+    // qui restait bloqué indéfiniment sur certains téléphones Xiaomi/MIUI (voir signalement
+    // utilisateur : timeout 20s déclenché malgré compte Google + Play Services en ordre).
+    private val googleLegacySignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result -> onLegacySignInResult(result.data) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -231,10 +238,11 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun addGoogleAccount() {
-        // Diagnostic temporaire : confirme que le clic est bien reçu, indépendamment de tout le
-        // reste (webClientId, signIn, autorisation...). Si l'utilisateur ne voit même pas CE
-        // Toast en appuyant sur le bouton, le problème est dans la vue/le clic lui-même (build
-        // pas à jour, vue couverte, listener non attaché), pas dans la logique OAuth.
+        // Diagnostic conserve : confirme que le clic est bien recu (utile si un futur probleme
+        // similaire refait surface). Voir GoogleAccountController.getLegacySignInIntent pour le
+        // pourquoi du passage a l'ancienne API GoogleSignInClient (Credential Manager restait
+        // bloque indefiniment sur Xiaomi/MIUI -- confirme par l'utilisateur, timeout 20s
+        // declenche alors que compte Google + Play Services etaient en ordre).
         Log.d("JarvisGoogleAuth", "addGoogleAccount() déclenché par un clic")
         Toast.makeText(this, "Tentative de connexion Google...", Toast.LENGTH_SHORT).show()
 
@@ -245,87 +253,81 @@ class SettingsActivity : AppCompatActivity() {
         }
         Prefs.setGoogleWebClientId(this, webClientId)
 
-        lifecycleScope.launch {
-            try {
-                // onlyAuthorized = false : montre TOUS les comptes Google du téléphone, pas
-                // seulement ceux déjà liés -- c'est ce qui permet d'en ajouter un nouveau (voir
-                // GoogleAccountController -- multi-comptes).
-                // withTimeout : sans ça, si le sélecteur de compte système ne répond jamais
-                // (vécu : Play Services obsolète/dégradé sur certains téléphones Xiaomi/MIUI),
-                // l'appli reste bloquée indéfiniment sans le moindre signe visible -- ni succès
-                // ni erreur -- ce qui est indiscernable pour l'utilisateur d'un bouton qui "ne
-                // fait rien". Avec le timeout, on obtient au moins un message clair au bout de
-                // 20s au lieu d'un silence total.
-                val credential = withTimeout(20_000L) {
-                    GoogleAccountController.signIn(this@SettingsActivity, webClientId, onlyAuthorized = false)
-                }
-                val email = credential.email ?: credential.id
-                val displayName = credential.displayName ?: email
+        try {
+            val intent = GoogleAccountController.getLegacySignInIntent(this, webClientId)
+            googleLegacySignInLauncher.launch(intent)
+        } catch (e: Exception) {
+            Log.e("JarvisGoogleAuth", "Impossible de lancer l'écran de connexion Google", e)
+            showCopyableErrorDialog(
+                getString(R.string.google_signin_error, ""),
+                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+            )
+        }
+    }
 
-                val accounts = Prefs.loadGoogleAccounts(this@SettingsActivity)
-                if (accounts.none { it.email == email }) {
-                    accounts.add(GoogleAccountController.LinkedAccount(email, displayName))
-                    Prefs.saveGoogleAccounts(this@SettingsActivity, accounts)
-                    refreshGoogleAccountsList()
-                }
+    /**
+     * Callback de googleLegacySignInLauncher (voir sa déclaration) une fois l'écran de
+     * sélection de compte système refermé -- succès ou échec/annulation.
+     */
+    private fun onLegacySignInResult(data: android.content.Intent?) {
+        try {
+            val account = GoogleAccountController.handleLegacySignInResult(data)
+            val email = account.email ?: account.id ?: "?"
+            val displayName = account.displayName ?: email
 
-                // Demande immédiatement l'autorisation Gmail/Agenda pour ce compte -- demande
-                // explicite de l'utilisateur : "accès complet" au compte, pas juste l'identité.
-                // Le jeton obtenu est mis en cache (Prefs.setGoogleAccessToken) pour que
-                // MainActivity puisse l'utiliser directement au prochain message du chat.
-                GoogleAccountController.requestAuthorization(
-                    activity = this@SettingsActivity,
-                    pendingIntentLauncher = googleAuthorizationLauncher,
-                    onGranted = { accessToken ->
-                        if (accessToken != null) Prefs.setGoogleAccessToken(this@SettingsActivity, accessToken)
-                        Toast.makeText(
-                            this@SettingsActivity,
-                            getString(R.string.google_account_linked, email),
-                            Toast.LENGTH_LONG
-                        ).show()
-                    },
-                    onFailure = { e ->
-                        Log.e("JarvisGoogleAuth", "requestAuthorization a échoué", e)
-                        showCopyableErrorDialog(
-                            getString(R.string.google_authorization_error, ""),
-                            "${e.javaClass.simpleName}: ${e.message ?: "?"}"
-                        )
-                    }
-                )
-            } catch (e: TimeoutCancellationException) {
-                Log.e("JarvisGoogleAuth", "signIn() n'a jamais répondu (timeout 20s)", e)
-                showCopyableErrorDialog(
-                    "Aucune réponse de Google",
-                    "Le sélecteur de compte Google n'a pas répondu après 20 secondes -- ni succès, ni erreur. " +
-                        "Causes fréquentes : Google Play Services obsolète ou dégradé sur ce téléphone " +
-                        "(vérifie les mises à jour dans le Play Store), aucun compte Google ajouté sur le " +
-                        "téléphone (Réglages Android > Comptes), ou une restriction MIUI qui bloque " +
-                        "silencieusement l'écran système. Réessaie après avoir vérifié ces points.\n\n" +
-                        "Détail technique : ${e.javaClass.simpleName}: ${e.message ?: "?"}"
-                )
-            } catch (e: CancellationException) {
-                // Le Job de lifecycleScope est annulé si l'Activity est détruite/recréée
-                // pendant que l'écran système Google (sélecteur de compte / consentement) est
-                // au premier plan -- vécu sur Xiaomi/MIUI, dont la gestion agressive du fond
-                // d'écran tue parfois le processus de l'appli pendant cette bascule. Pas une
-                // vraie erreur réseau/API : message dédié, actionnable, plutôt que le texte
-                // technique brut de CancellationException (peu clair pour l'utilisateur).
-                Log.e("JarvisGoogleAuth", "Opération annulée (Activity détruite/recréée pendant le flux Google ?)", e)
-                showCopyableErrorDialog(
-                    "Connexion interrompue",
-                    "L'opération a été annulée par le système, probablement parce que l'appli a été " +
-                        "mise en pause pendant l'écran Google (fréquent sur Xiaomi/MIUI). " +
-                        "Réglages > Applications > JARVIS > Batterie > \"Sans restrictions\", et active " +
-                        "\"Démarrage automatique\" dans l'appli Sécurité, puis réessaie.\n\n" +
-                        "Détail technique : ${e.javaClass.simpleName}: ${e.message ?: "?"}"
-                )
-            } catch (e: Exception) {
-                Log.e("JarvisGoogleAuth", "signIn() a échoué", e)
-                showCopyableErrorDialog(
-                    getString(R.string.google_signin_error, ""),
-                    "${e.javaClass.simpleName}: ${e.message ?: "?"}"
-                )
+            val accounts = Prefs.loadGoogleAccounts(this)
+            if (accounts.none { it.email == email }) {
+                accounts.add(GoogleAccountController.LinkedAccount(email, displayName))
+                Prefs.saveGoogleAccounts(this, accounts)
+                refreshGoogleAccountsList()
             }
+
+            // Demande immédiatement l'autorisation Gmail/Agenda pour ce compte -- demande
+            // explicite de l'utilisateur : "accès complet" au compte, pas juste l'identité.
+            // Le jeton obtenu est mis en cache (Prefs.setGoogleAccessToken) pour que
+            // MainActivity puisse l'utiliser directement au prochain message du chat.
+            GoogleAccountController.requestAuthorization(
+                activity = this,
+                pendingIntentLauncher = googleAuthorizationLauncher,
+                onGranted = { accessToken ->
+                    if (accessToken != null) Prefs.setGoogleAccessToken(this, accessToken)
+                    Toast.makeText(
+                        this,
+                        getString(R.string.google_account_linked, email),
+                        Toast.LENGTH_LONG
+                    ).show()
+                },
+                onFailure = { e ->
+                    Log.e("JarvisGoogleAuth", "requestAuthorization a échoué", e)
+                    showCopyableErrorDialog(
+                        getString(R.string.google_authorization_error, ""),
+                        "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+                    )
+                }
+            )
+        } catch (e: ApiException) {
+            // Codes fréquents : 12501 = annulé par l'utilisateur (pas une vraie erreur, message
+            // adapté) ; 10 = DEVELOPER_ERROR (SHA-1/package non enregistré comme client OAuth
+            // "Android" côté Cloud Console) ; 7 = erreur réseau.
+            if (e.statusCode == GoogleSignInStatusCodes.SIGN_IN_CANCELLED) {
+                Log.d("JarvisGoogleAuth", "Connexion Google annulée par l'utilisateur")
+                return
+            }
+            Log.e("JarvisGoogleAuth", "Legacy signIn a échoué (code ${e.statusCode})", e)
+            showCopyableErrorDialog(
+                getString(R.string.google_signin_error, ""),
+                "ApiException (code ${e.statusCode}): " +
+                    "${GoogleSignInStatusCodes.getStatusCodeString(e.statusCode)}\n\n" +
+                    "Si le code est 10 (DEVELOPER_ERROR), le SHA-1/package de l'appli n'est " +
+                    "probablement pas enregistré comme identifiant OAuth de type \"Android\" " +
+                    "dans Google Cloud Console."
+            )
+        } catch (e: Exception) {
+            Log.e("JarvisGoogleAuth", "Legacy signIn a échoué", e)
+            showCopyableErrorDialog(
+                getString(R.string.google_signin_error, ""),
+                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+            )
         }
     }
 

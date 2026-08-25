@@ -13,6 +13,9 @@ import androidx.credentials.GetCredentialRequest
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -90,6 +93,44 @@ object GoogleAccountController {
             return GoogleIdTokenCredential.createFrom(credential.data)
         }
         throw IllegalStateException("Type d'identifiant inattendu reçu de Credential Manager.")
+    }
+
+    /**
+     * Étape 1/2 (REPLI) -- AUTHENTIFICATION via l'ancienne API GoogleSignInClient
+     * (play-services-auth, déjà une dépendance du projet -- aucun ajout nécessaire).
+     *
+     * Utilisée à la place de signIn() (Credential Manager) car ce dernier reste bloqué
+     * INDÉFINIMENT sur certains téléphones Xiaomi/MIUI -- ni succès, ni erreur, confirmé par
+     * l'utilisateur (timeout de 20s déclenché) alors que le compte Google système et Play
+     * Services étaient tous les deux en ordre. Recherche : MIUI a des restrictions documentées
+     * qui interfèrent avec les opérations liées aux "credentials" système, y compris pour des
+     * apps tierces bien configurées (voir ex. autofill de gestionnaires de mots de passe cassé
+     * sur MIUI). GoogleSignInClient est une API bien plus ancienne (donc bien plus largement
+     * testée/compatible), même si Google la présente comme remplacée par Credential Manager
+     * pour les nouveaux projets -- elle reste pleinement fonctionnelle et documentée
+     * officiellement (developer.android.com/identity/sign-in/legacy-gsi).
+     *
+     * requestIdToken(webClientId) : même rôle que setServerClientId() côté Credential Manager --
+     * demande un ID token vérifiable serveur, garanti émis pour CE client OAuth Web précis.
+     */
+    fun getLegacySignInIntent(context: Context, webClientId: String): Intent {
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(webClientId)
+            .requestEmail()
+            .build()
+        return GoogleSignIn.getClient(context, options).signInIntent
+    }
+
+    /**
+     * Complète getLegacySignInIntent() une fois l'écran de sélection de compte système validé.
+     * Lance ApiException en cas d'échec/annulation -- le code (ex. 10 = DEVELOPER_ERROR, signe
+     * que le SHA-1/package n'est pas enregistré comme client OAuth "Android" côté Cloud
+     * Console ; 12501 = annulé par l'utilisateur ; 7 = erreur réseau) aide à diagnostiquer
+     * précisément la cause, voir GoogleSignInStatusCodes pour le mapping complet.
+     */
+    fun handleLegacySignInResult(data: Intent?): GoogleSignInAccount {
+        val task = GoogleSignIn.getSignedInAccountFromIntent(data)
+        return task.getResult(ApiException::class.java)
     }
 
     /**
