@@ -229,6 +229,13 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun addGoogleAccount() {
+        // Diagnostic temporaire : confirme que le clic est bien reçu, indépendamment de tout le
+        // reste (webClientId, signIn, autorisation...). Si l'utilisateur ne voit même pas CE
+        // Toast en appuyant sur le bouton, le problème est dans la vue/le clic lui-même (build
+        // pas à jour, vue couverte, listener non attaché), pas dans la logique OAuth.
+        Log.d("JarvisGoogleAuth", "addGoogleAccount() déclenché par un clic")
+        Toast.makeText(this, "Tentative de connexion Google...", Toast.LENGTH_SHORT).show()
+
         val webClientId = binding.googleWebClientIdInput.text?.toString()?.trim().orEmpty()
         if (webClientId.isBlank()) {
             Toast.makeText(this, getString(R.string.google_web_client_id_missing), Toast.LENGTH_SHORT).show()
