@@ -295,10 +295,21 @@ class SettingsActivity : AppCompatActivity() {
                 activity = this,
                 pendingIntentLauncher = googleAuthorizationLauncher,
                 onGranted = { accessToken ->
-                    if (accessToken != null) Prefs.setGoogleAccessToken(this, accessToken)
-                    // Voir Prefs.getActiveGoogleAccountEmail -- un seul jeton en cache à la fois
-                    // (contrainte de l'API Google elle-même, pas de JARVIS), ce compte devient
-                    // donc celui utilisé pour Agenda/Mail jusqu'au prochain changement.
+                    if (accessToken != null) {
+                        Prefs.setGoogleAccessToken(this, accessToken)
+                        // Voir Prefs.setGoogleAccessTokenForAccount -- en plus du jeton "actif"
+                        // unique ci-dessus (utilisé pour les écritures : créer/supprimer un
+                        // événement, envoyer un mail), on retient CE jeton pour CE compte
+                        // précisément, ce qui permet de lire l'agenda/les mails de plusieurs
+                        // comptes en même temps (voir MainActivity.ensureGoogleTokensForAllAccounts)
+                        // tant qu'aucun des jetons obtenus n'a expiré (~55 min).
+                        Prefs.setGoogleAccessTokenForAccount(this, email, accessToken)
+                    }
+                    // Voir Prefs.getActiveGoogleAccountEmail -- un seul jeton "actif" à la fois
+                    // pour les écritures (contrainte de l'API Google elle-même, pas de JARVIS) --
+                    // ce compte devient celui utilisé pour créer/supprimer un événement ou
+                    // envoyer un mail jusqu'au prochain changement (les LECTURES, elles, utilisent
+                    // tous les comptes autorisés simultanément, voir ci-dessus).
                     Prefs.setActiveGoogleAccountEmail(this, email)
                     refreshGoogleAccountsList()
                     Toast.makeText(
@@ -392,8 +403,10 @@ class SettingsActivity : AppCompatActivity() {
         // est réellement utilisé pour Agenda/Mail à un instant donné -- ce label rend ça visible
         // au lieu de laisser croire que tous les comptes sont interrogés simultanément.
         val activeEmail = Prefs.getActiveGoogleAccountEmail(this)
+        val readableAccounts = Prefs.getAllValidGoogleAccountTokens(this).keys
         accounts.forEach { account ->
             val isActive = account.email == activeEmail
+            val isReadable = account.email in readableAccounts
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -409,7 +422,11 @@ class SettingsActivity : AppCompatActivity() {
                 } else {
                     account.email
                 }
-                text = if (isActive) "✅ $identity\n(actif pour Agenda/Mail)" else identity
+                text = when {
+                    isActive -> "✅ $identity\n(actif -- création/suppression/envoi)"
+                    isReadable -> "🔓 $identity\n(lecture Agenda/Mail active)"
+                    else -> identity
+                }
                 setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.text_primary))
                 textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)

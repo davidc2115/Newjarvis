@@ -41,6 +41,10 @@ object CommandInterpreter {
         object ListCalendars : Command()
         data class CreateEvent(val title: String, val dateStr: String, val timeStr: String?) : Command()
         data class DeleteEvent(val query: String) : Command()
+        // Planning d'une date precise (demain, un jour de semaine, une date explicite --
+        // voir CalendarController.resolveLocalDate pour ce qui est reconnu) -- distinct de
+        // TodayEvents (aujourd'hui uniquement) et WeekEvents (semaine entiere, offset -1/0/+1).
+        data class EventsForDate(val dateStr: String) : Command()
         // Email (IMAP/SMTP, voir EmailController) -- demande explicite utilisateur, porté
         // depuis l'ancienne appli sans passer par Google Cloud Console.
         data class ReadInbox(val count: Int) : Command()
@@ -127,7 +131,40 @@ object CommandInterpreter {
         RegexOption.IGNORE_CASE
     )
     private val weekEventsRegex = Regex(
-        "(?:planning|agenda|[ée]v[ée]nements?)[^.]*(cette semaine|semaine prochaine|semaine derni[èe]re)",
+        "(?:planning|agenda|[ée]v[ée]nements?)[^.]*(cette semaine|semaine prochaine|semaine derni[èe]re|la semaine)",
+        RegexOption.IGNORE_CASE
+    )
+    // Planning d'un jour precis ("planning de demain", "agenda du 15 septembre"...) --
+    // capture large volontaire (groupe 1), CalendarController.resolveLocalDate se charge de
+    // l'interpretation exacte de la chaine capturee, comme pour createEventRegex.
+    private val eventsForDateRegex = Regex(
+        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*?\\b(?:pour|de|du|d['\u2019])?\\s*" +
+            "(demain|apr[èe]s-demain|hier|avant-hier|" +
+            "(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?:\\s+prochaine?)?|" +
+            "\\d{1,2}(?:er)?\\s+\\p{L}+(?:\\s+\\d{4})?|" +
+            "\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?|" +
+            "\\d{4}-\\d{2}-\\d{2})",
+        RegexOption.IGNORE_CASE
+    )
+    // Suivi conversationnel bref sans mot-cle "planning/agenda" repete (ex: l'utilisateur
+    // demande d'abord "planning de demain ?" puis enchaine juste "et la semaine prochaine ?") --
+    // CommandInterpreter.parse() ne voit qu'un message a la fois (pas d'historique), donc ce
+    // repli ne matche que si le message ENTIER (une fois les mots de liaison retires) se reduit
+    // a une simple phrase de periode/date, pour eviter les faux positifs sur des phrases plus
+    // longues qui parleraient d'autre chose.
+    // Prefixe de remplissage repetable ("et", "pour", "la", "le"...) retire avant de
+    // comparer au coeur de la phrase -- gere "et la semaine prochaine ?" (et + la + semaine
+    // prochaine), pas juste un seul mot de liaison isole.
+    private val bareWeekFollowupRegex = Regex(
+        "^(?:(?:et|pour|alors|ok|la|le|du|de)\\s+)*(cette semaine|semaine prochaine|semaine derni[èe]re|semaine)\\s*\\??\\s*$",
+        RegexOption.IGNORE_CASE
+    )
+    private val bareDateFollowupRegex = Regex(
+        "^(?:(?:et|pour|alors|ok|le)\\s+)*(demain|apr[èe]s-demain|hier|avant-hier|aujourd'?hui|" +
+            "(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?:\\s+prochaine?)?|" +
+            "\\d{1,2}(?:er)?\\s+\\p{L}+(?:\\s+\\d{4})?|" +
+            "\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?|" +
+            "\\d{4}-\\d{2}-\\d{2})\\s*\\??\\s*$",
         RegexOption.IGNORE_CASE
     )
     private val upcomingEventsRegex = Regex(
@@ -321,9 +358,29 @@ object CommandInterpreter {
             return Command.WeekEvents(offset)
         }
 
+        eventsForDateRegex.find(trimmed)?.let { match ->
+            val dateStr = match.groupValues[1].trim()
+            if (dateStr.isNotBlank()) return Command.EventsForDate(dateStr)
+        }
+
         if (upcomingEventsRegex.containsMatchIn(lower)) return Command.UpcomingEvents
 
         if (listCalendarsRegex.containsMatchIn(lower)) return Command.ListCalendars
+
+        bareWeekFollowupRegex.find(trimmed)?.let { match ->
+            val phrase = match.groupValues[1].lowercase()
+            val offset = when {
+                phrase.contains("prochaine") -> 1
+                phrase.contains("derni") -> -1
+                else -> 0
+            }
+            return Command.WeekEvents(offset)
+        }
+
+        bareDateFollowupRegex.find(trimmed)?.let { match ->
+            val dateStr = match.groupValues[1].trim()
+            if (dateStr.isNotBlank()) return Command.EventsForDate(dateStr)
+        }
 
         createEventRegex.find(trimmed)?.let { match ->
             val title = match.groupValues[1].trim()
@@ -409,6 +466,7 @@ Actions possibles (respecte exactement les noms des champs, JSON valide, une seu
 {"action":"show_notifications"}
 {"action":"today_events"}
 {"action":"week_events","offset":0}
+{"action":"events_for_date","date":"demain"}
 {"action":"upcoming_events"}
 {"action":"list_calendars"}
 {"action":"create_event","title":"dentiste","date":"25/08","time":"14h30"}
@@ -501,6 +559,7 @@ JSON :"""
                 val offset = obj.optInt("offset", 0).coerceIn(-1, 1)
                 Command.WeekEvents(offset)
             }
+            "events_for_date" -> str("date").ifBlank { null }?.let { Command.EventsForDate(it) }
             "upcoming_events" -> Command.UpcomingEvents
             "list_calendars" -> Command.ListCalendars
             "create_event" -> {

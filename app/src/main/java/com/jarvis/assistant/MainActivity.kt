@@ -114,6 +114,40 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Comme ensureGoogleToken, mais pour une LECTURE (agenda/mails) qui doit interroger TOUS
+     * les comptes Google actuellement autorisés en même temps -- pas seulement le compte
+     * "actif" -- voir Prefs.getAllValidGoogleAccountTokens et son commentaire pour le pourquoi
+     * (limite de l'API Google : un seul jeton par défaut à la fois, contournée en réutilisant
+     * les jetons déjà obtenus tant qu'ils sont valides, sans forcer de nouveau sélecteur de
+     * compte). Si aucun jeton par-compte n'est encore en cache (première utilisation), retombe
+     * sur le flux à compte unique habituel, qui gère lui-même la demande d'autorisation.
+     */
+    private fun ensureGoogleTokensForAllAccounts(onTokens: (Map<String, String>) -> Unit) {
+        val cached = Prefs.getAllValidGoogleAccountTokens(this)
+        if (cached.isNotEmpty()) {
+            onTokens(cached)
+            return
+        }
+        ensureGoogleToken { token ->
+            val email = Prefs.getActiveGoogleAccountEmail(this) ?: "compte Google"
+            onTokens(mapOf(email to token))
+        }
+    }
+
+    /**
+     * Appelle [fetch] pour chaque (email, jeton) de [tokens] et concatène les résultats texte,
+     * préfixés par l'email seulement s'il y a plusieurs comptes (sinon superflu). Utilisé pour
+     * fusionner l'agenda/les mails de plusieurs comptes Google liés en une seule réponse.
+     */
+    private suspend fun mergeAcrossAccounts(tokens: Map<String, String>, fetch: suspend (String) -> String): String {
+        if (tokens.isEmpty()) return "\u274c Aucun compte Google disponible."
+        if (tokens.size == 1) return fetch(tokens.values.first())
+        return tokens.entries.joinToString("\n\n") { (email, token) ->
+            "\u2500\u2500\u2500 $email \u2500\u2500\u2500\n" + fetch(token)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // BUG RÉEL CORRIGÉ (signalement utilisateur : titre/bouton réglages cachés sous la
@@ -458,19 +492,36 @@ class MainActivity : AppCompatActivity() {
         // OAuth, donc async comme GetLocation/CreateKml ci-dessus -- ensureGoogleToken() gère
         // l'obtention/le cache du jeton d'accès (voir sa doc) avant d'appeler l'API Google.
         if (command is CommandInterpreter.Command.TodayEvents) {
-            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.getTodayEvents(token)) } }
+            ensureGoogleTokensForAllAccounts { tokens ->
+                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getTodayEvents(it) }) }
+            }
             return
         }
         if (command is CommandInterpreter.Command.WeekEvents) {
-            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.getEventsForWeek(token, command.offset)) } }
+            ensureGoogleTokensForAllAccounts { tokens ->
+                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getEventsForWeek(it, command.offset) }) }
+            }
+            return
+        }
+        if (command is CommandInterpreter.Command.EventsForDate) {
+            ensureGoogleTokensForAllAccounts { tokens ->
+                lifecycleScope.launch {
+                    val date = CalendarController.resolveLocalDate(command.dateStr)
+                    appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getEventsForDate(it, date) })
+                }
+            }
             return
         }
         if (command is CommandInterpreter.Command.UpcomingEvents) {
-            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.getUpcomingEvents(token)) } }
+            ensureGoogleTokensForAllAccounts { tokens ->
+                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getUpcomingEvents(it) }) }
+            }
             return
         }
         if (command is CommandInterpreter.Command.ListCalendars) {
-            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.getCalendarList(token)) } }
+            ensureGoogleTokensForAllAccounts { tokens ->
+                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getCalendarList(it) }) }
+            }
             return
         }
         if (command is CommandInterpreter.Command.CreateEvent) {
@@ -490,15 +541,21 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (command is CommandInterpreter.Command.ReadInbox) {
-            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GmailApiController.readInbox(token, command.count)) } }
+            ensureGoogleTokensForAllAccounts { tokens ->
+                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GmailApiController.readInbox(it, command.count) }) }
+            }
             return
         }
         if (command is CommandInterpreter.Command.ReadUnreadEmails) {
-            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GmailApiController.readUnread(token)) } }
+            ensureGoogleTokensForAllAccounts { tokens ->
+                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GmailApiController.readUnread(it) }) }
+            }
             return
         }
         if (command is CommandInterpreter.Command.SearchEmail) {
-            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GmailApiController.searchEmails(token, command.query)) } }
+            ensureGoogleTokensForAllAccounts { tokens ->
+                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GmailApiController.searchEmails(it, command.query) }) }
+            }
             return
         }
         if (command is CommandInterpreter.Command.SendEmail) {
@@ -651,6 +708,7 @@ class MainActivity : AppCompatActivity() {
             }
             CommandInterpreter.Command.TodayEvents -> return // géré au-dessus (async, OAuth)
             is CommandInterpreter.Command.WeekEvents -> return // géré au-dessus (async, OAuth)
+            is CommandInterpreter.Command.EventsForDate -> return // géré au-dessus (async, OAuth)
             CommandInterpreter.Command.UpcomingEvents -> return // géré au-dessus (async, OAuth)
             CommandInterpreter.Command.ListCalendars -> return // géré au-dessus (async, OAuth)
             is CommandInterpreter.Command.CreateEvent -> return // géré au-dessus (async, OAuth)

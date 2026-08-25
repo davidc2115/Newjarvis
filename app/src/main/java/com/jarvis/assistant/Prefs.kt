@@ -26,6 +26,7 @@ object Prefs {
     private const val KEY_GOOGLE_ACCESS_TOKEN_EXPIRY = "google_oauth_access_token_expiry_millis"
     private const val KEY_OBSIDIAN_VAULT_URI = "obsidian_vault_tree_uri"
     private const val KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL = "google_active_account_email"
+    private const val KEY_GOOGLE_ACCOUNT_TOKENS = "google_account_tokens_json"
 
     /** Identifiants des backends IA supportés (voir GeminiNanoController / GemmaController). */
     const val MODEL_GEMINI_NANO = "gemini_nano"
@@ -306,5 +307,51 @@ object Prefs {
 
     fun setActiveGoogleAccountEmail(context: Context, email: String) {
         prefs(context).edit().putString(KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL, email).apply()
+    }
+
+    // --- Jetons OAuth PAR compte (email -> {token, expiry}) --------------------------------
+    // Ajoute a getGoogleAccessToken/setGoogleAccessToken (UN SEUL jeton "actif", toujours
+    // conserve tel quel pour les operations d'ECRITURE -- creer/supprimer un evenement,
+    // envoyer un mail -- qui doivent cibler un seul compte sans ambiguite). Ce deuxieme
+    // stockage, lui, retient un jeton par compte AUTORISE (voir SettingsActivity.onLegacySignInResult,
+    // qui ecrit dans les deux a chaque autorisation reussie) : il permet de LIRE (agenda, mails)
+    // simultanement sur tous les comptes dont le jeton est encore valide, sans repasser par le
+    // selecteur systeme a chaque fois -- contourne la limite "un seul compte par defaut a la
+    // fois" de l'API Google (voir commentaire de getActiveGoogleAccountEmail) puisqu'on ne
+    // redemande jamais un jeton pour un AUTRE compte que celui qui vient d'etre autorise : on se
+    // contente de reutiliser ceux deja obtenus tant qu'ils n'ont pas expire (~55 min).
+    fun setGoogleAccessTokenForAccount(context: Context, email: String, token: String, expiresInSeconds: Long = 3300) {
+        if (email.isBlank()) return
+        val map = loadGoogleAccountTokensRaw(context)
+        val entry = JSONObject()
+        entry.put("token", token)
+        entry.put("expiry", System.currentTimeMillis() + expiresInSeconds * 1000)
+        map.put(email, entry)
+        prefs(context).edit().putString(KEY_GOOGLE_ACCOUNT_TOKENS, map.toString()).apply()
+    }
+
+    /** Tous les jetons de compte encore valides (non expires), email -> jeton. */
+    fun getAllValidGoogleAccountTokens(context: Context): Map<String, String> {
+        val map = loadGoogleAccountTokensRaw(context)
+        val now = System.currentTimeMillis()
+        val result = mutableMapOf<String, String>()
+        val keys = map.keys()
+        while (keys.hasNext()) {
+            val email = keys.next()
+            val entry = map.optJSONObject(email) ?: continue
+            val expiry = entry.optLong("expiry", 0L)
+            val token = entry.optString("token", "")
+            if (token.isNotBlank() && now < expiry) result[email] = token
+        }
+        return result
+    }
+
+    private fun loadGoogleAccountTokensRaw(context: Context): JSONObject {
+        val raw = prefs(context).getString(KEY_GOOGLE_ACCOUNT_TOKENS, null) ?: return JSONObject()
+        return try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            JSONObject()
+        }
     }
 }

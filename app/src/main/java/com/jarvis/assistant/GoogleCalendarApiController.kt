@@ -7,6 +7,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -179,6 +181,25 @@ object GoogleCalendarApiController {
             else -> "📅 Cette semaine"
         }
         formatEvents(events, "✅ Rien de prévu cette semaine-là sur ton Agenda Google.", label)
+    }
+
+    /**
+     * Planning d'UN jour precis (ex. "demain", "le 15 septembre") -- distinct de
+     * getTodayEvents (toujours aujourd'hui) et getEventsForWeek (semaine entiere) : voir
+     * CommandInterpreter.Command.EventsForDate + CalendarController.resolveLocalDate pour la
+     * resolution de la date a partir du texte utilisateur, faite avant d'appeler cette fonction.
+     */
+    suspend fun getEventsForDate(token: String, date: LocalDate): String = withContext(Dispatchers.IO) {
+        val start = Calendar.getInstance().apply {
+            set(date.year, date.monthValue - 1, date.dayOfMonth, 0, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val end = (start.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) }
+        val (error, events) = fetchMergedEvents(token, start, end)
+        if (error != null) return@withContext error
+        val formatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
+        val label = "\uD83D\uDCC5 " + date.format(formatter).replaceFirstChar { it.uppercase() }
+        formatEvents(events, "\u2705 Rien de pr\u00e9vu ce jour-l\u00e0 sur ton Agenda Google.", label)
     }
 
     suspend fun getUpcomingEvents(token: String, days: Int = 7): String = withContext(Dispatchers.IO) {
