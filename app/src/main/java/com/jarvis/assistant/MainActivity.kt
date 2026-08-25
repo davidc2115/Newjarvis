@@ -54,6 +54,65 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Agenda + Mail via OAuth Google (voir GoogleCalendarApiController/GmailApiController) :
+    // équivalent de permissionLauncher/pendingCommand ci-dessus, mais pour l'écran de
+    // consentement Google (voir GoogleAccountController.requestAuthorization) au lieu d'une
+    // permission système -- ne se déclenche que si le jeton en cache (Prefs.getGoogleAccessToken)
+    // est absent/expiré ET que le compte n'a pas déjà autorisé silencieusement (cas normal après
+    // la 1ère fois, voir sa doc : hasResolution() == false).
+    private var pendingGoogleTokenCallback: ((String) -> Unit)? = null
+
+    private val googleAuthorizationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val callback = pendingGoogleTokenCallback
+        pendingGoogleTokenCallback = null
+        val token = GoogleAccountController.handleAuthorizationResult(this, result.data)
+        if (token != null && callback != null) {
+            Prefs.setGoogleAccessToken(this, token)
+            callback(token)
+        } else if (callback != null) {
+            appendAssistantMessage(
+                "❌ Autorisation Google refusée ou annulée -- va dans Réglages > Compte(s) Google pour réessayer."
+            )
+        }
+    }
+
+    /**
+     * S'assure d'avoir un jeton d'accès Google valide avant [onToken], en le redemandant
+     * silencieusement (ou avec un écran de consentement si nécessaire) sinon. Si aucun compte
+     * Google n'a jamais été lié (voir Réglages > Compte(s) Google), l'échec est normal et
+     * explicite -- pas de plantage.
+     */
+    private fun ensureGoogleToken(onToken: (String) -> Unit) {
+        val cached = Prefs.getGoogleAccessToken(this)
+        if (cached != null) {
+            onToken(cached)
+            return
+        }
+        pendingGoogleTokenCallback = onToken
+        GoogleAccountController.requestAuthorization(
+            activity = this,
+            pendingIntentLauncher = googleAuthorizationLauncher,
+            onGranted = { token ->
+                pendingGoogleTokenCallback = null
+                if (token != null) {
+                    Prefs.setGoogleAccessToken(this, token)
+                    onToken(token)
+                } else {
+                    appendAssistantMessage("❌ Jeton d'accès Google indisponible -- réessaie depuis Réglages > Compte(s) Google.")
+                }
+            },
+            onFailure = { e ->
+                pendingGoogleTokenCallback = null
+                appendAssistantMessage(
+                    "❌ Aucun compte Google connecté ou autorisation refusée (${e.message}) -- " +
+                        "va dans Réglages > Compte(s) Google pour te connecter."
+                )
+            }
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // BUG RÉEL CORRIGÉ (signalement utilisateur : titre/bouton réglages cachés sous la
@@ -309,12 +368,10 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.CreateKml -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
             is CommandInterpreter.Command.Notify ->
                 if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
-            CommandInterpreter.Command.TodayEvents,
-            is CommandInterpreter.Command.WeekEvents,
-            CommandInterpreter.Command.UpcomingEvents,
-            CommandInterpreter.Command.ListCalendars -> listOf(Manifest.permission.READ_CALENDAR)
-            is CommandInterpreter.Command.CreateEvent,
-            is CommandInterpreter.Command.DeleteEvent -> listOf(Manifest.permission.WRITE_CALENDAR)
+            // Agenda + Mail : plus de permission runtime Android depuis le passage à l'API
+            // Google OAuth (Calendar API/Gmail API, voir GoogleCalendarApiController/
+            // GmailApiController) -- le "consentement" équivalent est géré par
+            // ensureGoogleToken() (écran d'autorisation Google, pas une permission système).
             else -> emptyList()
         }
         val missingPermissions = requiredPermissions.filter {
@@ -396,26 +453,60 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
-        // Email (voir EmailController) : requêtes réseau IMAP/SMTP, donc async comme
-        // GetLocation/CreateKml ci-dessus -- pas de permission runtime à vérifier (juste
-        // INTERNET, permission "normale" accordée à l'installation).
+        // Agenda + Mail (voir GoogleCalendarApiController/GmailApiController) : appels REST
+        // OAuth, donc async comme GetLocation/CreateKml ci-dessus -- ensureGoogleToken() gère
+        // l'obtention/le cache du jeton d'accès (voir sa doc) avant d'appeler l'API Google.
+        if (command is CommandInterpreter.Command.TodayEvents) {
+            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.getTodayEvents(token)) } }
+            return
+        }
+        if (command is CommandInterpreter.Command.WeekEvents) {
+            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.getEventsForWeek(token, command.offset)) } }
+            return
+        }
+        if (command is CommandInterpreter.Command.UpcomingEvents) {
+            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.getUpcomingEvents(token)) } }
+            return
+        }
+        if (command is CommandInterpreter.Command.ListCalendars) {
+            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.getCalendarList(token)) } }
+            return
+        }
+        if (command is CommandInterpreter.Command.CreateEvent) {
+            ensureGoogleToken { token ->
+                lifecycleScope.launch {
+                    val dateCal = CalendarController.resolveDate(command.dateStr)
+                    CalendarController.resolveTime(command.timeStr ?: "", dateCal, defaultHour = 9, defaultMinute = 0)
+                    val start = dateCal.timeInMillis
+                    val end = start + 60 * 60 * 1000 // durée par défaut : 1h
+                    appendAssistantMessage(GoogleCalendarApiController.createEvent(token, command.title, start, end))
+                }
+            }
+            return
+        }
+        if (command is CommandInterpreter.Command.DeleteEvent) {
+            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.deleteEventByTitle(token, command.query)) } }
+            return
+        }
         if (command is CommandInterpreter.Command.ReadInbox) {
-            lifecycleScope.launch { appendAssistantMessage(EmailController.readInbox(this@MainActivity, command.count)) }
+            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GmailApiController.readInbox(token, command.count)) } }
             return
         }
         if (command is CommandInterpreter.Command.ReadUnreadEmails) {
-            lifecycleScope.launch { appendAssistantMessage(EmailController.readUnread(this@MainActivity)) }
+            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GmailApiController.readUnread(token)) } }
             return
         }
         if (command is CommandInterpreter.Command.SearchEmail) {
-            lifecycleScope.launch { appendAssistantMessage(EmailController.searchEmails(this@MainActivity, command.query)) }
+            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GmailApiController.searchEmails(token, command.query)) } }
             return
         }
         if (command is CommandInterpreter.Command.SendEmail) {
-            lifecycleScope.launch {
-                // Pas de sujet distinct dans la phrase reconnue (voir sendEmailRegex) -- sujet
-                // générique, l'essentiel étant le corps du message demandé par l'utilisateur.
-                appendAssistantMessage(EmailController.sendEmail(this@MainActivity, command.to, "Message de JARVIS", command.body))
+            ensureGoogleToken { token ->
+                lifecycleScope.launch {
+                    // Pas de sujet distinct dans la phrase reconnue (voir sendEmailRegex) --
+                    // sujet générique, l'essentiel étant le corps du message demandé.
+                    appendAssistantMessage(GmailApiController.sendEmail(token, command.to, "Message de JARVIS", command.body))
+                }
             }
             return
         }
@@ -557,18 +648,12 @@ class MainActivity : AppCompatActivity() {
                     "• [${it.appLabel}] ${it.title} -- ${it.text}"
                 }
             }
-            CommandInterpreter.Command.TodayEvents -> CalendarController.getTodayEvents(this)
-            is CommandInterpreter.Command.WeekEvents -> CalendarController.getEventsForWeek(this, command.offset)
-            CommandInterpreter.Command.UpcomingEvents -> CalendarController.getUpcomingEvents(this)
-            CommandInterpreter.Command.ListCalendars -> CalendarController.getCalendarList(this)
-            is CommandInterpreter.Command.CreateEvent -> {
-                val dateCal = CalendarController.resolveDate(command.dateStr)
-                CalendarController.resolveTime(command.timeStr ?: "", dateCal, defaultHour = 9, defaultMinute = 0)
-                val start = dateCal.timeInMillis
-                val end = start + 60 * 60 * 1000 // durée par défaut : 1h
-                CalendarController.createEvent(this, command.title, start, end)
-            }
-            is CommandInterpreter.Command.DeleteEvent -> CalendarController.deleteEventByTitle(this, command.query)
+            CommandInterpreter.Command.TodayEvents -> return // géré au-dessus (async, OAuth)
+            is CommandInterpreter.Command.WeekEvents -> return // géré au-dessus (async, OAuth)
+            CommandInterpreter.Command.UpcomingEvents -> return // géré au-dessus (async, OAuth)
+            CommandInterpreter.Command.ListCalendars -> return // géré au-dessus (async, OAuth)
+            is CommandInterpreter.Command.CreateEvent -> return // géré au-dessus (async, OAuth)
+            is CommandInterpreter.Command.DeleteEvent -> return // géré au-dessus (async, OAuth)
             is CommandInterpreter.Command.ReadInbox -> return // géré au-dessus (async, comme GetLocation)
             CommandInterpreter.Command.ReadUnreadEmails -> return // géré au-dessus (async)
             is CommandInterpreter.Command.SearchEmail -> return // géré au-dessus (async)

@@ -22,6 +22,8 @@ object Prefs {
     private const val KEY_GOOGLE_WEB_CLIENT_ID = "google_web_client_id"
     private const val KEY_GOOGLE_ACCOUNTS = "google_linked_accounts_json"
     private const val KEY_EMAIL_ACCOUNTS = "email_accounts_json"
+    private const val KEY_GOOGLE_ACCESS_TOKEN = "google_oauth_access_token"
+    private const val KEY_GOOGLE_ACCESS_TOKEN_EXPIRY = "google_oauth_access_token_expiry_millis"
 
     /** Identifiants des backends IA supportés (voir GeminiNanoController / GemmaController). */
     const val MODEL_GEMINI_NANO = "gemini_nano"
@@ -109,6 +111,22 @@ object Prefs {
 
     fun setGoogleWebClientId(context: Context, id: String) {
         prefs(context).edit().putString(KEY_GOOGLE_WEB_CLIENT_ID, id).apply()
+    }
+
+    /** Jeton d'accès OAuth Google (Gmail/Agenda), voir GoogleAccountController.requestAuthorization
+     *  -- de courte durée de vie (~1h), on retient l'échéance pour savoir quand le redemander en
+     *  silencieux plutôt que de le réutiliser expiré (l'API Google renverrait alors 401). */
+    fun getGoogleAccessToken(context: Context): String? {
+        val expiry = prefs(context).getLong(KEY_GOOGLE_ACCESS_TOKEN_EXPIRY, 0L)
+        if (System.currentTimeMillis() >= expiry) return null
+        return prefs(context).getString(KEY_GOOGLE_ACCESS_TOKEN, null)
+    }
+
+    fun setGoogleAccessToken(context: Context, token: String, expiresInSeconds: Long = 3300) {
+        prefs(context).edit()
+            .putString(KEY_GOOGLE_ACCESS_TOKEN, token)
+            .putLong(KEY_GOOGLE_ACCESS_TOKEN_EXPIRY, System.currentTimeMillis() + expiresInSeconds * 1000)
+            .apply()
     }
 
     /** Comptes Google liés (email + nom affiché) -- voir GoogleAccountController.LinkedAccount. */

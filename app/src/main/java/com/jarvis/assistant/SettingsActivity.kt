@@ -1,9 +1,14 @@
 package com.jarvis.assistant
 
-import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -21,6 +26,26 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var swatches: List<SwatchEntry>
 
     private data class SwatchEntry(val color: Int, val circle: View, val check: View, val container: View)
+
+    // Écran de consentement système pour l'autorisation Gmail/Agenda (voir
+    // GoogleAccountController.requestAuthorization) -- distinct du sélecteur de compte
+    // Credential Manager. On persiste ici le jeton d'accès obtenu (voir Prefs.setGoogleAccessToken)
+    // pour que MainActivity puisse l'utiliser immédiatement sans redemander l'autorisation.
+    private val googleAuthorizationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val accessToken = GoogleAccountController.handleAuthorizationResult(this, result.data)
+        if (accessToken != null) {
+            Prefs.setGoogleAccessToken(this, accessToken)
+            Toast.makeText(this, "✅ Accès Gmail/Agenda autorisé.", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(
+                this,
+                getString(R.string.google_authorization_error, "consentement refusé ou annulé"),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,12 +78,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.backButton.setOnClickListener { finish() }
 
         setupModelSelection()
-
-        // Accès mail (voir EmailConfigActivity/EmailController) -- ouvre un écran dédié plutôt
-        // que d'encombrer Réglages, comme pour la couleur d'accent/le modèle IA.
-        binding.openEmailConfigButton.setOnClickListener {
-            startActivity(Intent(this, EmailConfigActivity::class.java))
-        }
+        setupGoogleAccountSection()
     }
 
     private fun selectColor(color: Int) {
@@ -185,4 +205,134 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+
+    /**
+     * Connexion Google directement depuis l'appli, multi-comptes (voir GoogleAccountController
+     * pour le pourquoi des deux étapes authentification/autorisation, et pour l'ID client Web
+     * indispensable -- saisi ici, jamais codé en dur). Utilisé par Agenda (GoogleCalendarApiController)
+     * et Mail (GmailApiController), demande explicite de l'utilisateur de repasser sur l'API
+     * OAuth officielle plutôt que CalendarContract/IMAP.
+     */
+    private fun setupGoogleAccountSection() {
+        binding.googleWebClientIdInput.setText(Prefs.getGoogleWebClientId(this).orEmpty())
+        binding.googleWebClientIdInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                Prefs.setGoogleWebClientId(this, binding.googleWebClientIdInput.text?.toString().orEmpty().trim())
+            }
+        }
+        binding.addGoogleAccountButton.setOnClickListener { addGoogleAccount() }
+        refreshGoogleAccountsList()
+    }
+
+    private fun addGoogleAccount() {
+        val webClientId = binding.googleWebClientIdInput.text?.toString()?.trim().orEmpty()
+        if (webClientId.isBlank()) {
+            Toast.makeText(this, getString(R.string.google_web_client_id_missing), Toast.LENGTH_SHORT).show()
+            return
+        }
+        Prefs.setGoogleWebClientId(this, webClientId)
+
+        lifecycleScope.launch {
+            try {
+                // onlyAuthorized = false : montre TOUS les comptes Google du téléphone, pas
+                // seulement ceux déjà liés -- c'est ce qui permet d'en ajouter un nouveau (voir
+                // GoogleAccountController -- multi-comptes).
+                val credential = GoogleAccountController.signIn(this@SettingsActivity, webClientId, onlyAuthorized = false)
+                val email = credential.email ?: credential.id
+                val displayName = credential.displayName ?: email
+
+                val accounts = Prefs.loadGoogleAccounts(this@SettingsActivity)
+                if (accounts.none { it.email == email }) {
+                    accounts.add(GoogleAccountController.LinkedAccount(email, displayName))
+                    Prefs.saveGoogleAccounts(this@SettingsActivity, accounts)
+                    refreshGoogleAccountsList()
+                }
+
+                // Demande immédiatement l'autorisation Gmail/Agenda pour ce compte -- demande
+                // explicite de l'utilisateur : "accès complet" au compte, pas juste l'identité.
+                // Le jeton obtenu est mis en cache (Prefs.setGoogleAccessToken) pour que
+                // MainActivity puisse l'utiliser directement au prochain message du chat.
+                GoogleAccountController.requestAuthorization(
+                    activity = this@SettingsActivity,
+                    pendingIntentLauncher = googleAuthorizationLauncher,
+                    onGranted = { accessToken ->
+                        if (accessToken != null) Prefs.setGoogleAccessToken(this@SettingsActivity, accessToken)
+                        Toast.makeText(
+                            this@SettingsActivity,
+                            getString(R.string.google_account_linked, email),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    },
+                    onFailure = { e ->
+                        Toast.makeText(
+                            this@SettingsActivity,
+                            getString(R.string.google_authorization_error, e.message ?: "?"),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                )
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this@SettingsActivity,
+                    getString(R.string.google_signin_error, e.message ?: "?"),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun refreshGoogleAccountsList() {
+        binding.googleAccountsContainer.removeAllViews()
+        val accounts = Prefs.loadGoogleAccounts(this)
+        if (accounts.isEmpty()) {
+            val empty = TextView(this).apply {
+                text = getString(R.string.google_no_accounts)
+                setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.text_secondary))
+                textSize = 13f
+                setPadding(dpToPx(20), 0, dpToPx(20), 0)
+            }
+            binding.googleAccountsContainer.addView(empty)
+            return
+        }
+
+        accounts.forEach { account ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundResource(R.drawable.bg_model_row)
+                setPadding(dpToPx(14), dpToPx(14), dpToPx(14), dpToPx(14))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(dpToPx(16), 0, dpToPx(16), dpToPx(8)) }
+            }
+            val label = TextView(this).apply {
+                text = if (account.displayName.isNotBlank() && account.displayName != account.email) {
+                    "${account.displayName}\n${account.email}"
+                } else {
+                    account.email
+                }
+                setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.text_primary))
+                textSize = 14f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val unlink = TextView(this).apply {
+                text = getString(R.string.google_unlink_button)
+                setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.accent_rouge))
+                textSize = 12f
+                setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                setOnClickListener { unlinkGoogleAccount(account) }
+            }
+            row.addView(label)
+            row.addView(unlink)
+            binding.googleAccountsContainer.addView(row)
+        }
+    }
+
+    private fun unlinkGoogleAccount(account: GoogleAccountController.LinkedAccount) {
+        val remaining = Prefs.loadGoogleAccounts(this).filterNot { it.email == account.email }
+        Prefs.saveGoogleAccounts(this, remaining)
+        refreshGoogleAccountsList()
+    }
+
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 }
