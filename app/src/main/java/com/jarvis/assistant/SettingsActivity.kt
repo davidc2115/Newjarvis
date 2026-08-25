@@ -6,6 +6,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -264,17 +265,25 @@ class SettingsActivity : AppCompatActivity() {
                         ).show()
                     },
                     onFailure = { e ->
+                        Log.e("JarvisGoogleAuth", "requestAuthorization a échoué", e)
                         Toast.makeText(
                             this@SettingsActivity,
-                            getString(R.string.google_authorization_error, e.message ?: "?"),
+                            getString(
+                                R.string.google_authorization_error,
+                                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+                            ),
                             Toast.LENGTH_LONG
                         ).show()
                     }
                 )
             } catch (e: Exception) {
+                Log.e("JarvisGoogleAuth", "signIn() a échoué", e)
                 Toast.makeText(
                     this@SettingsActivity,
-                    getString(R.string.google_signin_error, e.message ?: "?"),
+                    getString(
+                        R.string.google_signin_error,
+                        "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+                    ),
                     Toast.LENGTH_LONG
                 ).show()
             }

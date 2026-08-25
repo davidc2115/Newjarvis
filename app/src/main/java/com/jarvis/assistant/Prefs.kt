@@ -105,9 +105,17 @@ object Prefs {
     }
 
     /** ID client OAuth "Web application" (Google Cloud Console -- voir GoogleAccountController),
-     *  requis comme serverClientId par Credential Manager. Jamais codé en dur, saisi par
-     *  l'utilisateur dans Réglages, comme le jeton Hugging Face ci-dessus. */
-    fun getGoogleWebClientId(context: Context): String? = prefs(context).getString(KEY_GOOGLE_WEB_CLIENT_ID, null)
+     *  requis comme serverClientId par Credential Manager. Ce n'est PAS un secret (contrairement
+     *  au client secret, jamais utilisé ici) -- Google le documente explicitement comme un
+     *  identifiant public sans risque à embarquer dans une appli, voir
+     *  developer.android.com/identity/sign-in/credential-manager-siwg -- donc une valeur par
+     *  défaut est acceptable ici, demande explicite de l'utilisateur. Reste modifiable dans
+     *  Réglages si l'utilisateur crée son propre projet Cloud Console. */
+    private const val DEFAULT_GOOGLE_WEB_CLIENT_ID =
+        "253880913410-74a517f8fdmouu01hkojh01durm80236.apps.googleusercontent.com"
+
+    fun getGoogleWebClientId(context: Context): String? =
+        prefs(context).getString(KEY_GOOGLE_WEB_CLIENT_ID, null) ?: DEFAULT_GOOGLE_WEB_CLIENT_ID
 
     fun setGoogleWebClientId(context: Context, id: String) {
         prefs(context).edit().putString(KEY_GOOGLE_WEB_CLIENT_ID, id).apply()
