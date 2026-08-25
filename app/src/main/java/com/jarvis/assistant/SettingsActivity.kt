@@ -20,6 +20,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.jarvis.assistant.databinding.ActivitySettingsBinding
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /** Réglages : choix de la couleur d'accent du thème (bulles utilisateur, bouton d'envoi...). */
@@ -274,6 +275,22 @@ class SettingsActivity : AppCompatActivity() {
                         )
                     }
                 )
+            } catch (e: CancellationException) {
+                // Le Job de lifecycleScope est annulé si l'Activity est détruite/recréée
+                // pendant que l'écran système Google (sélecteur de compte / consentement) est
+                // au premier plan -- vécu sur Xiaomi/MIUI, dont la gestion agressive du fond
+                // d'écran tue parfois le processus de l'appli pendant cette bascule. Pas une
+                // vraie erreur réseau/API : message dédié, actionnable, plutôt que le texte
+                // technique brut de CancellationException (peu clair pour l'utilisateur).
+                Log.e("JarvisGoogleAuth", "Opération annulée (Activity détruite/recréée pendant le flux Google ?)", e)
+                showCopyableErrorDialog(
+                    "Connexion interrompue",
+                    "L'opération a été annulée par le système, probablement parce que l'appli a été " +
+                        "mise en pause pendant l'écran Google (fréquent sur Xiaomi/MIUI). " +
+                        "Réglages > Applications > JARVIS > Batterie > \"Sans restrictions\", et active " +
+                        "\"Démarrage automatique\" dans l'appli Sécurité, puis réessaie.\n\n" +
+                        "Détail technique : ${e.javaClass.simpleName}: ${e.message ?: "?"}"
+                )
             } catch (e: Exception) {
                 Log.e("JarvisGoogleAuth", "signIn() a échoué", e)
                 showCopyableErrorDialog(
@@ -291,17 +308,28 @@ class SettingsActivity : AppCompatActivity() {
      * tel quel dans le chat JARVIS ou envoyé en support.
      */
     private fun showCopyableErrorDialog(title: String, detail: String) {
-        AlertDialog.Builder(this)
-            .setTitle(title.trim().ifBlank { "Erreur" })
-            .setMessage(detail)
-            .setPositiveButton("Copier") { dialog, _ ->
-                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Erreur JARVIS", detail))
-                Toast.makeText(this, "Copié.", Toast.LENGTH_SHORT).show()
-                dialog.dismiss()
-            }
-            .setNegativeButton("Fermer", null)
-            .show()
+        // Si l'Activity a été détruite/recréée entre-temps (voir CancellationException
+        // ci-dessus), afficher une AlertDialog planterait avec BadTokenException -- on
+        // vérifie et on se contente du log dans ce cas (déjà écrit avant cet appel).
+        if (isFinishing || isDestroyed) {
+            Log.w("JarvisGoogleAuth", "Dialogue d'erreur ignoré (Activity finissante/détruite): $detail")
+            return
+        }
+        try {
+            AlertDialog.Builder(this)
+                .setTitle(title.trim().ifBlank { "Erreur" })
+                .setMessage(detail)
+                .setPositiveButton("Copier") { dialog, _ ->
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Erreur JARVIS", detail))
+                    Toast.makeText(this, "Copié.", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Fermer", null)
+                .show()
+        } catch (e: Exception) {
+            Log.e("JarvisGoogleAuth", "Impossible d'afficher le dialogue d'erreur", e)
+        }
     }
 
     private fun refreshGoogleAccountsList() {
