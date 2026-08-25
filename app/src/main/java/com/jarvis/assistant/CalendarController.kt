@@ -8,6 +8,10 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import android.provider.CalendarContract
 import java.text.SimpleDateFormat
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.temporal.TemporalAdjusters
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
@@ -36,56 +40,83 @@ import java.util.TimeZone
 object CalendarController {
 
     private val FRENCH_WEEKDAYS = mapOf(
-        "lundi" to Calendar.MONDAY, "mardi" to Calendar.TUESDAY, "mercredi" to Calendar.WEDNESDAY,
-        "jeudi" to Calendar.THURSDAY, "vendredi" to Calendar.FRIDAY, "samedi" to Calendar.SATURDAY,
-        "dimanche" to Calendar.SUNDAY
+        "lundi" to DayOfWeek.MONDAY, "mardi" to DayOfWeek.TUESDAY, "mercredi" to DayOfWeek.WEDNESDAY,
+        "jeudi" to DayOfWeek.THURSDAY, "vendredi" to DayOfWeek.FRIDAY, "samedi" to DayOfWeek.SATURDAY,
+        "dimanche" to DayOfWeek.SUNDAY
     )
 
-    /** Résout une date en langage naturel FRANÇAIS en [Calendar], calculée depuis l'horloge
-     *  RÉELLE de l'appareil (jamais laissé à l'IA, qui ne connaît pas fiablement "aujourd'hui"). */
-    fun resolveDate(dateStr: String): Calendar {
-        val cal = Calendar.getInstance()
-        val d = dateStr.trim().lowercase()
+    private val FRENCH_MONTHS = mapOf(
+        "janvier" to 1, "fevrier" to 2, "mars" to 3, "avril" to 4, "mai" to 5, "juin" to 6,
+        "juillet" to 7, "aout" to 8, "septembre" to 9, "octobre" to 10, "novembre" to 11, "decembre" to 12
+    )
+
+    /**
+     * Résout une date en langage naturel FRANÇAIS en [LocalDate], calculée depuis l'horloge
+     * RÉELLE de l'appareil (jamais laissé à l'IA, qui ne connaît pas fiablement "aujourd'hui").
+     *
+     * java.time (JSR-310) au lieu de java.util.Calendar -- disponible nativement depuis l'API 26
+     * (minSdk du projet), aucune dépendance/désucrage nécessaire. Remplace l'ancienne version
+     * Calendar suite à la demande explicite de l'utilisateur d'élargir la compréhension des
+     * dates (voir aussi historique du bug #181 sur les dates relatives, source de confusions
+     * répétées avec l'arithmétique manuelle de Calendar).
+     *
+     * Phrases reconnues en plus de l'existant : "<jour> prochain" (ex. "mardi prochain" = le
+     * mardi de la semaine SUIVANTE, distinct de juste "mardi" qui vise la prochaine occurrence,
+     * même si c'est cette semaine) ; "dans N jours"/"dans N semaines" ; dates avec nom de mois
+     * ("15 septembre", "15 septembre 2027").
+     */
+    fun resolveLocalDate(dateStr: String): LocalDate {
+        val today = LocalDate.now()
+        val raw = dateStr.trim().lowercase()
             .replace("é", "e").replace("è", "e").replace("ê", "e").replace("'", "")
-        when {
-            d.isBlank() || d == "aujourdhui" || d == "auj" -> Unit
-            d == "demain" -> cal.add(Calendar.DAY_OF_YEAR, 1)
-            d == "apres-demain" || d == "apresdemain" -> cal.add(Calendar.DAY_OF_YEAR, 2)
-            d == "hier" -> cal.add(Calendar.DAY_OF_YEAR, -1)
-            d == "avant-hier" || d == "avanthier" -> cal.add(Calendar.DAY_OF_YEAR, -2)
-            FRENCH_WEEKDAYS.containsKey(d) -> {
-                val target = FRENCH_WEEKDAYS.getValue(d)
-                do { cal.add(Calendar.DAY_OF_YEAR, 1) } while (cal.get(Calendar.DAY_OF_WEEK) != target)
-            }
-            Regex("^\\d{4}-\\d{2}-\\d{2}$").matches(d) -> {
-                val parts = d.split("-").map { it.toInt() }
-                cal.set(parts[0], parts[1] - 1, parts[2])
-            }
-            Regex("^\\d{1,2}/\\d{1,2}(/\\d{2,4})?$").matches(d) -> {
-                val parts = d.split("/")
-                val day = parts[0].toInt()
-                val month = parts[1].toInt()
-                val year = if (parts.size > 2) {
-                    val yr = parts[2].toInt()
-                    if (yr < 100) 2000 + yr else yr
-                } else cal.get(Calendar.YEAR)
-                cal.set(year, month - 1, day)
-            }
-            else -> Unit
+        val prochain = Regex("\\bprochaine?\\b").containsMatchIn(raw)
+        val d = raw.replace(Regex("\\bprochaine?\\b"), "").trim()
+
+        Regex("^dans\\s+(\\d+)\\s+jours?$").find(d)?.let { return today.plusDays(it.groupValues[1].toLong()) }
+        Regex("^dans\\s+(\\d+)\\s+semaines?$").find(d)?.let { return today.plusWeeks(it.groupValues[1].toLong()) }
+
+        FRENCH_WEEKDAYS[d]?.let { target ->
+            var result = today.with(TemporalAdjusters.next(target))
+            if (prochain) result = result.plusWeeks(1)
+            return result
         }
-        return cal
+
+        if (Regex("^\\d{4}-\\d{2}-\\d{2}$").matches(d)) return LocalDate.parse(d)
+
+        Regex("^(\\d{1,2})/(\\d{1,2})(?:/(\\d{2,4}))?$").find(d)?.let { m ->
+            val day = m.groupValues[1].toInt()
+            val month = m.groupValues[2].toInt()
+            val year = m.groupValues[3].toIntOrNull()?.let { if (it < 100) 2000 + it else it } ?: today.year
+            return try { LocalDate.of(year, month, day) } catch (e: Exception) { today }
+        }
+
+        Regex("^(\\d{1,2})\\s+(\\p{L}+)(?:\\s+(\\d{4}))?$").find(d)?.let { m ->
+            val day = m.groupValues[1].toInt()
+            val month = FRENCH_MONTHS[m.groupValues[2]]
+            val year = m.groupValues[3].toIntOrNull() ?: today.year
+            if (month != null) {
+                return try { LocalDate.of(year, month, day) } catch (e: Exception) { today }
+            }
+        }
+
+        return when {
+            d.isBlank() || d == "aujourdhui" || d == "auj" -> today
+            d == "demain" -> today.plusDays(1)
+            d == "apres-demain" || d == "apresdemain" || d == "apres demain" -> today.plusDays(2)
+            d == "hier" -> today.minusDays(1)
+            d == "avant-hier" || d == "avanthier" || d == "avant hier" -> today.minusDays(2)
+            else -> today
+        }
     }
 
-    /** Applique une heure en langage libre ("14:30", "14h30", "14h") à [cal]. */
-    fun resolveTime(timeStr: String, cal: Calendar, defaultHour: Int = 9, defaultMinute: Int = 0) {
+    /** Résout une heure en langage libre ("14:30", "14h30", "14h") en [LocalTime]. */
+    fun resolveLocalTime(timeStr: String, defaultHour: Int = 9, defaultMinute: Int = 0): LocalTime {
         val t = timeStr.trim().lowercase().replace("h", ":").trim(':')
+        if (t.isBlank()) return LocalTime.of(defaultHour, defaultMinute)
         val parts = t.split(":").filter { it.isNotBlank() }
         val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: defaultHour
         val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: defaultMinute
-        cal.set(Calendar.HOUR_OF_DAY, hour)
-        cal.set(Calendar.MINUTE, minute)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
+        return LocalTime.of(hour, minute)
     }
 
     fun getTodayEvents(context: Context): String {

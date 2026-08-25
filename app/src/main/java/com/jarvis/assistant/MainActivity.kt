@@ -18,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.mlkit.genai.common.FeatureStatus
 import com.jarvis.assistant.databinding.ActivityMainBinding
+import java.time.ZoneId
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -475,9 +476,9 @@ class MainActivity : AppCompatActivity() {
         if (command is CommandInterpreter.Command.CreateEvent) {
             ensureGoogleToken { token ->
                 lifecycleScope.launch {
-                    val dateCal = CalendarController.resolveDate(command.dateStr)
-                    CalendarController.resolveTime(command.timeStr ?: "", dateCal, defaultHour = 9, defaultMinute = 0)
-                    val start = dateCal.timeInMillis
+                    val date = CalendarController.resolveLocalDate(command.dateStr)
+                    val time = CalendarController.resolveLocalTime(command.timeStr ?: "", defaultHour = 9, defaultMinute = 0)
+                    val start = date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                     val end = start + 60 * 60 * 1000 // durée par défaut : 1h
                     appendAssistantMessage(GoogleCalendarApiController.createEvent(token, command.title, start, end))
                 }

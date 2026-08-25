@@ -138,8 +138,11 @@ object CommandInterpreter {
         "liste[^.]*calendriers|quels? calendriers|mes calendriers",
         RegexOption.IGNORE_CASE
     )
+    // (.+?) au lieu de (\S+) pour le groupe date : permet de capturer des dates a plusieurs
+    // mots ("mardi prochain", "15 septembre", "dans 3 jours"), pas juste un seul token -- voir
+    // CalendarController.resolveLocalDate pour ce qui est desormais reconnu.
     private val createEventRegex = Regex(
-        "(?:ajoute|cr[ée]e?)[^.]*(?:[ée]v[ée]nement|rendez-vous|rdv)[^.]*appel[ée]e?\\s+(.+?)\\s+le\\s+(\\S+)(?:\\s+[àa]\\s+([\\dh:]+))?\\s*$",
+        "(?:ajoute|cr[ée]e?)[^.]*(?:[ée]v[ée]nement|rendez-vous|rdv)[^.]*appel[ée]e?\\s+(.+?)\\s+le\\s+(.+?)(?:\\s+[àa]\\s+([\\dh:]+))?\\s*$",
         RegexOption.IGNORE_CASE
     )
     private val deleteEventRegex = Regex(
