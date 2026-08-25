@@ -66,19 +66,89 @@ object GoogleCalendarApiController {
         }
     }
 
-    private fun formatEventList(json: String, emptyMessage: String, title: String): String {
-        val obj = JSONObject(json)
-        val items = obj.optJSONArray("items") ?: return emptyMessage
-        if (items.length() == 0) return emptyMessage
-        return buildString {
-            append("$title\n\n")
+    /**
+     * Liste TOUS les calendriers auxquels le compte a accès (principal + partagés/abonnés --
+     * voir users.calendarList.list, distinct de calendars.get sur un seul calendrier). Le libellé
+     * est laissé vide pour le calendrier principal (jamais affiché en suffixe -- inutile, la
+     * grande majorité des événements en viennent) et rempli pour les autres (utile pour
+     * distinguer un agenda partagé dans la liste fusionnée). Retourne null si l'appel lui-même
+     * échoue (ex. jeton expiré) -- distinct d'une liste vide (compte sans aucun calendrier, cas
+     * qui ne devrait jamais arriver en pratique).
+     */
+    private fun listCalendarEntries(token: String): List<Pair<String, String>>? {
+        val (code, body) = request("$BASE/users/me/calendarList", token)
+        if (code !in 200..299) return null
+        val items = try {
+            JSONObject(body).optJSONArray("items")
+        } catch (e: Exception) {
+            null
+        } ?: return emptyList()
+        val result = mutableListOf<Pair<String, String>>()
+        for (i in 0 until items.length()) {
+            val cal = items.getJSONObject(i)
+            val isPrimary = cal.optBoolean("primary", false)
+            val label = if (isPrimary) "" else cal.optString("summary", cal.optString("id"))
+            result.add(cal.optString("id") to label)
+        }
+        return result
+    }
+
+    /**
+     * Interroge TOUS les calendriers de listCalendarEntries() sur la même période et fusionne
+     * les événements (triés par heure de début) -- avant ça, seul "primary" était interrogé,
+     * donc les agendas partagés (voir signalement utilisateur : "je ne vois que le planning
+     * principal, pas les planning partagés") n'apparaissaient jamais. Un calendrier individuel
+     * qui échoue (ex. scope insuffisant sur un agenda partagé précis) est ignoré plutôt que de
+     * faire échouer toute la requête -- l'erreur n'est remontée que si AUCUN calendrier n'a pu
+     * être lu (ex. jeton expiré, cas qui affecte tous les calendriers pareil).
+     */
+    private fun fetchMergedEvents(token: String, start: Calendar, end: Calendar): Pair<String?, List<JSONObject>> {
+        val timeMinEnc = URLEncoder.encode(rfc3339(start), "UTF-8")
+        val timeMaxEnc = URLEncoder.encode(rfc3339(end), "UTF-8")
+        val calendars = listCalendarEntries(token) ?: listOf("primary" to "")
+        val merged = mutableListOf<JSONObject>()
+        var lastError: String? = null
+        var anySuccess = false
+        for ((id, label) in calendars) {
+            val encodedId = URLEncoder.encode(id, "UTF-8")
+            val url = "$BASE/calendars/$encodedId/events?timeMin=$timeMinEnc&timeMax=$timeMaxEnc" +
+                "&singleEvents=true&orderBy=startTime"
+            val (code, body) = request(url, token)
+            if (code !in 200..299) {
+                lastError = errorMessage(code, body)
+                continue
+            }
+            anySuccess = true
+            val items = try {
+                JSONObject(body).optJSONArray("items")
+            } catch (e: Exception) {
+                null
+            } ?: continue
             for (i in 0 until items.length()) {
                 val ev = items.getJSONObject(i)
+                if (label.isNotBlank()) ev.put("_calendarName", label)
+                merged.add(ev)
+            }
+        }
+        merged.sortBy { ev ->
+            val s = ev.optJSONObject("start")
+            s?.optString("dateTime")?.ifBlank { null } ?: s?.optString("date") ?: ""
+        }
+        return (if (!anySuccess) lastError else null) to merged
+    }
+
+    private fun formatEvents(events: List<JSONObject>, emptyMessage: String, title: String): String {
+        if (events.isEmpty()) return emptyMessage
+        return buildString {
+            append("$title\n\n")
+            for (ev in events) {
                 val summary = ev.optString("summary", "(sans titre)")
                 val start = ev.optJSONObject("start")
                 val startStr = start?.optString("dateTime")?.ifBlank { null } ?: start?.optString("date")
+                val calendarName = ev.optString("_calendarName")
                 append("• $summary")
                 if (startStr != null) append(" -- $startStr")
+                if (calendarName.isNotBlank()) append(" [$calendarName]")
                 append("\n")
             }
         }
@@ -89,11 +159,9 @@ object GoogleCalendarApiController {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
         }
         val end = (start.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) }
-        val url = "$BASE/calendars/primary/events?timeMin=${URLEncoder.encode(rfc3339(start), "UTF-8")}" +
-            "&timeMax=${URLEncoder.encode(rfc3339(end), "UTF-8")}&singleEvents=true&orderBy=startTime"
-        val (code, body) = request(url, token)
-        if (code !in 200..299) return@withContext errorMessage(code, body)
-        formatEventList(body, "✅ Rien de prévu aujourd'hui sur ton Agenda Google.", "📅 Aujourd'hui")
+        val (error, events) = fetchMergedEvents(token, start, end)
+        if (error != null) return@withContext error
+        formatEvents(events, "✅ Rien de prévu aujourd'hui sur ton Agenda Google.", "📅 Aujourd'hui")
     }
 
     suspend fun getEventsForWeek(token: String, weekOffset: Int): String = withContext(Dispatchers.IO) {
@@ -103,26 +171,22 @@ object GoogleCalendarApiController {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
         }
         val end = (start.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 7) }
-        val url = "$BASE/calendars/primary/events?timeMin=${URLEncoder.encode(rfc3339(start), "UTF-8")}" +
-            "&timeMax=${URLEncoder.encode(rfc3339(end), "UTF-8")}&singleEvents=true&orderBy=startTime"
-        val (code, body) = request(url, token)
-        if (code !in 200..299) return@withContext errorMessage(code, body)
+        val (error, events) = fetchMergedEvents(token, start, end)
+        if (error != null) return@withContext error
         val label = when {
             weekOffset > 0 -> "📅 Semaine prochaine"
             weekOffset < 0 -> "📅 Semaine dernière"
             else -> "📅 Cette semaine"
         }
-        formatEventList(body, "✅ Rien de prévu cette semaine-là sur ton Agenda Google.", label)
+        formatEvents(events, "✅ Rien de prévu cette semaine-là sur ton Agenda Google.", label)
     }
 
     suspend fun getUpcomingEvents(token: String, days: Int = 7): String = withContext(Dispatchers.IO) {
         val start = Calendar.getInstance()
         val end = (start.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, days) }
-        val url = "$BASE/calendars/primary/events?timeMin=${URLEncoder.encode(rfc3339(start), "UTF-8")}" +
-            "&timeMax=${URLEncoder.encode(rfc3339(end), "UTF-8")}&singleEvents=true&orderBy=startTime"
-        val (code, body) = request(url, token)
-        if (code !in 200..299) return@withContext errorMessage(code, body)
-        formatEventList(body, "✅ Rien de prévu dans les $days prochains jours sur ton Agenda Google.", "📅 À venir")
+        val (error, events) = fetchMergedEvents(token, start, end)
+        if (error != null) return@withContext error
+        formatEvents(events, "✅ Rien de prévu dans les $days prochains jours sur ton Agenda Google.", "📅 À venir")
     }
 
     suspend fun getCalendarList(token: String): String = withContext(Dispatchers.IO) {
