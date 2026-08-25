@@ -72,6 +72,53 @@ object ObsidianController {
         return null
     }
 
+    /** Titres bruts (sans .md, sans chemin de sous-dossier) de toutes les notes du vault --
+     *  base pour autoLinkContent ci-dessous. Fonction synchrone volontairement privée : les
+     *  appelants publics (suspend) l'utilisent déjà depuis Dispatchers.IO. */
+    private fun collectAllNoteTitles(root: DocumentFile): List<String> {
+        val titles = mutableListOf<String>()
+        val stack = ArrayDeque<DocumentFile>()
+        stack.addLast(root)
+        while (stack.isNotEmpty()) {
+            val dir = stack.removeLast()
+            for (child in dir.listFiles()) {
+                if (child.isDirectory) {
+                    stack.addLast(child)
+                } else {
+                    val name = child.name ?: continue
+                    if (name.endsWith(".md", ignoreCase = true)) titles.add(name.dropLast(3))
+                }
+            }
+        }
+        return titles
+    }
+
+    /**
+     * Wikilinks automatiques (voir tâche #225, historique pré-réécriture #94/#97) : quand un
+     * texte mentionne le titre d'une autre note EXISTANTE du vault, l'entoure de [[...]]
+     * (syntaxe Obsidian standard) -- crée la navigation entre notes sans effort manuel de
+     * l'utilisateur. Les titres les plus longs sont traités en premier pour qu'un titre court
+     * ("Projet") ne "mange" pas une partie d'un titre plus long ("Projet Alpha") avant que ce
+     * dernier n'ait eu sa chance. Le lookaround (?<!\[\[)...(?!\]\]) évite de re-wrapper un
+     * titre déjà entouré de [[ ]] lors d'appels répétés (idempotent). [excludeTitle] : jamais
+     * lier une note à elle-même (inutile, et l'empêche pratiquement en pleine écriture).
+     */
+    suspend fun autoLinkContent(context: Context, text: String, excludeTitle: String? = null): String = withContext(Dispatchers.IO) {
+        val root = getVaultRoot(context) ?: return@withContext text
+        val titles = try {
+            collectAllNoteTitles(root)
+        } catch (e: Exception) {
+            return@withContext text
+        }
+        var result = text
+        for (title in titles.filter { it.isNotBlank() }.sortedByDescending { it.length }) {
+            if (excludeTitle != null && title.equals(excludeTitle, ignoreCase = true)) continue
+            val pattern = Regex("(?<!\\[\\[)\\b" + Regex.escape(title) + "\\b(?!\\]\\])", RegexOption.IGNORE_CASE)
+            result = pattern.replace(result) { m -> "[[${m.value}]]" }
+        }
+        result
+    }
+
     /** Liste tous les fichiers .md du vault (chemin relatif inclus si dans un sous-dossier, ex.
      *  "Contacts/Julie.md") -- utile pour que JARVIS sache ce qui existe déjà avant de créer un
      *  doublon, et pour un futur écran de liste/graphe (phases suivantes). */
@@ -107,7 +154,8 @@ object ObsidianController {
             }
             val file = root.createFile("text/markdown", fileName)
                 ?: return@withContext Result.failure(IllegalStateException("Impossible de créer le fichier dans le vault (permission perdue ?)."))
-            context.contentResolver.openOutputStream(file.uri)?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+            val linked = autoLinkContent(context, content, excludeTitle = title)
+            context.contentResolver.openOutputStream(file.uri)?.use { it.write(linked.toByteArray(Charsets.UTF_8)) }
                 ?: return@withContext Result.failure(IllegalStateException("Impossible d'écrire dans le fichier créé."))
             Result.success(Unit)
         } catch (e: Exception) {
@@ -143,7 +191,11 @@ object ObsidianController {
             val previous = context.contentResolver.openInputStream(existing.uri)?.use { stream ->
                 BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).readText()
             } ?: ""
-            val updated = if (previous.isBlank()) content else "$previous\n\n$content"
+            // Seul le NOUVEAU contenu passe par autoLinkContent (pas tout le fichier) -- le
+            // reste a deja ete traite lors de son propre ajout, le relier a chaque fois serait
+            // du travail inutile repete sur un fichier qui grandit.
+            val linked = autoLinkContent(context, content, excludeTitle = title)
+            val updated = if (previous.isBlank()) linked else "$previous\n\n$linked"
             context.contentResolver.openOutputStream(existing.uri, "wt")?.use { it.write(updated.toByteArray(Charsets.UTF_8)) }
                 ?: return@withContext Result.failure(IllegalStateException("Impossible d'écrire dans le fichier."))
             Result.success(Unit)
