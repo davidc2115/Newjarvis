@@ -232,6 +232,26 @@ object CommandInterpreter {
         "liste[^.]*notes|quelles? notes|mes notes(?: obsidian)?|notes? du vault",
         RegexOption.IGNORE_CASE
     )
+    // Capture rapide sans titre explicite ("note que...", "prends note : ...", "n'oublie
+    // pas de...") -- la facon la plus naturelle de prendre une note au vol, distincte de
+    // createNoteRegex qui exige un titre explicite ("note appelee X"). Ancre en debut de
+    // message (^) pour eviter les faux positifs sur une phrase qui contiendrait juste le mot
+    // "note" ailleurs. Toujours un AppendNote (jamais CreateNote) vers une note fourre-tout
+    // "Notes rapides" -- CreateNote echoue si la note existe deja, inutilisable pour des
+    // captures repetees.
+    private val quickNoteRegex = Regex(
+        "^(?:note\\s*:?\\s*(?:que\\s+)?|prends?\\s+note\\s*:?\\s*(?:que\\s+)?|" +
+            "n['\u2019]?oublie\\s+pas\\s+(?:de\\s+)?|ajoute\\s+[àa]\\s+m[ea]s?\\s+notes?\\s*:?\\s*)(.+)$",
+        RegexOption.IGNORE_CASE
+    )
+    // Memoire persistante (voir ObsidianController.MEMORY_NOTE_TITLE) -- "retiens que...",
+    // "souviens-toi que..." : ecrit dans une note dediee, relue automatiquement a chaque
+    // message pour donner a JARVIS un vrai contexte utilisateur d'une conversation a l'autre
+    // (voir MainActivity.buildConversationalPrompt).
+    private val memoryRegex = Regex(
+        "^(?:retiens|souviens-toi|rappelle-toi)\\s*(?:que\\s+)?(?:bien\\s+)?(.+)$",
+        RegexOption.IGNORE_CASE
+    )
 
     private val notifyRegex = Regex(
         "(?:envoie|affiche)[^.]*notification\\s+(?:disant|qui dit|:)?\\s*(.+)",
@@ -466,6 +486,16 @@ object CommandInterpreter {
 
         if (listNotesRegex.containsMatchIn(lower)) return Command.ListNotes
 
+        memoryRegex.find(trimmed)?.let { match ->
+            val text = match.groupValues[1].trim().trimEnd('.', '!', '?')
+            if (text.isNotBlank()) return Command.AppendNote(ObsidianController.MEMORY_NOTE_TITLE, "- $text")
+        }
+
+        quickNoteRegex.find(trimmed)?.let { match ->
+            val text = match.groupValues[1].trim().trimEnd('.', '!', '?')
+            if (text.isNotBlank()) return Command.AppendNote("Notes rapides", "- $text")
+        }
+
         return null
     }
 
@@ -627,17 +657,16 @@ JSON :"""
                 val body = str("body")
                 if (to.contains("@") && body.isNotBlank()) Command.SendEmail(to, body) else null
             }
-            "create_note" -> {
-                val title = str("title")
-                val text = str("content")
-                if (title.isBlank() || text.isBlank()) null else Command.CreateNote(title, text)
-            }
+            // Titre facultatif cote IA pour append_note (defaut "Notes rapides", meme
+            // capture au vol que quickNoteRegex) -- create_note garde un titre obligatoire
+            // (une note explicitement NOMMEE n'a de sens que si un nom est fourni), mais le
+            // contenu devient facultatif (note vierge avec juste un titre, cas valide).
+            "create_note" -> str("title").ifBlank { null }?.let { Command.CreateNote(it, str("content")) }
             "read_note" -> str("title").ifBlank { null }?.let { Command.ReadNote(it) }
             "list_notes" -> Command.ListNotes
             "append_note" -> {
-                val title = str("title")
                 val text = str("content")
-                if (title.isBlank() || text.isBlank()) null else Command.AppendNote(title, text)
+                if (text.isBlank()) null else Command.AppendNote(str("title").ifBlank { "Notes rapides" }, text)
             }
             else -> null
         }

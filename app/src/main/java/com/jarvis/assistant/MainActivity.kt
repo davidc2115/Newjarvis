@@ -358,9 +358,43 @@ class MainActivity : AppCompatActivity() {
             if (aiCommand != null) {
                 executeDeviceCommand(aiCommand)
             } else {
-                requestAiReply(text)
+                requestAiReply(buildConversationalPrompt(text))
             }
         }
+    }
+
+    /**
+     * Construit le prompt final envoyé au backend IA (Gemini Nano/Gemma) pour une réponse
+     * conversationnelle. Avant ça, requestAiReply recevait le message brut de l'utilisateur
+     * SANS AUCUN contexte -- ni préambule d'identité, ni historique de la conversation en
+     * cours, ni mémoire persistante : JARVIS "oubliait" tout d'un message à l'autre, même au
+     * sein de la même conversation (racine du "vrai assistant" demandé -- pas juste les
+     * notes). Ajoute : un court préambule, les derniers échanges (continuité immédiate), et
+     * le contenu de la note "Mémoire JARVIS" du vault Obsidian si elle existe (infos que
+     * l'utilisateur a explicitement demandé de retenir -- voir CommandInterpreter.memoryRegex,
+     * "retiens que..."). Volontairement compact (historique et mémoire tronqués) : les
+     * backends on-device ont un contexte réduit, un prompt trop long a déjà causé des échecs
+     * "conversation trop longue" par le passé sur ce projet.
+     */
+    private suspend fun buildConversationalPrompt(userText: String): String {
+        val preamble = "Tu es JARVIS, l'assistant personnel de l'utilisateur sur son t\u00e9l\u00e9phone Android. " +
+            "R\u00e9ponds de fa\u00e7on naturelle, concise et utile, en fran\u00e7ais."
+        val memory = if (ObsidianController.hasVault(this)) {
+            ObsidianController.readNote(this, ObsidianController.MEMORY_NOTE_TITLE).getOrNull()
+        } else null
+        val memoryBlock = if (!memory.isNullOrBlank()) {
+            "\n\nCe que tu sais d\u00e9j\u00e0 sur l'utilisateur :\n" + memory.trim().take(800)
+        } else ""
+        // dropLast(1) : le dernier message de la conversation active est CE message (deja
+        // ajoute dans sendMessage() avant l'appel a classifyThenReply) -- il est deja passe
+        // separement via userText, on ne veut pas le dupliquer dans l'historique.
+        val history = activeConversation.messages.dropLast(1).takeLast(8)
+        val historyBlock = if (history.isEmpty()) "" else {
+            "\n\nHistorique r\u00e9cent :\n" + history.joinToString("\n") { m ->
+                "${if (m.isUser) "Utilisateur" else "JARVIS"} : ${m.text}"
+            }
+        }
+        return "$preamble$memoryBlock$historyBlock\n\nUtilisateur : $userText\nJARVIS :"
     }
 
     /**

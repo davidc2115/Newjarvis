@@ -26,6 +26,12 @@ import java.io.InputStreamReader
  */
 object ObsidianController {
 
+    /** Titre de la note "memoire" persistante -- infos que JARVIS retient sur
+     *  l'utilisateur d'une conversation a l'autre (voir MainActivity.buildConversationalPrompt
+     *  et CommandInterpreter -- regex "retiens que..."). Constante partagee (pas dupliquee
+     *  en dur ailleurs) pour eviter un desalignement si le nom change un jour. */
+    const val MEMORY_NOTE_TITLE = "M\u00e9moire JARVIS"
+
     /** true si l'utilisateur a choisi un vault (voir SettingsActivity) et que l'accès est
      *  toujours valide (permission persistante pas révoquée entre-temps). */
     fun hasVault(context: Context): Boolean = getVaultRoot(context) != null
