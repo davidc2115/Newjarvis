@@ -351,6 +351,20 @@ class MainActivity : AppCompatActivity() {
      */
     private fun classifyThenReply(text: String) {
         lifecycleScope.launch {
+            // Repli "comprehension locale renforcee" (ML Kit Entity Extraction, voir
+            // EntityExtractorController) -- verifie AVANT le classifieur IA local : plus
+            // rapide, deterministe une fois le modele telecharge, et comprend des tournures de
+            // date/heure que les regex de CommandInterpreter ne couvrent pas (ex. "mardi en
+            // huit"). Garde par mot-cle d'agenda (voir hasScheduleKeyword) pour rester ciblé.
+            val entityCommand = try {
+                EntityExtractorController.classifyScheduleFallback(text)
+            } catch (e: Exception) {
+                null
+            }
+            if (entityCommand != null) {
+                executeDeviceCommand(entityCommand)
+                return@launch
+            }
             val aiCommand = try {
                 classifyIntent(text)
             } catch (e: Exception) {

@@ -160,6 +160,13 @@ object CommandInterpreter {
         "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous|" +
             "qu['’ ]est[- ]ce que j['’]ai|j['’]ai quoi|je fais quoi|qu['’]est[- ]ce que je fais|" +
             "j['’]ai (?:quelque chose|un truc)|suis[- ]je (?:libre|occup[ée]e?)|je suis (?:libre|occup[ée]e?))"
+    /** Test rapide (pas de capture) : le message contient-il un mot-cle de planning/agenda ?
+     *  Utilise par EntityExtractorController comme garde peu couteuse avant d'appeler l'API
+     *  ML Kit (evite un appel modele pour un message qui ne parle clairement pas d'agenda) --
+     *  reutilise SCHEDULE_KEYWORDS plutot que de dupliquer la liste des mots-cles ailleurs. */
+    fun hasScheduleKeyword(text: String): Boolean =
+        Regex(SCHEDULE_KEYWORDS, RegexOption.IGNORE_CASE).containsMatchIn(text)
+
     private val todayEventsRegex = Regex(
         "$SCHEDULE_KEYWORDS[^.]*aujourd'?hui",
         RegexOption.IGNORE_CASE
