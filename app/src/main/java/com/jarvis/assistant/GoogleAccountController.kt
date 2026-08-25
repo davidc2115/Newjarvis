@@ -122,6 +122,30 @@ object GoogleAccountController {
     }
 
     /**
+     * MULTI-COMPTES : appeler directement signInIntent (ci-dessus) peut sauter le sélecteur de
+     * compte et reconnecter silencieusement le dernier compte utilisé sur certains
+     * téléphones/versions de Play Services -- ce qui empêche l'utilisateur d'en choisir un
+     * différent pour ajouter un 2e/3e compte. signOut() efface uniquement la session mise en
+     * cache par CE client GoogleSignInClient (pas le compte Google du téléphone lui-même) ; une
+     * fois fait, le sélecteur système s'affiche systématiquement. [onIntentReady] reçoit
+     * l'Intent à lancer une fois signOut() terminé (asynchrone, d'où le callback).
+     */
+    fun signOutThenGetLegacySignInIntent(
+        context: Context,
+        webClientId: String,
+        onIntentReady: (Intent) -> Unit
+    ) {
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(webClientId)
+            .requestEmail()
+            .build()
+        val client = GoogleSignIn.getClient(context, options)
+        client.signOut().addOnCompleteListener {
+            onIntentReady(client.signInIntent)
+        }
+    }
+
+    /**
      * Complète getLegacySignInIntent() une fois l'écran de sélection de compte système validé.
      * Lance ApiException en cas d'échec/annulation -- le code (ex. 10 = DEVELOPER_ERROR, signe
      * que le SHA-1/package n'est pas enregistré comme client OAuth "Android" côté Cloud

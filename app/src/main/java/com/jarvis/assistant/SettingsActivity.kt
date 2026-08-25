@@ -254,8 +254,13 @@ class SettingsActivity : AppCompatActivity() {
         Prefs.setGoogleWebClientId(this, webClientId)
 
         try {
-            val intent = GoogleAccountController.getLegacySignInIntent(this, webClientId)
-            googleLegacySignInLauncher.launch(intent)
+            // signOutThenGetLegacySignInIntent (pas getLegacySignInIntent directement) : sans
+            // ça, le sélecteur de compte peut être sauté et reconnecter silencieusement le
+            // dernier compte utilisé, empêchant d'en ajouter un 2e/3e -- voir le commentaire de
+            // cette fonction dans GoogleAccountController.
+            GoogleAccountController.signOutThenGetLegacySignInIntent(this, webClientId) { intent ->
+                googleLegacySignInLauncher.launch(intent)
+            }
         } catch (e: Exception) {
             Log.e("JarvisGoogleAuth", "Impossible de lancer l'écran de connexion Google", e)
             showCopyableErrorDialog(
