@@ -143,9 +143,13 @@ class MainActivity : AppCompatActivity() {
     private suspend fun mergeAcrossAccounts(tokens: Map<String, String>, fetch: suspend (String) -> String): String {
         if (tokens.isEmpty()) return "\u274c Aucun compte Google disponible."
         if (tokens.size == 1) return fetch(tokens.values.first())
-        return tokens.entries.joinToString("\n\n") { (email, token) ->
-            "\u2500\u2500\u2500 $email \u2500\u2500\u2500\n" + fetch(token)
+        // Boucle classique et pas joinToString { ... } -- son lambda de transformation n'est
+        // pas "suspend", appeler fetch() (suspend) a l'interieur ne compile pas.
+        val parts = mutableListOf<String>()
+        for ((email, token) in tokens) {
+            parts.add("\u2500\u2500\u2500 $email \u2500\u2500\u2500\n" + fetch(token))
         }
+        return parts.joinToString("\n\n")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
