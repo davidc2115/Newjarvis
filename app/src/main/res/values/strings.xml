@@ -38,4 +38,22 @@
     <string name="google_signin_error">❌ Échec de la connexion Google : %1$s</string>
     <string name="google_authorization_error">❌ Échec de l\'autorisation Gmail/Agenda : %1$s</string>
     <string name="google_account_linked">✅ Compte Google lié : %1$s (accès Gmail/Agenda autorisé).</string>
+
+    <string name="email_title">Email</string>
+    <string name="email_intro">Lecture (IMAP) et envoi (SMTP) directement depuis l\'app, sans passer par Google Cloud Console. Pour Gmail/Yahoo/Outlook, utilise un « mot de passe d\'application », pas ton mot de passe principal.</string>
+    <string name="email_preset_label">Fournisseur</string>
+    <string name="email_label_hint">Nom (ex : Gmail perso)…</string>
+    <string name="email_address_hint">Adresse email…</string>
+    <string name="email_password_hint">Mot de passe d\'application…</string>
+    <string name="email_password_help">Gmail : myaccount.google.com → Sécurité → Validation en 2 étapes (à activer) → Mots de passe des applications → génère un code à 16 lettres et colle-le ici.</string>
+    <string name="email_advanced_label">Serveurs (avancé, pré-rempli par le fournisseur)</string>
+    <string name="email_imap_host_hint">Serveur IMAP…</string>
+    <string name="email_smtp_host_hint">Serveur SMTP…</string>
+    <string name="email_test_button">Tester la connexion</string>
+    <string name="email_save_button">Enregistrer ce compte</string>
+    <string name="email_accounts_label">Comptes configurés</string>
+    <string name="email_default_badge"> ⭐ (par défaut)</string>
+    <string name="email_delete_button">Supprimer</string>
+    <string name="email_no_accounts">Aucun compte email configuré pour l\'instant.</string>
+    <string name="email_missing_fields">Renseigne au moins l\'adresse email, le mot de passe, et les serveurs IMAP/SMTP (utilise un des boutons de fournisseur ci-dessus pour les pré-remplir).</string>
 </resources>

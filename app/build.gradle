@@ -43,6 +43,16 @@ android {
     kotlinOptions { jvmTarget = '17' }
 
     buildFeatures { viewBinding true }
+
+    // android-mail (JavaMail) embarque plusieurs META-INF/LICENSE.txt etc. identiques dans ses
+    // propres JARs -- sans cette exclusion, l'assemblage échoue avec "More than one file was
+    // found with OS independent path 'META-INF/...'" (conflit bien connu et documenté de cette
+    // lib sur Android, pas spécifique à ce projet).
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/LICENSE.txt', 'META-INF/LICENSE', 'META-INF/NOTICE.txt', 'META-INF/NOTICE', 'META-INF/DEPENDENCIES']
+        }
+    }
 }
 
 // FIX CI : une dépendance transitive (play-services-auth 21.6.0 ou googleid 1.2.0) tire
@@ -102,4 +112,14 @@ dependencies {
     implementation 'androidx.credentials:credentials-play-services-auth:1.5.0'
     implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.0'
     implementation 'com.google.android.gms:play-services-auth:21.6.0'
+
+    // Accès mail (demande explicite utilisateur : "regarde comme c'était sur l'ancienne appli")
+    // -- IMAP (lecture) + SMTP (envoi) directement depuis l'APK, avec un simple "mot de passe
+    // d'application" généré par l'utilisateur (myaccount.google.com > Sécurité > Mots de passe
+    // des applications, nécessite la validation en 2 étapes) : AUCUN Google Cloud Console, aucun
+    // ID client OAuth -- exactement l'approche retenue par l'ancienne version de ce projet
+    // (voir EmailController.kt) après plusieurs tentatives OAuth abandonnées. android-mail =
+    // portage JavaMail pour Android (le javax.mail standard n'est pas disponible sur Android).
+    implementation 'com.sun.mail:android-mail:1.6.7'
+    implementation 'com.sun.mail:android-activation:1.6.7'
 }

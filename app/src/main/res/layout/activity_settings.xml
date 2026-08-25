@@ -308,6 +308,33 @@
         android:layout_marginTop="8dp"
         android:visibility="gone" />
 
+    <!-- Accès mail (demande explicite utilisateur : "regarde comme c'était sur l'ancienne
+         appli") : IMAP/SMTP avec mot de passe d'application, aucune Console Cloud (voir
+         EmailConfigActivity/EmailController). -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/email_title"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp"
+        android:layout_marginStart="20dp"
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/openEmailConfigButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/email_title"
+        android:textColor="@color/text_primary"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:background="@drawable/bg_model_row"
+        android:padding="12dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp" />
+
     </LinearLayout>
     </ScrollView>
 

@@ -41,6 +41,12 @@ object CommandInterpreter {
         object ListCalendars : Command()
         data class CreateEvent(val title: String, val dateStr: String, val timeStr: String?) : Command()
         data class DeleteEvent(val query: String) : Command()
+        // Email (IMAP/SMTP, voir EmailController) -- demande explicite utilisateur, porté
+        // depuis l'ancienne appli sans passer par Google Cloud Console.
+        data class ReadInbox(val count: Int) : Command()
+        object ReadUnreadEmails : Command()
+        data class SearchEmail(val query: String) : Command()
+        data class SendEmail(val to: String, val body: String) : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -138,6 +144,26 @@ object CommandInterpreter {
     )
     private val deleteEventRegex = Regex(
         "(?:supprime|annule|efface)[^.]*(?:[ée]v[ée]nement|rendez-vous|rdv)\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Email (voir EmailController -- IMAP/SMTP, mot de passe d'application, aucune Console
+    // Cloud). "mails"/"emails" volontairement large -- ne doit pas capter "sms"/"message texte"
+    // déjà couverts par smsRegex, vérifié à l'usage.
+    private val readInboxRegex = Regex(
+        "mes (?:derniers? )?mails?|mes (?:derniers? )?emails?|ma bo[iî]te mail|ma bo[iî]te e-?mail",
+        RegexOption.IGNORE_CASE
+    )
+    private val readUnreadEmailsRegex = Regex(
+        "mails? non lus?|emails? non lus?",
+        RegexOption.IGNORE_CASE
+    )
+    private val searchEmailRegex = Regex(
+        "(?:cherche|recherche)[^.]*(?:mail|email)[^.]*sur\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val sendEmailRegex = Regex(
+        "envoie[^.]*(?:mail|email)[^.]*[àa]\s+(\S+@\S+)\D*?(?:disant|qui dit|:)\s*(.+)",
         RegexOption.IGNORE_CASE
     )
 
@@ -310,6 +336,24 @@ object CommandInterpreter {
 
         if (showNotificationsRegex.containsMatchIn(lower)) return Command.ShowNotifications
 
+        // Email : ordre important -- sendEmailRegex avant readInboxRegex/searchEmailRegex
+        // (une phrase d'envoi contient aussi le mot "mail", mais "envoie...à...disant..." est
+        // plus spécifique, donc vérifiée avant les regex de lecture, plus larges).
+        sendEmailRegex.find(trimmed)?.let { match ->
+            val to = match.groupValues[1].trim()
+            val body = match.groupValues[2].trim()
+            if (to.contains("@") && body.isNotBlank()) return Command.SendEmail(to, body)
+        }
+
+        searchEmailRegex.find(trimmed)?.let { match ->
+            val query = match.groupValues[1].trim()
+            if (query.isNotBlank()) return Command.SearchEmail(query)
+        }
+
+        if (readUnreadEmailsRegex.containsMatchIn(lower)) return Command.ReadUnreadEmails
+
+        if (readInboxRegex.containsMatchIn(lower)) return Command.ReadInbox(5)
+
         notifyRegex.find(trimmed)?.let { match ->
             val text = match.groupValues[1].trim()
             if (text.isNotBlank()) return Command.Notify(text)
@@ -366,6 +410,10 @@ Actions possibles (respecte exactement les noms des champs, JSON valide, une seu
 {"action":"list_calendars"}
 {"action":"create_event","title":"dentiste","date":"25/08","time":"14h30"}
 {"action":"delete_event","query":"dentiste"}
+{"action":"read_inbox"}
+{"action":"read_unread_emails"}
+{"action":"search_email","query":"facture"}
+{"action":"send_email","to":"quelqu-un@exemple.com","body":"texte du mail"}
 {"action":"none"}
 
 Message de l'utilisateur : "$safeText"
@@ -458,6 +506,14 @@ JSON :"""
                 if (title.isBlank() || date.isBlank()) null else Command.CreateEvent(title, date, strOrNull("time"))
             }
             "delete_event" -> str("query").ifBlank { null }?.let { Command.DeleteEvent(cleanName(it)) }
+            "read_inbox" -> Command.ReadInbox(5)
+            "read_unread_emails" -> Command.ReadUnreadEmails
+            "search_email" -> str("query").ifBlank { null }?.let { Command.SearchEmail(it) }
+            "send_email" -> {
+                val to = str("to")
+                val body = str("body")
+                if (to.contains("@") && body.isNotBlank()) Command.SendEmail(to, body) else null
+            }
             else -> null
         }
     }

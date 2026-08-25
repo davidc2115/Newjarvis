@@ -1,5 +1,6 @@
 package com.jarvis.assistant
 
+import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
@@ -52,6 +53,12 @@ class SettingsActivity : AppCompatActivity() {
         binding.backButton.setOnClickListener { finish() }
 
         setupModelSelection()
+
+        // Accès mail (voir EmailConfigActivity/EmailController) -- ouvre un écran dédié plutôt
+        // que d'encombrer Réglages, comme pour la couleur d'accent/le modèle IA.
+        binding.openEmailConfigButton.setOnClickListener {
+            startActivity(Intent(this, EmailConfigActivity::class.java))
+        }
     }
 
     private fun selectColor(color: Int) {

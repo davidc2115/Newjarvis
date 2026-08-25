@@ -7,8 +7,19 @@
 
     <!-- Lot 1 "contrôle téléphone" : permission "normale" (accordée automatiquement, pas de
          dialogue runtime) qui permet à AlarmClock.ACTION_SET_ALARM/ACTION_SET_TIMER de sauter
-         l'écran de confirmation (EXTRA_SKIP_UI) : voir DeviceController. -->
+         l'écran de confirmation (EXTRA_SKIP_UI) : voir DeviceController.
+         BUG SIGNALÉ PERSISTANT confirmé par l'utilisateur (texte d'erreur exact obtenu grâce au
+         diagnostic Result<Unit>) : "SecurityException: Permission Denial: starting Intent
+         { act=android.intent.action.SET_ALARM cmp=com.android.deskclock/.HandleSetAlarmActivity }"
+         Note : android.permission.SET_ALARM (ci-dessus) N'EST PAS la permission requise ici : c'est
+         une confusion très répandue (même nom en apparence). L'appli Horloge d'AOSP/Pixel
+         (com.android.deskclock) protège son activité HandleSetAlarmActivity, celle qui reçoit
+         réellement ACTION_SET_ALARM, avec une permission complètement différente et plus
+         ancienne : com.android.alarm.permission.SET_ALARM (préfixe com.android.alarm, pas
+         android). Les deux existent en parallèle dans l'écosystème Android pour des raisons
+         historiques ; il faut déclarer les DEUX pour couvrir tous les appareils/apps Horloge. -->
     <uses-permission android:name="android.permission.SET_ALARM" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <!-- Lot 2 "contrôle téléphone" : permissions dangereuses, demandées à l'exécution
          (voir MainActivity.permissionLauncher) avant tout envoi de SMS ou appel. -->
@@ -97,6 +108,11 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="@string/settings_title" />
+
+        <activity
+            android:name=".EmailConfigActivity"
+            android:exported="false"
+            android:label="@string/email_title" />
 
         <!-- Lot 8 "contrôle téléphone" : lecture des notifications système des autres applis
              (voir JarvisNotificationListenerService). BIND_NOTIFICATION_LISTENER_SERVICE est un

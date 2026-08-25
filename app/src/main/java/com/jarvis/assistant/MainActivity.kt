@@ -396,6 +396,29 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
+        // Email (voir EmailController) : requêtes réseau IMAP/SMTP, donc async comme
+        // GetLocation/CreateKml ci-dessus -- pas de permission runtime à vérifier (juste
+        // INTERNET, permission "normale" accordée à l'installation).
+        if (command is CommandInterpreter.Command.ReadInbox) {
+            lifecycleScope.launch { appendAssistantMessage(EmailController.readInbox(this@MainActivity, command.count)) }
+            return
+        }
+        if (command is CommandInterpreter.Command.ReadUnreadEmails) {
+            lifecycleScope.launch { appendAssistantMessage(EmailController.readUnread(this@MainActivity)) }
+            return
+        }
+        if (command is CommandInterpreter.Command.SearchEmail) {
+            lifecycleScope.launch { appendAssistantMessage(EmailController.searchEmails(this@MainActivity, command.query)) }
+            return
+        }
+        if (command is CommandInterpreter.Command.SendEmail) {
+            lifecycleScope.launch {
+                // Pas de sujet distinct dans la phrase reconnue (voir sendEmailRegex) -- sujet
+                // générique, l'essentiel étant le corps du message demandé par l'utilisateur.
+                appendAssistantMessage(EmailController.sendEmail(this@MainActivity, command.to, "Message de JARVIS", command.body))
+            }
+            return
+        }
         val reply = when (command) {
             is CommandInterpreter.Command.Flashlight -> {
                 val ok = DeviceController.setFlashlight(this, command.on)
@@ -546,6 +569,10 @@ class MainActivity : AppCompatActivity() {
                 CalendarController.createEvent(this, command.title, start, end)
             }
             is CommandInterpreter.Command.DeleteEvent -> CalendarController.deleteEventByTitle(this, command.query)
+            is CommandInterpreter.Command.ReadInbox -> return // géré au-dessus (async, comme GetLocation)
+            CommandInterpreter.Command.ReadUnreadEmails -> return // géré au-dessus (async)
+            is CommandInterpreter.Command.SearchEmail -> return // géré au-dessus (async)
+            is CommandInterpreter.Command.SendEmail -> return // géré au-dessus (async)
         }
         appendAssistantMessage(reply)
     }

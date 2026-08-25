@@ -21,6 +21,7 @@ object Prefs {
     private const val KEY_HF_TOKEN = "huggingface_token"
     private const val KEY_GOOGLE_WEB_CLIENT_ID = "google_web_client_id"
     private const val KEY_GOOGLE_ACCOUNTS = "google_linked_accounts_json"
+    private const val KEY_EMAIL_ACCOUNTS = "email_accounts_json"
 
     /** Identifiants des backends IA supportés (voir GeminiNanoController / GemmaController). */
     const val MODEL_GEMINI_NANO = "gemini_nano"
@@ -140,5 +141,106 @@ object Prefs {
             array.put(obj)
         }
         prefs(context).edit().putString(KEY_GOOGLE_ACCOUNTS, array.toString()).apply()
+    }
+
+    // --- Comptes Email (IMAP/SMTP, mot de passe d'application) ------------------------------
+    // Demande explicite utilisateur ("regarde comme c'était sur l'ancienne appli") : porté
+    // depuis EmailController.kt/Prefs.kt de l'ancienne version du projet (avant la remise à
+    // zéro), SIMPLIFIÉ pour ne garder que le chemin mot de passe d'application -- l'ancienne
+    // appli avait aussi tenté une variante OAuth2 via AccountManager, jamais aboutie et
+    // incompatible avec le retrait explicite de la Console Cloud (voir SettingsActivity.kt).
+
+    data class EmailAccount(
+        val id: String = System.currentTimeMillis().toString(),
+        val label: String = "",
+        val email: String = "",
+        val password: String = "",
+        val imapHost: String = "",
+        val imapPort: Int = 993,
+        val smtpHost: String = "",
+        val smtpPort: Int = 587,
+        val smtpStartTls: Boolean = true,
+        val isDefault: Boolean = false
+    ) {
+        fun toJson(): JSONObject = JSONObject().apply {
+            put("id", id); put("label", label); put("email", email); put("password", password)
+            put("imapHost", imapHost); put("imapPort", imapPort)
+            put("smtpHost", smtpHost); put("smtpPort", smtpPort)
+            put("smtpStartTls", smtpStartTls); put("isDefault", isDefault)
+        }
+
+        companion object {
+            fun fromJson(j: JSONObject) = EmailAccount(
+                id = j.optString("id", System.currentTimeMillis().toString()),
+                label = j.optString("label", ""),
+                email = j.optString("email", ""),
+                password = j.optString("password", ""),
+                imapHost = j.optString("imapHost", ""),
+                imapPort = j.optInt("imapPort", 993),
+                smtpHost = j.optString("smtpHost", ""),
+                smtpPort = j.optInt("smtpPort", 587),
+                smtpStartTls = j.optBoolean("smtpStartTls", true),
+                isDefault = j.optBoolean("isDefault", false)
+            )
+
+            /** Configs pré-remplies pour les grands services -- l'utilisateur n'a plus qu'à
+             *  saisir son adresse et son mot de passe d'application. */
+            fun preset(service: String, email: String, password: String): EmailAccount? = when (service.lowercase()) {
+                "gmail" -> EmailAccount(
+                    label = "Gmail", email = email, password = password,
+                    imapHost = "imap.gmail.com", imapPort = 993,
+                    smtpHost = "smtp.gmail.com", smtpPort = 587, smtpStartTls = true
+                )
+                "outlook" -> EmailAccount(
+                    label = "Outlook", email = email, password = password,
+                    imapHost = "outlook.office365.com", imapPort = 993,
+                    smtpHost = "smtp.office365.com", smtpPort = 587, smtpStartTls = true
+                )
+                "yahoo" -> EmailAccount(
+                    label = "Yahoo", email = email, password = password,
+                    imapHost = "imap.mail.yahoo.com", imapPort = 993,
+                    smtpHost = "smtp.mail.yahoo.com", smtpPort = 587, smtpStartTls = true
+                )
+                "icloud" -> EmailAccount(
+                    label = "iCloud", email = email, password = password,
+                    imapHost = "imap.mail.me.com", imapPort = 993,
+                    smtpHost = "smtp.mail.me.com", smtpPort = 587, smtpStartTls = true
+                )
+                else -> null
+            }
+        }
+    }
+
+    fun getEmailAccounts(context: Context): List<EmailAccount> {
+        val json = prefs(context).getString(KEY_EMAIL_ACCOUNTS, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { EmailAccount.fromJson(arr.getJSONObject(it)) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun getDefaultEmailAccount(context: Context): EmailAccount? =
+        getEmailAccounts(context).firstOrNull { it.isDefault } ?: getEmailAccounts(context).firstOrNull()
+
+    fun saveEmailAccounts(context: Context, accounts: List<EmailAccount>) {
+        val arr = JSONArray()
+        accounts.forEach { arr.put(it.toJson()) }
+        prefs(context).edit().putString(KEY_EMAIL_ACCOUNTS, arr.toString()).apply()
+    }
+
+    fun addEmailAccount(context: Context, account: EmailAccount) {
+        val list = getEmailAccounts(context).toMutableList()
+        list.removeAll { it.id == account.id }
+        // Le premier compte ajouté devient automatiquement le compte par défaut.
+        val finalAccount = if (list.isEmpty()) account.copy(isDefault = true) else account
+        list.add(finalAccount)
+        saveEmailAccounts(context, list)
+    }
+
+    fun removeEmailAccount(context: Context, id: String) {
+        val list = getEmailAccounts(context).filter { it.id != id }
+        saveEmailAccounts(context, list)
     }
 }
