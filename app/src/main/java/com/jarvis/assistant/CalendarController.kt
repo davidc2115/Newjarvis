@@ -173,6 +173,80 @@ object CalendarController {
         return getEventsTimeRange(context, start, end, label, calendarIdsOverride = ids)
     }
 
+    /**
+     * Comme [getEventsForCalendarMatching] mais avec EN PLUS une période/date précise (ex.
+     * "planning de Thomas pour cette semaine", "agenda de Marie pour le 30 août") -- distingue
+     * ce cas du filtrage par nom seul (qui balaie une plage large de [days] jours par défaut).
+     * [periodRaw] est la chaîne brute capturée par CommandInterpreter.
+     * eventsForCalendarWithPeriodRegex : soit une phrase de semaine ("cette semaine", "semaine
+     * prochaine", "semaine dernière", "la semaine"), soit "aujourd'hui", soit une date/jour
+     * reconnue par [resolveLocalDate]. Si [periodRaw] est null ou vide, se rabat simplement sur
+     * [getEventsForCalendarMatching] (comportement identique à avant pour "planning de Thomas"
+     * sans période).
+     */
+    fun getEventsForCalendarAndPeriod(context: Context, query: String, periodRaw: String?): String {
+        if (periodRaw.isNullOrBlank()) return getEventsForCalendarMatching(context, query)
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission de lecture de l'agenda non accordée."
+        }
+        val matches = findCalendarsMatching(context, query)
+        if (matches.isEmpty()) {
+            val available = buildCalendarNameMap(context).values.toSet()
+            val suggestion = if (available.isEmpty()) {
+                "Aucun calendrier n'est disponible sur cet appareil."
+            } else {
+                "Calendriers disponibles : ${available.joinToString(", ")}."
+            }
+            return "❌ Aucun calendrier trouvé pour « $query ». $suggestion"
+        }
+        val ids = matches.map { it.first }
+        val who = matches.joinToString(" / ") { it.second }
+        val period = periodRaw.trim().lowercase()
+
+        val weekMatch = Regex(
+            "^(cette semaine|semaine prochaine|semaine derni[èe]re|la semaine)$",
+            RegexOption.IGNORE_CASE
+        ).find(period)
+        if (weekMatch != null) {
+            val phrase = weekMatch.groupValues[1]
+            val offset = when {
+                phrase.contains("prochaine") -> 1
+                phrase.contains("derni") -> -1
+                else -> 0
+            }
+            val cal = Calendar.getInstance().apply {
+                firstDayOfWeek = Calendar.MONDAY
+                add(Calendar.WEEK_OF_YEAR, offset)
+                set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }
+            val start = cal.timeInMillis
+            val end = cal.apply {
+                add(Calendar.DAY_OF_YEAR, 6)
+                set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+            }.timeInMillis
+            val weekLabel = when {
+                offset == 0 -> "cette semaine"
+                offset == -1 -> "la semaine dernière"
+                offset == 1 -> "la semaine prochaine"
+                else -> "la semaine du ${SimpleDateFormat("dd/MM", Locale.FRENCH).format(Date(start))}"
+            }
+            return getEventsTimeRange(context, start, end, "📅 Planning de $who ($weekLabel)", calendarIdsOverride = ids)
+        }
+
+        val date = if (period == "aujourd'hui" || period == "aujourdhui") {
+            LocalDate.now()
+        } else {
+            resolveLocalDate(period)
+        }
+        val zone = ZoneId.systemDefault()
+        val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
+        val formatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
+        val dayLabel = date.format(formatter).replaceFirstChar { it.uppercase() }
+        return getEventsTimeRange(context, start, end, "📅 Planning de $who ($dayLabel)", calendarIdsOverride = ids)
+    }
+
     /** Normalisation accents/casse (voir ContactsController.normalize, même logique). */
     private fun normalize(s: String): String =
         java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)

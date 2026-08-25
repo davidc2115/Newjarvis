@@ -579,7 +579,7 @@ class MainActivity : AppCompatActivity() {
             // voir CalendarController.getEventsForCalendarMatching) -- fonctionnalité NOUVELLE,
             // donc pas de repli réseau nécessaire : le message d'erreur (calendrier introuvable
             // / permission) est déjà clair par lui-même.
-            appendAssistantMessage(CalendarController.getEventsForCalendarMatching(this, command.query))
+            appendAssistantMessage(CalendarController.getEventsForCalendarAndPeriod(this, command.query, command.periodRaw))
             return
         }
         if (command is CommandInterpreter.Command.UpcomingEvents) {

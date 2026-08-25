@@ -52,7 +52,7 @@ object CommandInterpreter {
         // date. Ajouté suite au constat qu'une demande comme "affiche moi le planning de
         // Thomas" retombait sur une commande générique (tout fusionné) faute de correspondre à
         // TodayEvents/WeekEvents/EventsForDate.
-        data class EventsForCalendar(val query: String) : Command()
+        data class EventsForCalendar(val query: String, val periodRaw: String? = null) : Command()
         // Email (IMAP/SMTP, voir EmailController) -- demande explicite utilisateur, porté
         // depuis l'ancienne appli sans passer par Google Cloud Console.
         data class ReadInbox(val count: Int) : Command()
@@ -218,6 +218,34 @@ object CommandInterpreter {
     // ponctuation de fin de phrase du nom capturé (pas besoin de nettoyage après-coup).
     private val eventsForCalendarRegex = Regex(
         "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*?\\b(?:de|du|pour)\\s+([\\p{L} '’\\-]{2,})",
+        RegexOption.IGNORE_CASE
+    )
+    // Planning d'un calendrier/compte PRECIS ET d'une periode/date precise EN MEME TEMPS (ex.
+    // "affiche le planning de Thomas pour cette semaine", "planning de Marie-Claire pour la
+    // semaine prochaine", "planning de Thomas pour le 30 aout") -- bug signale par l'utilisateur
+    // : sans cette regex dediee, un message contenant a la fois un nom ET une phrase de periode
+    // ("cette semaine") est intercepte par todayEventsRegex/weekEventsRegex/eventsForDateRegex
+    // (verifiees plus haut dans parse(), voir plus bas) qui matchent sur la periode seule et
+    // ignorent silencieusement le nom, fusionnant alors TOUS les calendriers au lieu d'un seul.
+    // Cette regex est donc verifiee AVANT ces trois regex generiques dans parse() (contrairement
+    // a eventsForCalendarRegex ci-dessus, verifiee APRES) : elle doit gagner la priorite des
+    // qu'un nom ET une periode sont tous les deux presents.
+    // Groupe 1 = nom (mots qui ne sont pas eux-memes des mots-cles de connexion/periode, evite
+    // que le nom "avale" "pour"/"la"/"semaine"...). Groupe 2 = periode brute, reutilise le meme
+    // vocabulaire que weekEventsRegex/eventsForDateRegex (CalendarController.resolveLocalDate
+    // et getEventsForWeek se chargent de l'interpretation exacte de ce qui est capture).
+    private const val CALENDAR_NAME_STOPWORDS =
+        "(?:pour|de|du|d['’]|la|le|l['’]|cette|semaine|prochaine?|derni[èe]re?|aujourd|demain|" +
+            "hier|apr[èe]s|avant|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)"
+    private const val CALENDAR_PERIOD_ALT =
+        "(cette semaine|(?:la\\s+)?semaine\\s+prochaine|(?:la\\s+)?semaine\\s+derni[èe]re|la semaine|" +
+            "aujourd'?hui|demain|apr[èe]s-demain|hier|avant-hier|" +
+            "(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?:\\s+prochaine?)?|" +
+            "\\d{1,2}(?:er)?\\s+\\p{L}+(?:\\s+\\d{4})?|\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?|\\d{4}-\\d{2}-\\d{2})"
+    private val eventsForCalendarWithPeriodRegex = Regex(
+        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*?\\b(?:de|du|pour)\\s+" +
+            "((?:(?!$CALENDAR_NAME_STOPWORDS\\b)[\\p{L}'’\\-]+\\s*)+)" +
+            "(?:pour\\s+|de\\s+|du\\s+)?(?:le\\s+|la\\s+|l['’]\\s*)?$CALENDAR_PERIOD_ALT\\s*\\??\\s*$",
         RegexOption.IGNORE_CASE
     )
     // (.+?) au lieu de (\S+) pour le groupe date : permet de capturer des dates a plusieurs
@@ -434,6 +462,17 @@ object CommandInterpreter {
             return Command.CreateKml(name, label)
         }
 
+        // Verifiee AVANT todayEventsRegex/weekEventsRegex/eventsForDateRegex (voir commentaire
+        // sur eventsForCalendarWithPeriodRegex) : un nom + une periode doivent l'emporter sur
+        // une periode seule.
+        eventsForCalendarWithPeriodRegex.find(trimmed)?.let { match ->
+            val query = cleanName(match.groupValues[1])
+            val periodRaw = match.groupValues[2].trim()
+            if (query.isNotBlank() && periodRaw.isNotBlank()) {
+                return Command.EventsForCalendar(query, periodRaw)
+            }
+        }
+
         if (todayEventsRegex.containsMatchIn(lower)) return Command.TodayEvents
 
         weekEventsRegex.find(lower)?.let { match ->
@@ -592,6 +631,7 @@ Actions possibles (respecte exactement les noms des champs, JSON valide, une seu
 {"action":"week_events","offset":0}
 {"action":"events_for_date","date":"demain"}
 {"action":"events_for_calendar","query":"Thomas"}
+{"action":"events_for_calendar","query":"Thomas","period":"cette semaine"}
 {"action":"upcoming_events"}
 {"action":"list_calendars"}
 {"action":"create_event","title":"dentiste","date":"25/08","time":"14h30"}
@@ -689,7 +729,9 @@ JSON :"""
                 Command.WeekEvents(offset)
             }
             "events_for_date" -> str("date").ifBlank { null }?.let { Command.EventsForDate(it) }
-            "events_for_calendar" -> str("query").ifBlank { null }?.let { Command.EventsForCalendar(it) }
+            "events_for_calendar" -> str("query").ifBlank { null }?.let {
+                Command.EventsForCalendar(it, strOrNull("period"))
+            }
             "upcoming_events" -> Command.UpcomingEvents
             "list_calendars" -> Command.ListCalendars
             "create_event" -> {
