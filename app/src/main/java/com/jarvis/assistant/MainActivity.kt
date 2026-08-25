@@ -446,8 +446,13 @@ class MainActivity : AppCompatActivity() {
                 if (ok) "👤 Contact « ${command.name} » créé (${command.phoneNumber})." else "❌ Échec de la création du contact."
             }
             is CommandInterpreter.Command.FindContact -> {
-                val contact = ContactsController.findContact(this, command.name)
+                val searchResult = ContactsController.findContact(this, command.name)
+                val contact = searchResult.getOrNull()
                 when {
+                    searchResult.isFailure -> {
+                        val e = searchResult.exceptionOrNull()
+                        "❌ Recherche de contact impossible -- ${e?.javaClass?.simpleName} : ${e?.message}"
+                    }
                     contact == null -> "🔍 Aucun contact trouvé pour « ${command.name} »."
                     else -> buildString {
                         append("👤 ${contact.name}")
@@ -461,9 +466,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             is CommandInterpreter.Command.CallContact -> {
-                val contact = ContactsController.findContact(this, command.name)
+                val searchResult = ContactsController.findContact(this, command.name)
+                val contact = searchResult.getOrNull()
                 val number = contact?.phoneNumbers?.firstOrNull()
                 when {
+                    searchResult.isFailure -> {
+                        val e = searchResult.exceptionOrNull()
+                        "❌ Recherche de contact impossible -- ${e?.javaClass?.simpleName} : ${e?.message}"
+                    }
                     contact == null -> "🔍 Aucun contact trouvé pour « ${command.name} »."
                     number == null -> "👤 ${contact.name} -- aucun numéro enregistré, impossible d'appeler."
                     else -> {

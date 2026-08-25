@@ -3,6 +3,7 @@ package com.jarvis.assistant
 import android.content.ContentProviderOperation
 import android.content.Context
 import android.provider.ContactsContract
+import java.text.Normalizer
 
 /**
  * Lot 3 "contrôle téléphone" : lecture/création de contacts natifs (ContactsContract), avec
@@ -12,28 +13,69 @@ object ContactsController {
 
     data class ContactInfo(val name: String, val phoneNumbers: List<String>, val address: String? = null)
 
-    /** Recherche par nom (correspondance partielle, insensible à la casse). */
-    fun findContact(context: Context, query: String): ContactInfo? {
-        val resolver = context.contentResolver
-        val contactsCursor = resolver.query(
-            ContactsContract.Contacts.CONTENT_URI,
-            arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.DISPLAY_NAME),
-            "${ContactsContract.Contacts.DISPLAY_NAME} LIKE ?",
-            arrayOf("%$query%"),
-            null
-        ) ?: return null
+    /**
+     * Normalise pour la comparaison : enlève les accents (Normalizer NFD + suppression des
+     * marques diacritiques) et met en minuscules. BUG SIGNALÉ PERSISTANT ("aucun contact
+     * trouvé" malgré cleanName() qui retire déjà les mots parasites) : la clause SQL
+     * "DISPLAY_NAME LIKE ?" utilisée avant ne fait un rapprochement insensible à la casse que
+     * pour les caractères ASCII a-z (comportement par défaut de SQLite sur Android, pas
+     * d'extension ICU chargée) -- "Eric" ne matchait donc jamais un contact enregistré "Éric",
+     * "cecile" ne matchait pas "Cécile", etc., très courant avec des noms français. On récupère
+     * maintenant TOUS les contacts (requête large, peu coûteuse : juste _ID+DISPLAY_NAME) et on
+     * filtre nous-mêmes en Kotlin avec cette normalisation, qui gère correctement les accents.
+     */
+    private fun normalize(s: String): String =
+        Normalizer.normalize(s, Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .lowercase()
+            .trim()
 
-        contactsCursor.use { cursor ->
-            if (!cursor.moveToFirst()) return null
-            val contactId = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID))
-            val name = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME))
+    /**
+     * Recherche par nom (correspondance partielle, insensible à la casse ET aux accents).
+     * Renvoie Result pour remonter une vraie exception (SecurityException si la permission
+     * READ_CONTACTS a été révoquée entre-temps, IllegalStateException du ContentProvider...)
+     * au lieu de la confondre avec un simple "aucun contact ne correspond" -- même logique que
+     * DeviceController.setTimer/setAlarm (voir leur commentaire).
+     */
+    fun findContact(context: Context, query: String): Result<ContactInfo?> {
+        return try {
+            val resolver = context.contentResolver
+            val normalizedQuery = normalize(query)
+            if (normalizedQuery.isBlank()) return Result.success(null)
+
+            var contactId: Long? = null
+            var name: String? = null
+            resolver.query(
+                ContactsContract.Contacts.CONTENT_URI,
+                arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val candidateName = cursor.getString(nameCol) ?: continue
+                    if (normalize(candidateName).contains(normalizedQuery)) {
+                        contactId = cursor.getLong(idCol)
+                        name = candidateName
+                        // Préfère une correspondance de nom complet (ex. recherche "julie
+                        // martin" qui matche exactement) à la première trouvée : on continue
+                        // seulement si ce n'est pas déjà une correspondance exacte.
+                        if (normalize(candidateName) == normalizedQuery) return@use
+                    }
+                }
+            }
+
+            val id = contactId ?: return Result.success(null)
+            val finalName = name ?: return Result.success(null)
 
             val phones = mutableListOf<String>()
             resolver.query(
                 ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
                 arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
                 "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
-                arrayOf(contactId.toString()),
+                arrayOf(id.toString()),
                 null
             )?.use { phoneCursor ->
                 while (phoneCursor.moveToNext()) {
@@ -49,7 +91,7 @@ object ContactsController {
                 ContactsContract.CommonDataKinds.StructuredPostal.CONTENT_URI,
                 arrayOf(ContactsContract.CommonDataKinds.StructuredPostal.FORMATTED_ADDRESS),
                 "${ContactsContract.CommonDataKinds.StructuredPostal.CONTACT_ID} = ?",
-                arrayOf(contactId.toString()),
+                arrayOf(id.toString()),
                 null
             )?.use { addressCursor ->
                 if (addressCursor.moveToFirst()) {
@@ -59,7 +101,9 @@ object ContactsController {
                 }
             }
 
-            return ContactInfo(name, phones, address)
+            Result.success(ContactInfo(finalName, phones, address))
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
