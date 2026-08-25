@@ -86,16 +86,26 @@ object CommandInterpreter {
 
     // Distinct du regex ci-dessus : "appelle Julie" (nom, pas un numéro) -- cherche dans les
     // contacts natifs puis compose avec le premier numéro trouvé (voir MainActivity.CallContact).
+    // Pas besoin d'ancrer ni de couvrir "peux-tu"/"est-ce que tu peux" explicitement : find()
+    // n'exige pas que le match commence en début de message, donc "peux-tu appeler Julie"
+    // matche déjà via "appeler Julie" -- élargi ici seulement avec des VERBES alternatifs
+    // ("téléphone à", "compose le numéro de", "passe un appel à") absents jusqu'ici.
     private val callContactRegex = Regex(
-        "appel(?:le|er)?\\s+(?:le\\s+|au\\s+)?([\\p{L} '\\-]{2,})",
+        "(?:appel(?:le|er)?|t[ée]l[ée]phone(?:\\s+[àa])?|compose(?:r)?\\s+le\\s+num[ée]ro\\s+d['’]?e?|" +
+            "passe(?:-moi)?\\s+un\\s+appel(?:\\s+[àa])?)\\s+(?:le\\s+|au\\s+|[àa]\\s+)?([\\p{L} '\\-]{2,})",
         RegexOption.IGNORE_CASE
     )
     private val createContactRegex = Regex(
         "(?:cr[ée]e?|ajoute)[^.]*?contact\\s+([\\p{L} '\\-]+?)\\s+(?:num[ée]ro|t[ée]l[ée]phone|tel)\\s*:?\\s*(\\+?[\\d][\\d .-]{5,})",
         RegexOption.IGNORE_CASE
     )
+    // Élargi avec des tournures interrogatives naturelles ("as-tu le numéro de...",
+    // "donne-moi le numéro de...", "c'est quoi le numéro de...") en plus des verbes d'action
+    // déjà couverts -- même logique que callContactRegex ci-dessus.
     private val findContactRegex = Regex(
-        "(?:num[ée]ro de|cherche(?: le)? contact|trouve(?: le)? contact|affiche(?: le)? contact|adresse de|o[uù] habite)\\s+([\\p{L} '\\-]+)",
+        "(?:num[ée]ro de|cherche(?: le)? contact|trouve(?: le)? contact|affiche(?: le)? contact|adresse de|o[uù] habite|" +
+            "as-tu (?:le )?(?:num[ée]ro|contact) de|donne(?:-moi)? (?:le )?(?:num[ée]ro|contact) de|" +
+            "c['’]est quoi le num[ée]ro de)\\s+([\\p{L} '\\-]+)",
         RegexOption.IGNORE_CASE
     )
     private val locationRegex = Regex(
@@ -245,16 +255,19 @@ object CommandInterpreter {
     // Notes Obsidian (voir ObsidianController) -- vault reel choisi par l'utilisateur, pas
     // un dossier interne. Titre capture en (.+?) non-gourmand comme createEventRegex : les
     // titres de notes sont souvent multi-mots ("Reunion client mardi"), pas un seul token.
+    // "sauvegarde"/"enregistre" ajoutés comme synonymes de créer -- tournure naturelle
+    // ("sauvegarde une note appelée..."). Voir aussi quickNoteRegex plus bas pour la capture
+    // SANS titre explicite (bien plus fréquente en usage réel).
     private val createNoteRegex = Regex(
-        "(?:cr[ée]e?|nouvelle)[^.]*note[^.]*appel[ée]e?\\s+(.+?)\\s*(?:avec|contenant|:)\\s*(.+)",
+        "(?:cr[ée]e?|nouvelle|sauvegarde|enregistre)[^.]*note[^.]*appel[ée]e?\\s+(.+?)\\s*(?:avec|contenant|:)\\s*(.+)",
         RegexOption.IGNORE_CASE
     )
     private val appendNoteRegex = Regex(
-        "(?:ajoute|compl[èe]te)[^.]*note\\s+(.+?)\\s*(?:avec|contenant|disant|:)\\s*(.+)",
+        "(?:ajoute|compl[èe]te|mets? [àa] jour|modifie)[^.]*note\\s+(.+?)\\s*(?:avec|contenant|disant|:)\\s*(.+)",
         RegexOption.IGNORE_CASE
     )
     private val readNoteRegex = Regex(
-        "(?:lis|lire|montre(?:-moi)?|affiche(?:-moi)?|ouvre)[^.]*note\\s+(.+)",
+        "(?:lis|lire|montre(?:-moi)?|affiche(?:-moi)?|ouvre|que dit|qu['’]y a[- ]t[- ]il dans)[^.]*note\\s+(.+)",
         RegexOption.IGNORE_CASE
     )
     private val listNotesRegex = Regex(
