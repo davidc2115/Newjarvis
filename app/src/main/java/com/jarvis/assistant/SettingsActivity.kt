@@ -21,7 +21,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.jarvis.assistant.databinding.ActivitySettingsBinding
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 /** Réglages : choix de la couleur d'accent du thème (bulles utilisateur, bouton d'envoi...). */
 class SettingsActivity : AppCompatActivity() {
@@ -248,7 +250,15 @@ class SettingsActivity : AppCompatActivity() {
                 // onlyAuthorized = false : montre TOUS les comptes Google du téléphone, pas
                 // seulement ceux déjà liés -- c'est ce qui permet d'en ajouter un nouveau (voir
                 // GoogleAccountController -- multi-comptes).
-                val credential = GoogleAccountController.signIn(this@SettingsActivity, webClientId, onlyAuthorized = false)
+                // withTimeout : sans ça, si le sélecteur de compte système ne répond jamais
+                // (vécu : Play Services obsolète/dégradé sur certains téléphones Xiaomi/MIUI),
+                // l'appli reste bloquée indéfiniment sans le moindre signe visible -- ni succès
+                // ni erreur -- ce qui est indiscernable pour l'utilisateur d'un bouton qui "ne
+                // fait rien". Avec le timeout, on obtient au moins un message clair au bout de
+                // 20s au lieu d'un silence total.
+                val credential = withTimeout(20_000L) {
+                    GoogleAccountController.signIn(this@SettingsActivity, webClientId, onlyAuthorized = false)
+                }
                 val email = credential.email ?: credential.id
                 val displayName = credential.displayName ?: email
 
@@ -281,6 +291,17 @@ class SettingsActivity : AppCompatActivity() {
                             "${e.javaClass.simpleName}: ${e.message ?: "?"}"
                         )
                     }
+                )
+            } catch (e: TimeoutCancellationException) {
+                Log.e("JarvisGoogleAuth", "signIn() n'a jamais répondu (timeout 20s)", e)
+                showCopyableErrorDialog(
+                    "Aucune réponse de Google",
+                    "Le sélecteur de compte Google n'a pas répondu après 20 secondes -- ni succès, ni erreur. " +
+                        "Causes fréquentes : Google Play Services obsolète ou dégradé sur ce téléphone " +
+                        "(vérifie les mises à jour dans le Play Store), aucun compte Google ajouté sur le " +
+                        "téléphone (Réglages Android > Comptes), ou une restriction MIUI qui bloque " +
+                        "silencieusement l'écran système. Réessaie après avoir vérifié ces points.\n\n" +
+                        "Détail technique : ${e.javaClass.simpleName}: ${e.message ?: "?"}"
                 )
             } catch (e: CancellationException) {
                 // Le Job de lifecycleScope est annulé si l'Activity est détruite/recréée
