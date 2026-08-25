@@ -92,6 +92,7 @@ class SettingsActivity : AppCompatActivity() {
 
         setupModelSelection()
         setupGoogleAccountSection()
+        setupObsidianSection()
     }
 
     private fun selectColor(color: Int) {
@@ -226,6 +227,51 @@ class SettingsActivity : AppCompatActivity() {
      * et Mail (GmailApiController), demande explicite de l'utilisateur de repasser sur l'API
      * OAuth officielle plutôt que CalendarContract/IMAP.
      */
+    // Vault Obsidian (voir ObsidianController) -- OpenDocumentTree() est le seul moyen sous
+    // scoped storage (Android 10+) de laisser l'utilisateur choisir un dossier ARBITRAIRE
+    // (pas juste un fichier) avec un acces lecture/ecriture qui survit au redemarrage de
+    // l'appli -- d'ou takePersistableUriPermission juste apres, sans quoi l'acces expirerait
+    // a la fin de ce processus.
+    private val obsidianVaultPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri -> onObsidianVaultChosen(uri) }
+
+    private fun onObsidianVaultChosen(uri: android.net.Uri?) {
+        if (uri == null) return // l'utilisateur a annule le selecteur, rien a faire
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (e: Exception) {
+            showCopyableErrorDialog(
+                "Impossible de garder l'accès à ce dossier",
+                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+            )
+            return
+        }
+        Prefs.setObsidianVaultUri(this, uri.toString())
+        refreshObsidianVaultStatus()
+        Toast.makeText(this, "✅ Vault Obsidian sélectionné.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun setupObsidianSection() {
+        binding.chooseObsidianVaultButton.setOnClickListener { obsidianVaultPickerLauncher.launch(null) }
+        refreshObsidianVaultStatus()
+    }
+
+    private fun refreshObsidianVaultStatus() {
+        val root = ObsidianController.getVaultRoot(this)
+        if (root != null) {
+            val label = root.name ?: root.uri.lastPathSegment ?: root.uri.toString()
+            binding.obsidianVaultStatus.text = getString(R.string.obsidian_vault_selected, label)
+            binding.chooseObsidianVaultButton.text = getString(R.string.obsidian_change_vault_button)
+        } else {
+            binding.obsidianVaultStatus.text = getString(R.string.obsidian_no_vault)
+            binding.chooseObsidianVaultButton.text = getString(R.string.obsidian_choose_vault_button)
+        }
+    }
+
     private fun setupGoogleAccountSection() {
         binding.googleWebClientIdInput.setText(Prefs.getGoogleWebClientId(this).orEmpty())
         binding.googleWebClientIdInput.setOnFocusChangeListener { _, hasFocus ->

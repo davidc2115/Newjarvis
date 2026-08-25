@@ -51,6 +51,12 @@ object CommandInterpreter {
         object ReadUnreadEmails : Command()
         data class SearchEmail(val query: String) : Command()
         data class SendEmail(val to: String, val body: String) : Command()
+        // Notes Obsidian (voir ObsidianController -- vault SAF reel choisi par l'utilisateur
+        // dans Reglages, phase 1 du systeme second-brain, tache #211).
+        data class CreateNote(val title: String, val content: String) : Command()
+        data class ReadNote(val title: String) : Command()
+        object ListNotes : Command()
+        data class AppendNote(val title: String, val content: String) : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -204,6 +210,26 @@ object CommandInterpreter {
     )
     private val sendEmailRegex = Regex(
         "envoie[^.]*(?:mail|email)[^.]*[àa]\\s+(\\S+@\\S+)\\D*?(?:disant|qui dit|:)\\s*(.+)",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Notes Obsidian (voir ObsidianController) -- vault reel choisi par l'utilisateur, pas
+    // un dossier interne. Titre capture en (.+?) non-gourmand comme createEventRegex : les
+    // titres de notes sont souvent multi-mots ("Reunion client mardi"), pas un seul token.
+    private val createNoteRegex = Regex(
+        "(?:cr[ée]e?|nouvelle)[^.]*note[^.]*appel[ée]e?\\s+(.+?)\\s*(?:avec|contenant|:)\\s*(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val appendNoteRegex = Regex(
+        "(?:ajoute|compl[èe]te)[^.]*note\\s+(.+?)\\s*(?:avec|contenant|disant|:)\\s*(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val readNoteRegex = Regex(
+        "(?:lis|lire|montre(?:-moi)?|affiche(?:-moi)?|ouvre)[^.]*note\\s+(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    private val listNotesRegex = Regex(
+        "liste[^.]*notes|quelles? notes|mes notes(?: obsidian)?|notes? du vault",
         RegexOption.IGNORE_CASE
     )
 
@@ -419,6 +445,27 @@ object CommandInterpreter {
             if (text.isNotBlank()) return Command.Notify(text)
         }
 
+        // Notes Obsidian -- ordre important : createNoteRegex/appendNoteRegex avant
+        // readNoteRegex (verbe different mais toutes contiennent le mot "note").
+        createNoteRegex.find(trimmed)?.let { match ->
+            val title = match.groupValues[1].trim()
+            val text = match.groupValues[2].trim()
+            if (title.isNotBlank() && text.isNotBlank()) return Command.CreateNote(title, text)
+        }
+
+        appendNoteRegex.find(trimmed)?.let { match ->
+            val title = match.groupValues[1].trim()
+            val text = match.groupValues[2].trim()
+            if (title.isNotBlank() && text.isNotBlank()) return Command.AppendNote(title, text)
+        }
+
+        readNoteRegex.find(trimmed)?.let { match ->
+            val title = cleanName(match.groupValues[1].trim())
+            if (title.isNotBlank()) return Command.ReadNote(title)
+        }
+
+        if (listNotesRegex.containsMatchIn(lower)) return Command.ListNotes
+
         return null
     }
 
@@ -475,6 +522,10 @@ Actions possibles (respecte exactement les noms des champs, JSON valide, une seu
 {"action":"read_unread_emails"}
 {"action":"search_email","query":"facture"}
 {"action":"send_email","to":"quelqu-un@exemple.com","body":"texte du mail"}
+{"action":"create_note","title":"Idee projet","content":"texte de la note"}
+{"action":"read_note","title":"Idee projet"}
+{"action":"list_notes"}
+{"action":"append_note","title":"Idee projet","content":"texte a ajouter"}
 {"action":"none"}
 
 Message de l'utilisateur : "$safeText"
@@ -575,6 +626,18 @@ JSON :"""
                 val to = str("to")
                 val body = str("body")
                 if (to.contains("@") && body.isNotBlank()) Command.SendEmail(to, body) else null
+            }
+            "create_note" -> {
+                val title = str("title")
+                val text = str("content")
+                if (title.isBlank() || text.isBlank()) null else Command.CreateNote(title, text)
+            }
+            "read_note" -> str("title").ifBlank { null }?.let { Command.ReadNote(it) }
+            "list_notes" -> Command.ListNotes
+            "append_note" -> {
+                val title = str("title")
+                val text = str("content")
+                if (title.isBlank() || text.isBlank()) null else Command.AppendNote(title, text)
             }
             else -> null
         }

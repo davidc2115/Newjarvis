@@ -39,6 +39,12 @@
     <string name="google_authorization_error">❌ Échec de l\'autorisation Gmail/Agenda : %1$s</string>
     <string name="google_account_linked">✅ Compte Google lié : %1$s (accès Gmail/Agenda autorisé).</string>
 
+    <string name="obsidian_section_label">Vault Obsidian</string>
+    <string name="obsidian_no_vault">Aucun vault choisi -- les notes ne peuvent pas être créées/lues tant qu'un dossier n'est pas sélectionné.</string>
+    <string name="obsidian_vault_selected">✅ Vault sélectionné : %1$s</string>
+    <string name="obsidian_choose_vault_button">📁 Choisir le dossier du vault</string>
+    <string name="obsidian_change_vault_button">Changer de dossier</string>
+
     <string name="email_title">Email</string>
     <string name="email_intro">Lecture (IMAP) et envoi (SMTP) directement depuis l\'app, sans passer par Google Cloud Console. Pour Gmail/Yahoo/Outlook, utilise un « mot de passe d\'application », pas ton mot de passe principal.</string>
     <string name="email_preset_label">Fournisseur</string>

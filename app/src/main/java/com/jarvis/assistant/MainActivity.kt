@@ -572,6 +572,60 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
+        // Notes Obsidian (voir ObsidianController) -- pas d'OAuth ici, juste SAF, donc pas
+        // besoin d'ensureGoogleToken : les erreurs ("aucun vault choisi"...) sont deja des
+        // messages clairs renvoyes par ObsidianController lui-meme (Result.failure).
+        if (command is CommandInterpreter.Command.CreateNote) {
+            lifecycleScope.launch {
+                val result = ObsidianController.createNote(this@MainActivity, command.title, command.content)
+                appendAssistantMessage(
+                    result.fold(
+                        onSuccess = { "\uD83D\uDCDD Note \u00ab ${command.title} \u00bb cr\u00e9\u00e9e dans le vault Obsidian." },
+                        onFailure = { e -> "\u274c ${e.message}" }
+                    )
+                )
+            }
+            return
+        }
+        if (command is CommandInterpreter.Command.ReadNote) {
+            lifecycleScope.launch {
+                val result = ObsidianController.readNote(this@MainActivity, command.title)
+                appendAssistantMessage(
+                    result.fold(
+                        onSuccess = { text -> "\uD83D\uDCD6 ${command.title} :\n\n$text" },
+                        onFailure = { e -> "\u274c ${e.message}" }
+                    )
+                )
+            }
+            return
+        }
+        if (command is CommandInterpreter.Command.ListNotes) {
+            lifecycleScope.launch {
+                val result = ObsidianController.listNotes(this@MainActivity)
+                appendAssistantMessage(
+                    result.fold(
+                        onSuccess = { notes ->
+                            if (notes.isEmpty()) "\uD83D\uDCC2 Le vault Obsidian est vide."
+                            else "\uD83D\uDCC2 ${notes.size} note(s) :\n\n" + notes.joinToString("\n") { "\u2022 $it" }
+                        },
+                        onFailure = { e -> "\u274c ${e.message}" }
+                    )
+                )
+            }
+            return
+        }
+        if (command is CommandInterpreter.Command.AppendNote) {
+            lifecycleScope.launch {
+                val result = ObsidianController.appendToNote(this@MainActivity, command.title, command.content)
+                appendAssistantMessage(
+                    result.fold(
+                        onSuccess = { "\uD83D\uDCDD Ajout\u00e9 \u00e0 la note \u00ab ${command.title} \u00bb." },
+                        onFailure = { e -> "\u274c ${e.message}" }
+                    )
+                )
+            }
+            return
+        }
         val reply = when (command) {
             is CommandInterpreter.Command.Flashlight -> {
                 val ok = DeviceController.setFlashlight(this, command.on)
@@ -721,6 +775,10 @@ class MainActivity : AppCompatActivity() {
             CommandInterpreter.Command.ReadUnreadEmails -> return // géré au-dessus (async)
             is CommandInterpreter.Command.SearchEmail -> return // géré au-dessus (async)
             is CommandInterpreter.Command.SendEmail -> return // géré au-dessus (async)
+            is CommandInterpreter.Command.CreateNote -> return // géré au-dessus (async, SAF)
+            is CommandInterpreter.Command.ReadNote -> return // géré au-dessus (async, SAF)
+            CommandInterpreter.Command.ListNotes -> return // géré au-dessus (async, SAF)
+            is CommandInterpreter.Command.AppendNote -> return // géré au-dessus (async, SAF)
         }
         appendAssistantMessage(reply)
     }

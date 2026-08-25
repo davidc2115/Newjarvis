@@ -371,6 +371,44 @@
         android:layout_marginEnd="16dp"
         android:layout_marginTop="10dp" />
 
+    <!-- Vault Obsidian (systeme de notes/second brain, voir ObsidianController) : dossier
+         reel choisi par l'utilisateur via SAF (Storage Access Framework), pas un dossier
+         interne cree par l'appli : demande explicite "vault reel". -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/obsidian_section_label"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp"
+        android:layout_marginStart="20dp"
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/obsidianVaultStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/obsidian_no_vault"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp"
+        android:layout_marginStart="20dp"
+        android:layout_marginEnd="20dp" />
+
+    <TextView
+        android:id="@+id/chooseObsidianVaultButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/obsidian_choose_vault_button"
+        android:textColor="@color/accent_default"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:background="@drawable/bg_new_conversation"
+        android:padding="12dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="10dp" />
+
     </LinearLayout>
     </ScrollView>
 
