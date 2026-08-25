@@ -1,5 +1,7 @@
 package com.jarvis.assistant
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
@@ -266,28 +268,40 @@ class SettingsActivity : AppCompatActivity() {
                     },
                     onFailure = { e ->
                         Log.e("JarvisGoogleAuth", "requestAuthorization a échoué", e)
-                        Toast.makeText(
-                            this@SettingsActivity,
-                            getString(
-                                R.string.google_authorization_error,
-                                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
-                            ),
-                            Toast.LENGTH_LONG
-                        ).show()
+                        showCopyableErrorDialog(
+                            getString(R.string.google_authorization_error, ""),
+                            "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+                        )
                     }
                 )
             } catch (e: Exception) {
                 Log.e("JarvisGoogleAuth", "signIn() a échoué", e)
-                Toast.makeText(
-                    this@SettingsActivity,
-                    getString(
-                        R.string.google_signin_error,
-                        "${e.javaClass.simpleName}: ${e.message ?: "?"}"
-                    ),
-                    Toast.LENGTH_LONG
-                ).show()
+                showCopyableErrorDialog(
+                    getString(R.string.google_signin_error, ""),
+                    "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+                )
             }
         }
+    }
+
+    /**
+     * Les Toast disparaissent en ~3s -- trop court pour lire/recopier une erreur technique
+     * (vécu : l'utilisateur ne pouvait recopier que des bribes du message). Une AlertDialog
+     * reste affichée et le texte peut être copié dans le presse-papier pour être recollé
+     * tel quel dans le chat JARVIS ou envoyé en support.
+     */
+    private fun showCopyableErrorDialog(title: String, detail: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title.trim().ifBlank { "Erreur" })
+            .setMessage(detail)
+            .setPositiveButton("Copier") { dialog, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Erreur JARVIS", detail))
+                Toast.makeText(this, "Copié.", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Fermer", null)
+            .show()
     }
 
     private fun refreshGoogleAccountsList() {
