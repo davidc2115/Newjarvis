@@ -176,7 +176,7 @@ object CalendarController {
     /** Normalisation accents/casse (voir ContactsController.normalize, même logique). */
     private fun normalize(s: String): String =
         java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
-            .replace(Regex("\p{Mn}+"), "")
+            .replace(Regex("\\p{Mn}+"), "")
             .lowercase()
             .trim()
 

@@ -196,7 +196,7 @@ object CommandInterpreter {
     // restreinte aux lettres/espaces/apostrophes/tirets : exclut naturellement "?" et autre
     // ponctuation de fin de phrase du nom capturé (pas besoin de nettoyage après-coup).
     private val eventsForCalendarRegex = Regex(
-        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*?\b(?:de|du|pour)\s+([\p{L} '’\-]{2,})",
+        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*?\\b(?:de|du|pour)\\s+([\\p{L} '’\\-]{2,})",
         RegexOption.IGNORE_CASE
     )
     // (.+?) au lieu de (\S+) pour le groupe date : permet de capturer des dates a plusieurs
