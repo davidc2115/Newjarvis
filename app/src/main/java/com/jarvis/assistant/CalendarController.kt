@@ -141,6 +141,75 @@ object CalendarController {
         return getEventsTimeRange(context, start, end, label)
     }
 
+    /**
+     * Planning d'un calendrier/compte PRECIS retrouvé par nom ("planning de Thomas", "agenda
+     * du compte pro") -- recherche insensible à la casse ET aux accents dans le nom affiché du
+     * calendrier (CALENDAR_DISPLAY_NAME, ex. "Anniversaires", un calendrier partagé nommé
+     * "Thomas"...) ET dans le compte propriétaire (ACCOUNT_NAME/OWNER_ACCOUNT, ex.
+     * "thomas@gmail.com"), pour couvrir aussi bien un calendrier PARTAGÉ par quelqu'un qu'un
+     * second compte Google de l'utilisateur lui-même. Si aucun calendrier ne correspond, on le
+     * dit clairement (avec la liste réelle des calendriers disponibles) plutôt que de retomber
+     * silencieusement sur "tout" -- c'est précisément le bug signalé ("il m'affiche toujours
+     * tous les plannings" pour une demande par nom, faute d'action dédiée jusqu'ici).
+     */
+    fun getEventsForCalendarMatching(context: Context, query: String, days: Int = 30): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission de lecture de l'agenda non accordée."
+        }
+        val matches = findCalendarsMatching(context, query)
+        if (matches.isEmpty()) {
+            val available = buildCalendarNameMap(context).values.toSet()
+            val suggestion = if (available.isEmpty()) {
+                "Aucun calendrier n'est disponible sur cet appareil."
+            } else {
+                "Calendriers disponibles : ${available.joinToString(", ")}."
+            }
+            return "❌ Aucun calendrier trouvé pour « $query ». $suggestion"
+        }
+        val ids = matches.map { it.first }
+        val label = "📅 Planning de ${matches.joinToString(" / ") { it.second }}"
+        val start = Calendar.getInstance().timeInMillis
+        val end = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, days) }.timeInMillis
+        return getEventsTimeRange(context, start, end, label, calendarIdsOverride = ids)
+    }
+
+    /** Normalisation accents/casse (voir ContactsController.normalize, même logique). */
+    private fun normalize(s: String): String =
+        java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\p{Mn}+"), "")
+            .lowercase()
+            .trim()
+
+    /** Calendriers dont le nom affiché OU le compte propriétaire contient [query] (voir
+     *  [normalize]) -- renvoie (ID, nom affiché lisible) pour chaque correspondance. */
+    private fun findCalendarsMatching(context: Context, query: String): List<Pair<Long, String>> {
+        val needle = normalize(query)
+        if (needle.isBlank()) return emptyList()
+        val results = mutableListOf<Pair<Long, String>>()
+        try {
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(
+                    CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                    CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.OWNER_ACCOUNT
+                ),
+                null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val displayName = c.getString(1) ?: ""
+                    val accountName = c.getString(2) ?: ""
+                    val owner = c.getString(3) ?: ""
+                    if (normalize(displayName).contains(needle) || normalize(accountName).contains(needle) ||
+                        normalize(owner).contains(needle)
+                    ) {
+                        results.add(c.getLong(0) to (displayName.ifBlank { accountName }))
+                    }
+                }
+            }
+        } catch (_: Exception) { /* liste vide en cas d'erreur, pas bloquant */ }
+        return results
+    }
+
     fun getUpcomingEvents(context: Context, days: Int = 7): String {
         val start = Calendar.getInstance().timeInMillis
         val end = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, days) }.timeInMillis
@@ -194,7 +263,13 @@ object CalendarController {
      * disparaître quasi tous les événements récurrents. Instances développe les récurrences en
      * occurrences réelles pour la plage demandée.
      */
-    private fun getEventsTimeRange(context: Context, startMillis: Long, endMillis: Long, title: String): String {
+    private fun getEventsTimeRange(
+        context: Context,
+        startMillis: Long,
+        endMillis: Long,
+        title: String,
+        calendarIdsOverride: List<Long>? = null
+    ): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return "❌ Permission de lecture de l'agenda non accordée."
         }
@@ -202,12 +277,15 @@ object CalendarController {
 
         // Par défaut, on se limite aux calendriers Google (voir getGoogleCalendarIds) pour ne
         // JAMAIS faire remonter un calendrier LOCAL du fabricant (Xiaomi/MIUI...) -- demande
-        // explicite de l'utilisateur : "Forcer Google Agenda uniquement".
+        // explicite de l'utilisateur : "Forcer Google Agenda uniquement". [calendarIdsOverride]
+        // permet de restreindre à un sous-ensemble précis (voir getEventsForCalendarMatching,
+        // "planning de Thomas") -- dans ce cas on fait confiance à la liste fournie plutôt que
+        // de la recroiser avec les IDs Google, l'appelant a déjà résolu les IDs voulus.
         var selection = "1 = 1"
         val selectionArgsList = mutableListOf<String>()
-        val googleIds = getGoogleCalendarIds(context)
-        if (googleIds.isNotEmpty()) {
-            selection += " AND ${CalendarContract.Instances.CALENDAR_ID} IN (${googleIds.joinToString(",")})"
+        val restrictIds = calendarIdsOverride ?: getGoogleCalendarIds(context)
+        if (restrictIds.isNotEmpty()) {
+            selection += " AND ${CalendarContract.Instances.CALENDAR_ID} IN (${restrictIds.joinToString(",")})"
         }
 
         return try {

@@ -45,6 +45,14 @@ object CommandInterpreter {
         // voir CalendarController.resolveLocalDate pour ce qui est reconnu) -- distinct de
         // TodayEvents (aujourd'hui uniquement) et WeekEvents (semaine entiere, offset -1/0/+1).
         data class EventsForDate(val dateStr: String) : Command()
+        // Planning d'un calendrier/compte PRECIS (ex. "planning de Thomas", "agenda du
+        // compte pro") -- distinct des commandes ci-dessus qui fusionnent TOUJOURS tous les
+        // calendriers synchronisés. Voir CalendarController.getEventsForCalendarMatching :
+        // recherche par nom de calendrier/compte (insensible à la casse/aux accents), pas une
+        // date. Ajouté suite au constat qu'une demande comme "affiche moi le planning de
+        // Thomas" retombait sur une commande générique (tout fusionné) faute de correspondre à
+        // TodayEvents/WeekEvents/EventsForDate.
+        data class EventsForCalendar(val query: String) : Command()
         // Email (IMAP/SMTP, voir EmailController) -- demande explicite utilisateur, porté
         // depuis l'ancienne appli sans passer par Google Cloud Console.
         data class ReadInbox(val count: Int) : Command()
@@ -179,6 +187,16 @@ object CommandInterpreter {
     )
     private val listCalendarsRegex = Regex(
         "liste[^.]*calendriers|quels? calendriers|mes calendriers",
+        RegexOption.IGNORE_CASE
+    )
+    // Planning d'un calendrier/compte PRECIS par nom ("planning de Thomas", "agenda du
+    // compte pro") -- vérifié APRES eventsForDateRegex/upcomingEventsRegex/listCalendarsRegex
+    // ci-dessus, donc ne se déclenche que si "de/du/pour X" n'était PAS une date reconnue ni
+    // une des phrases fixes "à venir"/"mes calendriers". Classe de caractères volontairement
+    // restreinte aux lettres/espaces/apostrophes/tirets : exclut naturellement "?" et autre
+    // ponctuation de fin de phrase du nom capturé (pas besoin de nettoyage après-coup).
+    private val eventsForCalendarRegex = Regex(
+        "(?:planning|agenda|[ée]v[ée]nements?|rendez-vous)[^.]*?\b(?:de|du|pour)\s+([\p{L} '’\-]{2,})",
         RegexOption.IGNORE_CASE
     )
     // (.+?) au lieu de (\S+) pour le groupe date : permet de capturer des dates a plusieurs
@@ -413,6 +431,11 @@ object CommandInterpreter {
 
         if (listCalendarsRegex.containsMatchIn(lower)) return Command.ListCalendars
 
+        eventsForCalendarRegex.find(trimmed)?.let { match ->
+            val query = cleanName(match.groupValues[1])
+            if (query.isNotBlank()) return Command.EventsForCalendar(query)
+        }
+
         bareWeekFollowupRegex.find(trimmed)?.let { match ->
             val phrase = match.groupValues[1].lowercase()
             val offset = when {
@@ -544,6 +567,7 @@ Actions possibles (respecte exactement les noms des champs, JSON valide, une seu
 {"action":"today_events"}
 {"action":"week_events","offset":0}
 {"action":"events_for_date","date":"demain"}
+{"action":"events_for_calendar","query":"Thomas"}
 {"action":"upcoming_events"}
 {"action":"list_calendars"}
 {"action":"create_event","title":"dentiste","date":"25/08","time":"14h30"}
@@ -641,6 +665,7 @@ JSON :"""
                 Command.WeekEvents(offset)
             }
             "events_for_date" -> str("date").ifBlank { null }?.let { Command.EventsForDate(it) }
+            "events_for_calendar" -> str("query").ifBlank { null }?.let { Command.EventsForCalendar(it) }
             "upcoming_events" -> Command.UpcomingEvents
             "list_calendars" -> Command.ListCalendars
             "create_event" -> {

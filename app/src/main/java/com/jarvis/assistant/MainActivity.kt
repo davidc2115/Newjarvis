@@ -452,6 +452,7 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.TodayEvents,
             is CommandInterpreter.Command.WeekEvents,
             is CommandInterpreter.Command.EventsForDate,
+            is CommandInterpreter.Command.EventsForCalendar,
             is CommandInterpreter.Command.UpcomingEvents,
             is CommandInterpreter.Command.ListCalendars -> listOf(Manifest.permission.READ_CALENDAR)
             // Mail + création/suppression d'événement : toujours via l'API Google OAuth (voir
@@ -570,6 +571,14 @@ class MainActivity : AppCompatActivity() {
             ensureGoogleTokensForAllAccounts { tokens ->
                 lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getEventsForDate(it, date) }) }
             }
+            return
+        }
+        if (command is CommandInterpreter.Command.EventsForCalendar) {
+            // Pas d'équivalent Google API ici (recherche par nom = spécifique à CalendarContract,
+            // voir CalendarController.getEventsForCalendarMatching) -- fonctionnalité NOUVELLE,
+            // donc pas de repli réseau nécessaire : le message d'erreur (calendrier introuvable
+            // / permission) est déjà clair par lui-même.
+            appendAssistantMessage(CalendarController.getEventsForCalendarMatching(this, command.query))
             return
         }
         if (command is CommandInterpreter.Command.UpcomingEvents) {
@@ -832,6 +841,7 @@ class MainActivity : AppCompatActivity() {
             CommandInterpreter.Command.TodayEvents -> return // géré au-dessus (async, OAuth)
             is CommandInterpreter.Command.WeekEvents -> return // géré au-dessus (async, OAuth)
             is CommandInterpreter.Command.EventsForDate -> return // géré au-dessus (async, OAuth)
+            is CommandInterpreter.Command.EventsForCalendar -> return // géré au-dessus (local, CalendarContract)
             CommandInterpreter.Command.UpcomingEvents -> return // géré au-dessus (async, OAuth)
             CommandInterpreter.Command.ListCalendars -> return // géré au-dessus (async, OAuth)
             is CommandInterpreter.Command.CreateEvent -> return // géré au-dessus (async, OAuth)
