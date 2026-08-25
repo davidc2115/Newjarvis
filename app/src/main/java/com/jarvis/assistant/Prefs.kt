@@ -114,8 +114,14 @@ object Prefs {
     private const val DEFAULT_GOOGLE_WEB_CLIENT_ID =
         "253880913410-74a517f8fdmouu01hkojh01durm80236.apps.googleusercontent.com"
 
-    fun getGoogleWebClientId(context: Context): String? =
-        prefs(context).getString(KEY_GOOGLE_WEB_CLIENT_ID, null) ?: DEFAULT_GOOGLE_WEB_CLIENT_ID
+    fun getGoogleWebClientId(context: Context): String? {
+        // isNullOrBlank() et pas juste null : une ancienne version de l'appli a pu enregistrer
+        // une chaîne vide (champ Réglages quitté sans saisie, avant l'ajout de cette valeur par
+        // défaut) -- cette préférence survit à une simple réinstallation par-dessus (pas un
+        // désinstall complet), donc un null-check seul ne suffisait pas à activer le défaut.
+        val saved = prefs(context).getString(KEY_GOOGLE_WEB_CLIENT_ID, null)
+        return if (saved.isNullOrBlank()) DEFAULT_GOOGLE_WEB_CLIENT_ID else saved
+    }
 
     fun setGoogleWebClientId(context: Context, id: String) {
         prefs(context).edit().putString(KEY_GOOGLE_WEB_CLIENT_ID, id).apply()
