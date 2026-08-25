@@ -138,6 +138,18 @@
             android:gravity="center"
             android:padding="12dp"
             android:background="@drawable/bg_new_conversation"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/openVaultButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/open_vault_button"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:padding="10dp"
+            android:background="@drawable/bg_conversation_item"
             android:layout_marginBottom="16dp" />
 
         <androidx.recyclerview.widget.RecyclerView

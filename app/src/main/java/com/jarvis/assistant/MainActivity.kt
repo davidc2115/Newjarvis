@@ -299,6 +299,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupTopBar() {
         binding.menuButton.setOnClickListener { binding.root.openDrawer(GravityCompat.START) }
         binding.settingsButton.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        binding.openVaultButton.setOnClickListener { startActivity(Intent(this, VaultActivity::class.java)) }
     }
 
     private fun setupInputBar() {

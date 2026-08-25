@@ -111,6 +111,11 @@
             android:label="@string/settings_title" />
 
         <activity
+            android:name=".VaultActivity"
+            android:exported="false"
+            android:label="@string/vault_title" />
+
+        <activity
             android:name=".EmailConfigActivity"
             android:exported="false"
             android:label="@string/email_title" />

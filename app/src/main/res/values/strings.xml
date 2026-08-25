@@ -41,6 +41,11 @@
     <string name="obsidian_vault_selected">✅ Vault sélectionné : %1$s</string>
     <string name="obsidian_choose_vault_button">📁 Choisir le dossier du vault</string>
     <string name="obsidian_change_vault_button">Changer de dossier</string>
+    <string name="open_vault_button">📓 Parcourir mes notes</string>
+    <string name="vault_title">Mes notes</string>
+    <string name="vault_no_vault_message">Aucun vault choisi -- va dans Réglages pour en sélectionner un dossier avant de pouvoir parcourir tes notes.</string>
+    <string name="vault_empty_message">Ce vault ne contient encore aucune note. Dis à JARVIS \"note que ...\" ou \"crée une note appelée ...\" pour commencer.</string>
+    <string name="vault_note_not_found">🔍 Note introuvable : « %1$s ».</string>
 
     <string name="email_title">Email</string>
     <string name="email_intro">Lecture (IMAP) et envoi (SMTP) directement depuis l\'app, sans passer par Google Cloud Console. Pour Gmail/Yahoo/Outlook, utilise un « mot de passe d\'application », pas ton mot de passe principal.</string>
