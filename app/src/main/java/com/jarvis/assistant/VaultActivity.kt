@@ -25,11 +25,18 @@ import kotlinx.coroutines.launch
  * tap avec ses [[wikilinks]] cliquables pour naviguer de note en note -- la façon dont on
  * utilise réellement Obsidian, pas juste du CRUD en ligne de commande.
  *
- * Volontairement simple (liste + lecture + navigation par wikilinks), pas un graphe visuel
- * (nœuds/arêtes) : c'est la version "on peut vraiment se balader dans son vault" en un
- * passage, le graphe visuel reste une amélioration possible ultérieure si demandée.
+ * Liste + lecture + navigation par wikilinks -- le complément visuel en nœuds/arêtes ("vue de
+ * la toile") est dans VaultGraphActivity (tâche #226), accessible via [vaultGraphButton] dans
+ * la barre du haut ; taper un nœud du graphe revient ici en mode détail directement (voir
+ * [EXTRA_OPEN_NOTE_TITLE]).
  */
 class VaultActivity : AppCompatActivity() {
+
+    companion object {
+        /** Ouvre directement une note precise au lancement (utilise par VaultGraphActivity
+         *  quand on tape un noeud du graphe) plutot que de passer par la liste d'abord. */
+        const val EXTRA_OPEN_NOTE_TITLE = "extra_open_note_title"
+    }
 
     private lateinit var binding: ActivityVaultBinding
 
@@ -49,6 +56,9 @@ class VaultActivity : AppCompatActivity() {
         applyWindowInsets()
 
         binding.vaultBackButton.setOnClickListener { onBackPressedFromVault() }
+        binding.vaultGraphButton.setOnClickListener {
+            startActivity(android.content.Intent(this, VaultGraphActivity::class.java))
+        }
 
         loadVault()
     }
@@ -102,6 +112,14 @@ class VaultActivity : AppCompatActivity() {
             } else {
                 binding.vaultEmptyText.visibility = View.GONE
                 renderList(notes)
+                // Ouverture directe demandee par VaultGraphActivity (tap sur un noeud du
+                // graphe) -- verifiee APRES renderList/showList pour repasser en mode detail
+                // par-dessus l'etat "liste" par defaut.
+                val openTitle = intent.getStringExtra(EXTRA_OPEN_NOTE_TITLE)
+                if (openTitle != null && allNoteTitles.any { it.equals(openTitle, ignoreCase = true) }) {
+                    noteBackStack.clear()
+                    showNote(openTitle)
+                }
             }
         }
     }

@@ -178,6 +178,59 @@ object ObsidianController {
         }
     }
 
+    /**
+     * Structure minimale pour la vue graphe (VaultGraphActivity, tâche #226) : un nœud = une
+     * note (titre lisible, sans .md ni chemin de sous-dossier -- cohérent avec [readNote] qui
+     * cherche déjà par titre nu, pas par chemin complet), une arête = un wikilink [[...]]
+     * trouvé dans son contenu vers une AUTRE note du vault (les liens vers un titre qui
+     * n'existe pas encore ne sont pas dessinés, il n'y a rien à relier).
+     */
+    data class NoteNode(val title: String, val linkedTitles: List<String>)
+
+    private val wikilinkPattern = Regex("\\[\\[([^\\[\\]]+)\\]\\]")
+
+    /** Parcourt tout le vault UNE fois et construit la liste des nœuds + arêtes pour le graphe
+     *  -- lecture directe (pas via [readNote] qui referait une recherche par titre pour
+     *  chaque note, inutilement coûteux ici où on lit déjà tout). */
+    suspend fun loadGraph(context: Context): Result<List<NoteNode>> = withContext(Dispatchers.IO) {
+        val root = getVaultRoot(context)
+            ?: return@withContext Result.failure(IllegalStateException("Aucun vault Obsidian choisi -- va dans Réglages pour en sélectionner un."))
+        try {
+            val nodes = mutableListOf<NoteNode>()
+            val knownTitles = mutableSetOf<String>()
+            val pending = mutableListOf<Pair<String, DocumentFile>>()
+            fun walk(dir: DocumentFile) {
+                for (child in dir.listFiles()) {
+                    if (child.isDirectory) {
+                        walk(child)
+                    } else {
+                        val name = child.name ?: continue
+                        if (name.endsWith(".md", ignoreCase = true)) {
+                            val title = name.dropLast(3)
+                            knownTitles.add(title.lowercase())
+                            pending.add(title to child)
+                        }
+                    }
+                }
+            }
+            walk(root)
+            for ((title, file) in pending) {
+                val text = context.contentResolver.openInputStream(file.uri)?.use { stream ->
+                    BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).readText()
+                } ?: ""
+                val links = wikilinkPattern.findAll(text)
+                    .map { it.groupValues[1].trim() }
+                    .filter { it.isNotBlank() && it.lowercase() != title.lowercase() && knownTitles.contains(it.lowercase()) }
+                    .distinct()
+                    .toList()
+                nodes.add(NoteNode(title, links))
+            }
+            Result.success(nodes)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /** Ajoute du contenu à la fin d'une note existante (créée si absente) -- pratique pour la
      *  future note "Mémoire JARVIS" (phase suivante) qui s'enrichit au fil des conversations. */
     suspend fun appendToNote(context: Context, title: String, content: String): Result<Unit> = withContext(Dispatchers.IO) {

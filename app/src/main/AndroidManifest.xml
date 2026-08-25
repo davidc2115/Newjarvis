@@ -116,6 +116,11 @@
             android:label="@string/vault_title" />
 
         <activity
+            android:name=".VaultGraphActivity"
+            android:exported="false"
+            android:label="@string/vault_graph_title" />
+
+        <activity
             android:name=".EmailConfigActivity"
             android:exported="false"
             android:label="@string/email_title" />
