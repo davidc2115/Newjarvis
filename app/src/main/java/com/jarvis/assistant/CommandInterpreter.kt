@@ -159,11 +159,11 @@ object CommandInterpreter {
         RegexOption.IGNORE_CASE
     )
     private val searchEmailRegex = Regex(
-        "(?:cherche|recherche)[^.]*(?:mail|email)[^.]*sur\s+(.+)",
+        "(?:cherche|recherche)[^.]*(?:mail|email)[^.]*sur\\s+(.+)",
         RegexOption.IGNORE_CASE
     )
     private val sendEmailRegex = Regex(
-        "envoie[^.]*(?:mail|email)[^.]*[àa]\s+(\S+@\S+)\D*?(?:disant|qui dit|:)\s*(.+)",
+        "envoie[^.]*(?:mail|email)[^.]*[àa]\\s+(\\S+@\\S+)\\D*?(?:disant|qui dit|:)\\s*(.+)",
         RegexOption.IGNORE_CASE
     )
 
