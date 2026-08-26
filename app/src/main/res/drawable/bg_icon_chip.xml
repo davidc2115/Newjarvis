@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pastille décorative ronde derrière l'icône d'une carte de menu (pas cliquable en soi,
+     juste un repère visuel cohérent — dégradé cyan/violet discret sur fond sombre). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <gradient
+        android:type="linear"
+        android:angle="45"
+        android:startColor="#26E8B84B"
+        android:endColor="#26A9793A" />
+</shape>

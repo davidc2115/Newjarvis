@@ -1,50 +1,86 @@
 package com.jarvis.assistant
 
-import android.graphics.drawable.GradientDrawable
+import android.graphics.BitmapFactory
+import android.graphics.PorterDuff
+import android.text.method.LinkMovementMethod
+import android.util.Base64
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
-/**
- * Affiche les messages de la conversation active : bulle à droite (couleur d'accent choisie
- * dans Réglages) pour l'utilisateur, bulle translucide à gauche pour l'assistant.
- */
-class ChatAdapter(
-    private val messages: List<Message>,
-    private val accentColor: Int
-) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
-
-    companion object {
-        private const val TYPE_USER = 0
-        private const val TYPE_ASSISTANT = 1
-    }
+class ChatAdapter(private val messages: MutableList<Message>) :
+    RecyclerView.Adapter<ChatAdapter.MessageViewHolder>() {
 
     class MessageViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val text: TextView = view.findViewById(R.id.messageText)
+        val root: LinearLayout = view as LinearLayout
+        val bubbleContainer: LinearLayout = view.findViewById(R.id.bubbleContainer)
+        val senderLabel: TextView = view.findViewById(R.id.senderLabel)
+        val messageText: TextView = view.findViewById(R.id.messageText)
+        val messageImage: ImageView = view.findViewById(R.id.messageImage)
     }
 
-    override fun getItemViewType(position: Int): Int =
-        if (messages[position].isUser) TYPE_USER else TYPE_ASSISTANT
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-        val layout = if (viewType == TYPE_USER) R.layout.item_message_user else R.layout.item_message_assistant
-        val view = LayoutInflater.from(parent.context).inflate(layout, parent, false)
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
+        val view = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_message, parent, false)
         return MessageViewHolder(view)
+    }
+
+    override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
+        val message = messages[position]
+        val context = holder.root.context
+        // Les liens cliquables (tel:/mailto:/adresse) DANS le texte ne sont posés que si
+        // l'utilisateur a explicitement demandé à JARVIS de les activer (Prefs.isContactLinksEnabled)
+        // — plus d'activation automatique, et plus de rangée de boutons séparée sous la bulle,
+        // retirées à la demande explicite de l'utilisateur.
+        holder.messageText.text = MarkdownUtils.toSpannable(message.text, context)
+        holder.messageText.movementMethod = LinkMovementMethod.getInstance()
+
+        if (message.imageBase64 != null) {
+            try {
+                val bytes = Base64.decode(message.imageBase64, Base64.NO_WRAP)
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                holder.messageImage.setImageBitmap(bitmap)
+                holder.messageImage.visibility = View.VISIBLE
+            } catch (e: Exception) {
+                holder.messageImage.visibility = View.GONE
+            }
+        } else {
+            holder.messageImage.visibility = View.GONE
+        }
+
+        if (message.isUser) {
+            holder.senderLabel.text = "VOUS"
+            holder.bubbleContainer.setBackgroundResource(R.drawable.bg_bubble_user)
+            applyBubbleColorOverride(holder.bubbleContainer, Prefs.getChatBubbleUserColor(context))
+            holder.root.gravity = Gravity.END
+        } else {
+            holder.senderLabel.text = "JARVIS"
+            holder.bubbleContainer.setBackgroundResource(R.drawable.bg_bubble_ai)
+            applyBubbleColorOverride(holder.bubbleContainer, Prefs.getChatBubbleAiColor(context))
+            holder.root.gravity = Gravity.START
+        }
+    }
+
+    /**
+     * Applique une couleur de bulle personnalisée (via set_chat_theme depuis le chat/vocal)
+     * par-dessus le dégradé par défaut du thème — 0 = pas de surcharge, on garde le dégradé
+     * d'origine intact. setTint sur un GradientDrawable remplace le dégradé par une teinte
+     * plate : c'est le compromis attendu d'une personnalisation de couleur simple.
+     */
+    private fun applyBubbleColorOverride(view: LinearLayout, color: Int) {
+        if (color == 0) return
+        view.background?.mutate()?.setColorFilter(color, PorterDuff.Mode.SRC_IN)
     }
 
     override fun getItemCount(): Int = messages.size
 
-    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-        val message = messages[position]
-        val vh = holder as MessageViewHolder
-        vh.text.text = message.text
-        if (message.isUser) {
-            // .mutate() : une bulle par ViewHolder, sinon la teinte se répercuterait sur
-            // TOUTES les bulles (le drawable XML est partagé/mis en cache par défaut).
-            val bubble = vh.text.background?.mutate()
-            if (bubble is GradientDrawable) bubble.setColor(accentColor)
-        }
+    fun addMessage(message: Message) {
+        messages.add(message)
+        notifyItemInserted(messages.size - 1)
     }
 }

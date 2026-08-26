@@ -1,55 +1,113 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Écran d'exploration interactive de la Toile Obsidian : demandé explicitement par
+     l'utilisateur ("créer un système pour l'afficher de manière interactive pour voir
+     chaque lien et point"), distinct du petit orb en arrière-plan du chat : pan/zoom
+     tactile sur tout le graphe réel du vault, tap sur un nœud pour voir son détail. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@drawable/bg_app_gradient">
+    android:background="@color/background_dark">
 
-    <RelativeLayout
-        android:id="@+id/graphTopBar"
+    <com.jarvis.assistant.VaultGraphExplorerView
+        android:id="@+id/vaultGraphExplorer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:minHeight="56dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp">
-
-        <ImageButton
-            android:id="@+id/graphBackButton"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_centerVertical="true"
-            android:layout_alignParentStart="true"
-            android:background="@drawable/bg_icon_button"
-            android:src="@drawable/ic_back"
-            android:contentDescription="@string/vault_graph_title"
-            android:padding="8dp" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="12dp">
 
         <TextView
-            android:id="@+id/graphTitleText"
-            android:layout_width="wrap_content"
+            android:id="@+id/vaultGraphBackButton"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:text="←"
+            android:textSize="20sp"
+            android:textColor="@color/cyan_accent"
+            android:gravity="center"
+            android:background="@drawable/bg_icon_button" />
+
+        <TextView
+            android:id="@+id/vaultGraphTitle"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_centerInParent="true"
-            android:text="@string/vault_graph_title"
-            android:textColor="@color/text_primary"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:text="🌌 Toile Obsidian — exploration"
+            android:textColor="@color/cyan_accent"
             android:textSize="16sp"
             android:textStyle="bold" />
 
-    </RelativeLayout>
+        <TextView
+            android:id="@+id/vaultGraphNewFolderButton"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:text="+"
+            android:textSize="22sp"
+            android:textColor="@color/cyan_accent"
+            android:gravity="center"
+            android:background="@drawable/bg_icon_button" />
+
+    </LinearLayout>
 
     <TextView
-        android:id="@+id/graphEmptyText"
+        android:id="@+id/vaultGraphHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="64dp"
+        android:text="Pincer pour zoomer · glisser pour déplacer · toucher un point · double-tap pour recentrer"
+        android:textColor="@color/text_secondary"
+        android:textSize="11sp"
+        android:gravity="center"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp" />
+
+    <ScrollView
+        android:id="@+id/vaultGraphInfoPanelScroll"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/vault_no_vault_message"
-        android:textColor="@color/text_secondary"
-        android:textSize="14sp"
-        android:padding="24dp"
-        android:visibility="gone" />
+        android:layout_gravity="bottom"
+        android:maxHeight="320dp"
+        android:visibility="gone">
 
-    <com.jarvis.assistant.VaultGraphView
-        android:id="@+id/graphView"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
+        <LinearLayout
+            android:id="@+id/vaultGraphInfoPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_bubble_ai"
+            android:padding="16dp">
 
-</LinearLayout>
+            <TextView
+                android:id="@+id/vaultGraphNodeTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/vaultGraphNodeMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/vaultGraphNodeContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:layout_marginTop="10dp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</FrameLayout>

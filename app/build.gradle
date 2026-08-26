@@ -3,22 +3,38 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-// Projet remis à zéro à la demande explicite de l'utilisateur ("recommençons le projet
-// complètement") : toutes les fonctionnalités précédentes (IA, appels, SMS, contacts,
-// agenda, Obsidian, box internet, IA locale embarquée, wake-word...) ont été retirées.
-// Ce module ne garde que le strict nécessaire pour un projet Android minimal qui compile
-// et se lance (écran vide) — dépendances/permissions/build natif (NDK, sdcpp) à réajouter
-// au fur et à mesure de la reconstruction de chaque fonctionnalité, jamais avant.
 android {
     namespace 'com.jarvis.assistant'
     compileSdk 35
+    ndkVersion "27.0.12077973"
 
     defaultConfig {
         applicationId "com.jarvis.assistant"
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName "0.1-reset"
+        versionCode 5
+        versionName "5.0"
+
+        ndk {
+            // 32 bits (armeabi-v7a) retiré : llama.cpp utilise des instructions
+            // NEON fp16 (vld1q_f16) qui n'existent que sur 64 bits. Les téléphones
+            // modernes (2019+) sont quasiment tous en 64 bits de toute façon.
+            abiFilters 'arm64-v8a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17"
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
     }
 
     signingConfigs {
@@ -44,107 +60,131 @@ android {
 
     buildFeatures { viewBinding true }
 
-    // android-mail (JavaMail) embarque plusieurs META-INF/LICENSE.txt etc. identiques dans ses
-    // propres JARs -- sans cette exclusion, l'assemblage échoue avec "More than one file was
-    // found with OS independent path 'META-INF/...'" (conflit bien connu et documenté de cette
-    // lib sur Android, pas spécifique à ce projet).
-    // CI #2 a échoué malgré les excludes ci-dessus : le conflit réel était sur les variantes
-    // .md (META-INF/NOTICE.md), pas seulement .txt -- android-mail ET android-activation
-    // embarquent chacun leur propre copie identique de ces fichiers. Liste élargie à toutes
-    // les variantes usuelles pour éviter une 3e itération sur le même problème.
-    packagingOptions {
+    packaging {
         resources {
-            excludes += [
-                'META-INF/LICENSE.txt', 'META-INF/LICENSE.md', 'META-INF/LICENSE',
-                'META-INF/NOTICE.txt', 'META-INF/NOTICE.md', 'META-INF/NOTICE',
-                'META-INF/DEPENDENCIES'
-            ]
+            pickFirsts += ['**/libc++_shared.so', '**/libllama.so', 'META-INF/NOTICE.md', 'META-INF/LICENSE.md']
+            excludes += ['META-INF/DEPENDENCIES']
         }
     }
 }
 
-// FIX CI : une dépendance transitive (play-services-auth 21.6.0 ou googleid 1.2.0) tire
-// androidx.credentials en 1.6.0-beta01 malgré la version 1.5.0 déclarée explicitement
-// ci-dessous (résolution Gradle = plus haute version demandée, directe OU transitive gagne).
-// 1.6.x exige AGP 8.6.0 (ce projet est en 8.5.2, voir plus haut) -- on force donc la
-// résolution sur 1.5.0 pour toute la config, peu importe qui la redemande en interne.
-configurations.all {
-    resolutionStrategy {
-        force 'androidx.credentials:credentials:1.5.0'
-        force 'androidx.credentials:credentials-play-services-auth:1.5.0'
-    }
-}
-
 dependencies {
+    // ── Module natif isolé : génération d'image Stable Diffusion embarquée ─────
+    implementation project(':sdcpp')
+
+    // ── Core Android ──────────────────────────────────────────────────────────
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'com.google.android.material:material:1.12.0'
-    implementation 'androidx.activity:activity-ktx:1.9.1'
-
-    // Vault Obsidian reel (SAF -- Storage Access Framework, voir ObsidianController) :
-    // lecture/ecriture de fichiers via DocumentFile.fromTreeUri() plutot que java.io.File
-    // brut, seule approche fonctionnelle pour un dossier arbitraire choisi par l'utilisateur
-    // (hors stockage prive de l'appli) depuis Android 10+ (scoped storage).
-    implementation 'androidx.documentfile:documentfile:1.0.1'
-
-    // Écran de chat : liste de messages + sidebar rétractable des conversations.
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
-    implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
-
-    // Coroutines (lifecycleScope) pour les appels IA asynchrones sans bloquer l'UI.
+    implementation 'androidx.activity:activity-ktx:1.9.1'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.6'
+
+    // ── Réseau ────────────────────────────────────────────────────────────────
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    implementation 'org.json:json:20240303'
 
-    // Backend IA on-device : Gemini Nano via AICore (ML Kit GenAI Prompt API, gratuit, sans
-    // clé, aucune donnée envoyée à un serveur). API level 26+ requis (déjà notre minSdk).
-    // Uniquement fonctionnel sur les appareils compatibles AICore (voir GeminiNanoController).
-    implementation 'com.google.mlkit:genai-prompt:1.0.0-beta2'
+    // ── Accès SMB/CIFS générique (voir SmbController) — partage réseau (NAS, PC
+    // Windows, disque dur Freebox une fois son partage SMB activé côté Freebox OS).
+    // Bibliothèque Java pure, aucune dépendance native, aucune clé/API requise.
+    implementation 'eu.agno3.jcifs:jcifs-ng:2.1.10'
 
-    // Comprehension locale renforcee : ML Kit Entity Extraction (dates/heures, telephones,
-    // adresses...) -- 100% on-device comme genai-prompt ci-dessus : un petit modele (~5,6 Mo,
-    // francais) est telecharge UNE FOIS via Google Play Services puis toute l'inference se
-    // fait ensuite hors-ligne sur l'appareil, aucun texte envoye a un serveur pour l'analyse
-    // elle-meme (seul le telechargement initial du modele necessite une connexion, comme pour
-    // n'importe quelle mise a jour d'appli). Utilise en repli (voir EntityExtractorController)
-    // quand aucune regex de CommandInterpreter n'a reconnu une date/heure dans le message --
-    // vient s'ajouter aux regex, ne les remplace pas (demande explicite utilisateur : rester
-    // 100% local, pas de cloud, mais ameliorer la comprehension des demandes).
-    implementation 'com.google.mlkit:entity-extraction:16.0.0-beta6'
+    // ── IA embarquée : MediaPipe LLM Inference (.task) ────────────────────────
+    implementation 'com.google.mediapipe:tasks-genai:0.10.14'
 
-    // Backend IA on-device : Gemma 3 1B via LiteRT-LM (API Kotlin officielle et activement
-    // maintenue de Google AI Edge -- l'ancienne API MediaPipe "tasks-genai" est en mode
-    // maintenance seule depuis 2026 et n'est plus recommandée pour un nouveau projet).
-    // Contrairement à Gemini Nano, ne passe PAS par AICore : le modèle (.litertlm, ~555 Mo)
-    // est téléchargé séparément depuis Hugging Face et tourne dans le processus de l'appli
-    // (voir GemmaController + android:largeHeap ci-dessus). Fonctionne sur tout appareil
-    // Android suffisamment puissant, pas seulement les appareils compatibles AICore.
-    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.16.1'
+    // ── IA embarquée : ONNX Runtime GenAI (.onnx) ────────────────────────────
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.19.2'
 
-    // Connexion Google DIRECTEMENT depuis l'appli (demande explicite de l'utilisateur) : accès
-    // complet au compte Google configuré sur le téléphone (mail/agenda), avec possibilité de
-    // lier PLUSIEURS comptes Google différents. Deux briques distinctes, toutes deux
-    // officiellement recommandées par Google (l'ancienne GoogleSignInClient est dépréciée) :
-    //  - Credential Manager = AUTHENTIFICATION (qui est l'utilisateur, sélecteur de compte
-    //    natif du système).
-    //  - play-services-auth (AuthorizationClient) = AUTORISATION (accès aux données Gmail/
-    //    Agenda -- distinct de l'authentification, demande un consentement séparé par scope).
-    // Un ID client OAuth (Google Cloud Console, créé par l'utilisateur lui-même -- voir
-    // GoogleAccountController) reste indispensable dans les deux cas : c'est une exigence de
-    // l'infrastructure OAuth de Google elle-même, pas quelque chose que ce code peut contourner.
-    // 1.6.0+ exige AGP 8.6.0 (CI a échoué dessus -- ce projet utilise AGP 8.5.2, voir plus
-    // haut) ; 1.5.0 est la dernière version stable compatible avec l'AGP actuel.
-    implementation 'androidx.credentials:credentials:1.5.0'
-    implementation 'androidx.credentials:credentials-play-services-auth:1.5.0'
-    implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.0'
-    implementation 'com.google.android.gms:play-services-auth:21.6.0'
-
-    // Accès mail (demande explicite utilisateur : "regarde comme c'était sur l'ancienne appli")
-    // -- IMAP (lecture) + SMTP (envoi) directement depuis l'APK, avec un simple "mot de passe
-    // d'application" généré par l'utilisateur (myaccount.google.com > Sécurité > Mots de passe
-    // des applications, nécessite la validation en 2 étapes) : AUCUN Google Cloud Console, aucun
-    // ID client OAuth -- exactement l'approche retenue par l'ancienne version de ce projet
-    // (voir EmailController.kt) après plusieurs tentatives OAuth abandonnées. android-mail =
-    // portage JavaMail pour Android (le javax.mail standard n'est pas disponible sur Android).
+    // ── Email IMAP / SMTP ─────────────────────────────────────────────────────
+    // JavaMail portage Android — lecture IMAP + envoi SMTP
     implementation 'com.sun.mail:android-mail:1.6.7'
     implementation 'com.sun.mail:android-activation:1.6.7'
+
+    // ── Localisation ──────────────────────────────────────────────────────────
+    implementation 'com.google.android.gms:play-services-location:21.3.0'
+
+    // ── Médias / ExoPlayer (optionnel : meilleure gestion audio) ─────────────
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
+    implementation 'androidx.media3:media3-session:1.4.1'
+
+    // ── Détection de mot-clé dédiée (écoute permanente basse consommation) ────
+    // openWakeWord : 100% gratuit, SANS CLÉ NI COMPTE, hors-ligne et basse consommation
+    // (modèles ONNX exécutés via onnxruntime-android, déjà présent ci-dessus) — seul moteur
+    // utilisé, voir WakeWordService. Picovoice/Porcupine (moteur alternatif nécessitant un
+    // compte/une clé d'accès) retiré à la demande explicite de l'utilisateur.
+    implementation 'xyz.rementia:openwakeword:0.1.5'
 }
+
+// ── Modèles openWakeWord : téléchargés au moment du build (pas commités dans git, pour ne
+// pas alourdir le dépôt de binaires) depuis les releases officielles GitHub du projet
+// open-source openWakeWord (Apache-2.0, https://github.com/dscripka/openWakeWord), avec un
+// miroir PyPI en repli (même fichiers, hébergement différent — files.pythonhosted.org plutôt
+// que github.com, pour survivre à un blocage/souci ponctuel touchant l'un des deux). Le script
+// est idempotent (un fichier déjà présent n'est pas re-téléchargé).
+//
+// BUG RÉEL CORRIGÉ (signalement utilisateur : "le déclenchement vocal par mot ne fonctionne
+// pas") : jusqu'ici, un échec de TOUS les téléchargements laissait le build réussir quand même
+// (juste un message d'avertissement dans les logs, jamais vraiment lu) — l'APK partait alors en
+// production avec l'écoute permanente silencieusement cassée (aucun modèle présent), sans que
+// personne ne le sache avant un signalement utilisateur des semaines plus tard. Le build ÉCHOUE
+// désormais explicitement si un modèle manque encore après tous les repos, pour qu'un souci
+// réseau CI soit visible IMMÉDIATEMENT (build rouge) plutôt que de livrer une fonctionnalité
+// cassée en silence.
+task downloadWakeWordModels {
+    doLast {
+        def assetsDir = file("src/main/assets")
+        assetsDir.mkdirs()
+        def ghRelease = "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1"
+        def pypiMirror = "https://files.pythonhosted.org/packages/source/o/openwakeword/openwakeword-0.6.0.tar.gz"
+        def files = [
+            "melspectrogram.onnx" : ["${ghRelease}/melspectrogram.onnx"],
+            "embedding_model.onnx": ["${ghRelease}/embedding_model.onnx"],
+            "hey_jarvis.onnx"     : ["${ghRelease}/hey_jarvis_v0.1.onnx"],
+            "alexa.onnx"          : ["${ghRelease}/alexa_v0.1.onnx"],
+            "hey_mycroft.onnx"    : ["${ghRelease}/hey_mycroft_v0.1.onnx"]
+        ]
+        def failures = []
+        files.each { name, urls ->
+            def dest = new File(assetsDir, name)
+            if (dest.exists() && dest.length() > 0L) return
+
+            def done = false
+            urls.each { url ->
+                if (done) return
+                def maxAttempts = 3
+                def attempt = 1
+                while (attempt <= maxAttempts && !done) {
+                    try {
+                        println "📥 Téléchargement du modèle mot-clé (openWakeWord) : ${name} depuis ${url} (tentative ${attempt}/${maxAttempts})"
+                        new URL(url).openConnection().with { conn ->
+                            conn.connectTimeout = 20000
+                            conn.readTimeout = 30000
+                            conn.instanceFollowRedirects = true
+                            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; JARVIS-build)")
+                            dest.withOutputStream { out -> out << conn.inputStream }
+                        }
+                        done = dest.exists() && dest.length() > 0L
+                    } catch (Exception e) {
+                        println "⚠️ Tentative ${attempt}/${maxAttempts} échouée pour ${name} (${url}) : ${e.message}"
+                        dest.delete()
+                        if (attempt < maxAttempts) Thread.sleep(3000)
+                    }
+                    attempt++
+                }
+            }
+            if (!done) failures.add(name)
+        }
+        if (!failures.isEmpty()) {
+            throw new GradleException(
+                "Échec du téléchargement des modèles openWakeWord (mot-clé d'activation) : " +
+                failures.join(", ") + ". L'écoute permanente serait silencieusement cassée sans " +
+                "ces fichiers — build volontairement interrompu plutôt que de livrer une " +
+                "fonctionnalité cassée. Relance le build avec une connexion internet capable " +
+                "d'atteindre github.com."
+            )
+        }
+    }
+}
+preBuild.dependsOn downloadWakeWordModels

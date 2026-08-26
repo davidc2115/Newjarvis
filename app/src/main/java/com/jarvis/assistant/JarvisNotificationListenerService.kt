@@ -8,69 +8,83 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationManagerCompat
 
-/**
- * Lecture des notifications système des AUTRES applis (pas celles envoyées par JARVIS lui-même,
- * voir NotificationController pour ça -- clarification explicite de l'utilisateur : "je parlais
- * des notifications d'application Android").
- *
- * Accès spécial (comme MANAGE_EXTERNAL_STORAGE pour le stockage, voir StorageController) : ce
- * n'est PAS une permission runtime classique, impossible à demander via permissionLauncher.
- * L'utilisateur doit l'activer lui-même dans Réglages > Notifications > Accès aux notifications
- * (voir settingsIntent() ci-dessous), Android l'impose ainsi car c'est un accès très sensible
- * (lit le contenu de TOUTES les notifications, y compris codes de vérification, messages...).
- */
 class JarvisNotificationListenerService : NotificationListenerService() {
 
-    data class CapturedNotification(
-        val appLabel: String,
-        val title: String,
-        val text: String,
-        val postedAt: Long
-    )
-
     companion object {
-        private const val MAX_HISTORY = 50
+        val latestNotifications = mutableListOf<String>()
+        var isConnected = false
 
-        // En mémoire seulement (pas de persistance disque) : historique remis à zéro si le
-        // système tue le service, acceptable pour un simple "montre-moi mes dernières
-        // notifications" (pas un journal permanent).
-        private val history = ArrayDeque<CapturedNotification>()
+        fun getRecent(count: Int = 5): String {
+            if (!isConnected) {
+                return "⚠️ Le service de lecture des notifications n'est pas actif. Activez JARVIS dans Paramètres Android → Accès aux notifications."
+            }
+            if (latestNotifications.isEmpty()) {
+                return "🔔 Aucune notification récente enregistrée."
+            }
 
-        fun recent(limit: Int = 10): List<CapturedNotification> = synchronized(history) {
-            history.toList().takeLast(limit).reversed()
+            val sb = StringBuilder("🔔 **Dernières notifications reçues** :\n\n")
+            val items = latestNotifications.takeLast(count).reversed()
+            items.forEachIndexed { i, notif ->
+                sb.append("${i + 1}. $notif\n\n")
+            }
+            return sb.toString().trimEnd()
         }
 
-        fun isEnabled(context: Context): Boolean =
-            NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
-
-        fun settingsIntent(): Intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        fun checkAndRequestAccess(context: Context): String {
+            val enabledPackages = NotificationManagerCompat.getEnabledListenerPackages(context)
+            return if (enabledPackages.contains(context.packageName)) {
+                "✅ Service de lecture des notifications activé."
+            } else {
+                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+                "⚙️ Veuillez activer l'accès aux notifications pour JARVIS dans l'écran qui vient de s'ouvrir."
+            }
+        }
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification) {
-        // On ignore nos propres notifications (voir NotificationController) pour ne pas se
-        // citer soi-même dans l'historique.
-        if (sbn.packageName == packageName) return
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        isConnected = true
+    }
 
-        val extras = sbn.notification.extras
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        isConnected = false
+    }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        super.onNotificationPosted(sbn)
+        sbn ?: return
+
+        val pkg = sbn.packageName ?: "Inconnu"
+        if (pkg == packageName) return // Ignorer les notifications de JARVIS lui-même
+
+        val extras = sbn.notification?.extras ?: return
+        val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+
         if (title.isBlank() && text.isBlank()) return
 
-        val appLabel = try {
-            val pm = applicationContext.packageManager
-            pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString()
+        val appName = try {
+            val appInfo = packageManager.getApplicationInfo(pkg, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
         } catch (e: Exception) {
-            sbn.packageName
+            pkg
         }
 
-        synchronized(history) {
-            history.addLast(CapturedNotification(appLabel, title, text, sbn.postTime))
-            while (history.size > MAX_HISTORY) history.removeFirst()
+        val entry = "📱 **$appName** : $title ${if (text.isNotEmpty()) "— $text" else ""}"
+
+        synchronized(latestNotifications) {
+            latestNotifications.add(entry)
+            if (latestNotifications.size > 50) {
+                latestNotifications.removeAt(0)
+            }
         }
     }
 
-    override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        // Rien à faire : on garde l'historique même après disparition de la notif d'origine
-        // (l'utilisateur peut vouloir revoir une notif déjà balayée).
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        super.onNotificationRemoved(sbn)
     }
 }

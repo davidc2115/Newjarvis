@@ -1,103 +1,158 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Projet remis à zéro (voir MainActivity.kt) : permissions retirées, seront
-         réajoutées au fur et à mesure de la reconstruction de chaque fonctionnalité. -->
+    <!-- ── Réseau ────────────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
-    <!-- Lot 1 "contrôle téléphone" : permission "normale" (accordée automatiquement, pas de
-         dialogue runtime) qui permet à AlarmClock.ACTION_SET_ALARM/ACTION_SET_TIMER de sauter
-         l'écran de confirmation (EXTRA_SKIP_UI) : voir DeviceController.
-         BUG SIGNALÉ PERSISTANT confirmé par l'utilisateur (texte d'erreur exact obtenu grâce au
-         diagnostic Result<Unit>) : "SecurityException: Permission Denial: starting Intent
-         { act=android.intent.action.SET_ALARM cmp=com.android.deskclock/.HandleSetAlarmActivity }"
-         Note : android.permission.SET_ALARM (ci-dessus) N'EST PAS la permission requise ici : c'est
-         une confusion très répandue (même nom en apparence). L'appli Horloge d'AOSP/Pixel
-         (com.android.deskclock) protège son activité HandleSetAlarmActivity, celle qui reçoit
-         réellement ACTION_SET_ALARM, avec une permission complètement différente et plus
-         ancienne : com.android.alarm.permission.SET_ALARM (préfixe com.android.alarm, pas
-         android). Les deux existent en parallèle dans l'écosystème Android pour des raisons
-         historiques ; il faut déclarer les DEUX pour couvrir tous les appareils/apps Horloge. -->
-    <uses-permission android:name="android.permission.SET_ALARM" />
-    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- ── Audio / Micro ─────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Lot 2 "contrôle téléphone" : permissions dangereuses, demandées à l'exécution
-         (voir MainActivity.permissionLauncher) avant tout envoi de SMS ou appel. -->
-    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- ── Téléphone ─────────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
 
-    <!-- Lot 3 "contrôle téléphone" : lecture/création de contacts natifs, demandées à
-         l'exécution comme les permissions ci-dessus. -->
+    <!-- ── SMS / MMS ─────────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_MMS" />
+
+    <!-- ── Contacts ──────────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
 
-    <!-- Lot 4 "contrôle téléphone" : position GPS/réseau, demandée à l'exécution. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
-    <!-- Lot 5 "contrôle téléphone" : accès complet au stockage partagé (recherche/suppression
-         de fichiers). MANAGE_EXTERNAL_STORAGE (Android 10+) ne peut être accordée que via un
-         écran Réglages dédié (voir StorageController) : WRITE/READ_EXTERNAL_STORAGE couvrent
-         Android 9 et moins (maxSdkVersion 32 : ignorée par le système au-delà, comme il se
-         doit depuis le passage au scoped storage). -->
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
-
-    <!-- Lot 7 "contrôle téléphone" : notifications, permission dangereuse depuis Android 13
-         (API 33), demandée à l'exécution (sans objet sur les versions antérieures). -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Agenda (voir CalendarController) : lecture/écriture du calendrier LOCAL Android
-         (CalendarContract), synchronisé avec Google Agenda par le système lui-même si le
-         compte Google du téléphone a la synchro Agenda active : ce n'est PAS l'API Google
-         Calendar en ligne, donc aucun ID client OAuth requis pour ça (voir le commentaire
-         d'en-tête de CalendarController.kt). -->
+    <!-- ── Agenda ────────────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
-    <!-- Déclaration facultative : indique qu'on utilise le flash si présent, sans empêcher
-         l'installation sur un appareil qui n'en a pas (required="false"). -->
-    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <!-- ── Médias (Android 13+ = séparées, <13 = storage) ───────────────────── -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
 
-    <!-- BUG SIGNALÉ : réveil/minuteur répondaient "aucune appli Horloge trouvée" alors que
-         l'appli existe bien sur l'appareil. Cause réelle : depuis Android 11 (API 30), le
-         "package visibility" empêche par défaut une appli de résoudre un intent implicite
-         vers une autre appli tant qu'elle ne l'a pas explicitement déclaré ici. targetSdk 35
-         est largement concerné. Sans ce bloc, startActivity() sur ACTION_SET_ALARM/
-         ACTION_SET_TIMER/geo: peut lever ActivityNotFoundException même si une appli
-         Horloge/Cartes est bien installée. -->
+    <!-- ── Stockage (Android <= 12) ─────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <!-- Accès total au stockage (Android 11+) -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <!-- ── Caméra ────────────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- ── Localisation ──────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- ── Bluetooth ─────────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <!-- ── Notifications ─────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- ── Système ───────────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Exemption d'optimisation batterie : indispensable sur beaucoup de telephones (Xiaomi/MIUI
+         en tete) pour que l'ecoute permanente (WakeWordService) ne soit pas tuee par le systeme
+         apres quelques minutes en arriere-plan (voir requestBatteryExemptionButton). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.SET_ALARM" />
+    <!-- BUG RÉEL CORRIGÉ : sur certains ROM/OEM, com.android.deskclock.HandleSetAlarmActivity
+         exige EN PLUS cette permission custom (distincte de la permission standard ci-dessus)
+         pour accepter l'intent ACTION_SET_ALARM — sans elle, l'appel échouait avec
+         "Permission Denial: ... requires com.android.alarm.permission.SET_ALARM" alors même
+         que la permission standard était bien déclarée. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- ── Intégration Stable Diffusion WebUI via Termux (opt-in, voir TermuxController) ──
+         Permission dédiée exigée par Termux lui-même (com.termux.permission.RUN_COMMAND) pour
+         qu'une app tierce puisse lui envoyer des commandes — SANS ELLE, Termux refuse
+         silencieusement toute commande venant de JARVIS. Accordée par l'utilisateur via
+         Réglages système Android (pas une simple pop-up runtime, Termux l'exige via la page
+         "Autorisations" de l'app dans les paramètres Android), EN PLUS d'un réglage manuel
+         obligatoire à faire une seule fois DANS Termux (allow-external-apps=true dans
+         ~/.termux/termux.properties) que JARVIS ne peut pas modifier lui-même (sandbox
+         Android : chaque app a son propre répertoire privé, JARVIS n'a pas accès à celui de
+         Termux). Termux doit être installé par l'utilisateur lui-même (F-Droid recommandé,
+         la version Play Store ne supporte plus RUN_COMMAND). -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- targetSdkVersion >= 30 (Android 11+) : sans cette déclaration, JARVIS ne peut même
+         pas VÉRIFIER si Termux est installé ni lui envoyer d'intent (restriction de visibilité
+         des paquets) — l'appairage échouerait silencieusement, exactement le genre de bug
+         invisible que ce projet évite systématiquement ailleurs (voir FreeboxController). -->
     <queries>
+        <package android:name="com.termux" />
+
+        <!-- Même restriction de visibilité (Android 11+) pour l'appli Horloge/Réveil par
+             défaut : sans ces déclarations, intent.resolveActivity() renvoie TOUJOURS null
+             même quand une vraie appli Horloge est installée, et JARVIS répond à tort
+             "aucune application horloge n'est installée" (bug réel signalé par l'utilisateur,
+             alors que le téléphone en a bien une) — startActivity() aurait fonctionné sans
+             cette vérification, mais pas la vérification préalable elle-même. -->
         <intent>
             <action android:name="android.intent.action.SET_ALARM" />
         </intent>
         <intent>
-            <action android:name="android.intent.action.SET_TIMER" />
+            <action android:name="android.intent.action.SHOW_ALARMS" />
         </intent>
         <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="geo" />
+            <action android:name="android.intent.action.SET_TIMER" />
+        </intent>
+
+        <!-- Visibilité du service de reconnaissance vocale système (Android 11+) : requis pour
+             que SpeechRecognizer.createSpeechRecognizer() trouve le moteur par défaut du
+             téléphone : voir WakeWordService.startKeywordSpotting() (mode-clé libre, ex:
+             "Jarvis" seul ou tout autre mot personnalisé non couvert par un modèle openWakeWord
+             pré-entraîné). Sans cette déclaration, le service de reconnaissance reste invisible
+             et l'écoute échouerait silencieusement, comme pour Termux/Horloge ci-dessus. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 
-    <!-- Demande un tas mémoire plus grand au système : utile pour les modèles IA
-         embarqués (Gemini Nano/AICore tourne dans un processus système séparé et n'est pas
-         concerné, mais de futurs modèles chargés directement dans le processus de l'appli,
-         type MediaPipe/ONNX Runtime, en ont besoin). Ne garantit pas une RAM illimitée : la
-         limite réelle dépend toujours de l'appareil (Android l'accorde au mieux). -->
     <application
         android:name=".JarvisApplication"
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@drawable/ic_launcher"
         android:theme="@style/Theme.Jarvis"
-        android:largeHeap="true"
-        android:supportsRtl="true">
+        android:usesCleartextTraffic="true"
+        android:requestLegacyExternalStorage="true">
 
+        <!-- ── Activités ─────────────────────────────────────────────────────── -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Jarvis"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -108,37 +163,168 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
-            android:label="@string/settings_title" />
+            android:label="Paramètres"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
-            android:name=".VaultActivity"
+            android:name=".VoiceModeActivity"
             android:exported="false"
-            android:label="@string/vault_title" />
+            android:label="Mode vocal"
+            android:theme="@style/Theme.Jarvis"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
-            android:name=".VaultGraphActivity"
+            android:name=".PhoneControlActivity"
             android:exported="false"
-            android:label="@string/vault_graph_title" />
+            android:label="Contrôle téléphone"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".GitHubActivity"
+            android:exported="false"
+            android:label="GitHub"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".EmailConfigActivity"
             android:exported="false"
-            android:label="@string/email_title" />
+            android:label="Configuration Email IMAP/SMTP"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
 
-        <!-- Lot 8 "contrôle téléphone" : lecture des notifications système des autres applis
-             (voir JarvisNotificationListenerService). BIND_NOTIFICATION_LISTENER_SERVICE est un
-             permission "signature" détenue par le système : exported="false" + cette valeur
-             android:permission garantissent que seul le système peut lier ce service, jamais
-             une autre appli tierce. -->
+        <activity
+            android:name=".ObsidianActivity"
+            android:exported="false"
+            android:label="🧠 Second Brain — Obsidian"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".VaultGraphActivity"
+            android:exported="false"
+            android:label="🌌 Toile Obsidian — exploration"
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
+            android:name=".SmartHomeActivity"
+            android:exported="false"
+            android:label="☰ Menu JARVIS"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".HomeAssistantActivity"
+            android:exported="false"
+            android:label="Home Assistant"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".NetworkActivity"
+            android:exported="false"
+            android:label="Réseau local"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".MusicActivity"
+            android:exported="false"
+            android:label="Musique"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".GenerationActivity"
+            android:exported="false"
+            android:label="Génération IA"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- ── Receiver SMS (Validation des permissions SMS sur Android 10+) ── -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ── Service de lecture des notifications ───────────────────────────── -->
         <service
             android:name=".JarvisNotificationListenerService"
-            android:exported="false"
-            android:label="@string/app_name"
+            android:exported="true"
+            android:label="JARVIS — Lecteur de notifications"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- ── Service d'écoute permanente (mot-clé d'activation) ─────────────── -->
+        <service
+            android:name=".WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- ── Service de génération IA en arrière-plan (image/vidéo/site) ────── -->
+        <service
+            android:name=".GenerationService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- ── Serveur web local (hebergement d'un site JARVIS depuis le telephone) ── -->
+        <service
+            android:name=".LocalWebServerService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- ── Tuiles Paramètres rapides (Wi-Fi / Bluetooth téléphone) ─────────── -->
+        <service
+            android:name=".JarvisWifiTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher"
+            android:label="JARVIS Wi-Fi"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".JarvisBluetoothTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher"
+            android:label="JARVIS Bluetooth"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- ── Relance l'écoute permanente après redémarrage du téléphone ─────── -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ── Provider de fichiers (import/export) ───────────────────────────── -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

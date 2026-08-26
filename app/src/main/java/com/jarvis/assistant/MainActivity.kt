@@ -3,1123 +3,665 @@ package com.jarvis.assistant
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.drawable.GradientDrawable
-import android.os.Build
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import android.util.Base64
+import android.view.Gravity
+import android.view.View
+import android.widget.EditText
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.view.GravityCompat
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.lifecycle.lifecycleScope
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.google.mlkit.genai.common.FeatureStatus
-import com.jarvis.assistant.databinding.ActivityMainBinding
-import java.time.ZoneId
+import androidx.recyclerview.widget.RecyclerView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.UUID
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Locale
 
-/**
- * Écran de chat : liste de messages + barre de saisie, sidebar rétractable pour changer de
- * conversation, bouton réglages en haut à droite (couleur d'accent). Backend IA : Gemini Nano
- * on-device via AICore (voir GeminiNanoController) — gratuit, sans clé, mais seulement
- * disponible sur les appareils compatibles AICore (Pixel 8/9, Galaxy S24...).
- */
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
-    private lateinit var binding: ActivityMainBinding
-    private lateinit var conversations: MutableList<Conversation>
-    private lateinit var activeConversation: Conversation
-    private var accentColor: Int = 0
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var adapter: ChatAdapter
+    private lateinit var messageInput: EditText
+    private lateinit var statusText: TextView
+    // Nom d'affichage dynamique de l'assistant (voir Prefs.getAssistantDisplayName) — propriété
+    // de classe (pas juste un val local à onCreate) car utilisé aussi depuis sendMessage() et
+    // d'autres méthodes ; rafraîchi dans onCreate ET onResume pour refléter un changement de
+    // mot-clé d'écoute fait dans Réglages sans forcer à tuer/relancer cette Activity.
+    private var assistantName: String = "Jarvis"
+    private lateinit var ramUsageText: TextView
+    private lateinit var pendingImageBar: View
+    private lateinit var pendingImageThumbnail: ImageView
+    private var removePendingImageButtonRef: TextView? = null
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var conversationListContainer: LinearLayout
 
-    // Lot 2 "contrôle téléphone" (SMS/appels) : SEND_SMS et CALL_PHONE sont des permissions
-    // "dangereuses", il faut les demander à l'exécution. On mémorise la commande en attente
-    // pendant la durée du dialogue système, pour l'exécuter dès que l'utilisateur accepte
-    // (ou expliquer clairement si il refuse).
-    private var pendingCommand: CommandInterpreter.Command? = null
+    // Toile Obsidian en arriere-plan du chat (voir activity_main.xml) — demande explicitement
+    // par l'utilisateur pour que le graphe du vault (notes reelles + [[wikilinks]]) soit visible
+    // aussi derriere les messages, pas seulement dans VoiceModeActivity. rafraichie
+    // periodiquement (voir onCreate/repeatOnLifecycle) ET immediatement apres chaque reponse de
+    // JARVIS susceptible d'avoir cree/modifie une note, pour "grossir en temps reel".
+    private lateinit var chatBackgroundOrb: OrbView
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val command = pendingCommand
-        pendingCommand = null
-        if (command != null) {
-            if (results.values.all { it }) {
-                runDeviceCommand(command)
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+
+    private var pendingImageBase64: String? = null
+    private var pendingImageMime: String? = null
+    // Chemin disque + nom d'un fichier joint (photo OU document) en attente d'envoi — distinct
+    // de pendingImageBase64 (qui ne sert qu'à la "vision" IA). Permet à attach_contact_file de
+    // retrouver le fichier original plus tard, même une fois le message envoyé. Ce sont toujours
+    // ceux de la PREMIÈRE pièce jointe (compatibilité) — voir pendingExtraAttachments pour le reste.
+    private var pendingAttachmentPath: String? = null
+    private var pendingAttachmentName: String? = null
+
+    // Objet complet de la PREMIÈRE pièce jointe (y compris son extractedText éventuel, ex: un
+    // .docx en premier — les scalaires pendingImageBase64/pendingAttachmentPath ci-dessus n'en
+    // sont qu'un miroir partiel pour l'affichage/la compatibilité, la vraie source de vérité
+    // envoyée à l'IA est cet objet).
+    private var pendingPrimaryAttachment: Attachment? = null
+
+    // Pièces jointes au-delà de la première (plusieurs fichiers, ou contenu d'un dossier/PDF
+    // multi-pages) — voir Attachment.kt/AttachmentController.kt.
+    private val pendingExtraAttachments = mutableListOf<Attachment>()
+
+    private val micPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) openVoiceMode() else {
+            Toast.makeText(this, "Permission micro refusée", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Sélection de PLUSIEURS fichiers en une fois (images, vidéos, documents, zip, pdf...) —
+    // GetMultipleContents renvoie une liste d'URI même si l'utilisateur n'en choisit qu'un seul.
+    private val pickFilesLauncher = registerForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<@JvmSuppressWildcards Uri> ->
+        if (uris.isNotEmpty()) attachFiles(uris)
+    }
+
+    // Sélection d'un DOSSIER entier (ACTION_OPEN_DOCUMENT_TREE) — tous les fichiers directement
+    // à l'intérieur sont joints pour analyse (voir AttachmentController.listFolderChildren).
+    private val pickFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            val children = AttachmentController.listFolderChildren(this, treeUri)
+            if (children.isEmpty()) {
+                Toast.makeText(this, "Dossier vide ou illisible", Toast.LENGTH_SHORT).show()
             } else {
-                appendAssistantMessage("❌ Permission refusée -- impossible d'exécuter cette action sans elle.")
+                attachFiles(children)
             }
         }
-    }
-
-    // Dictée vocale (voir VoiceController.buildRecognizerIntent) -- axe "voix/personnalité
-    // JARVIS" : l'appli réécrite (squelette vierge, tâche #182) n'avait ni entrée ni sortie
-    // vocale contrairement à l'ancienne version. Ici : lance la dictée système, remplit le
-    // champ de saisie avec la meilleure hypothèse reconnue, puis envoie directement -- comme
-    // si l'utilisateur avait tapé le message lui-même.
-    private val speechRecognitionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val text = result.data
-            ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            ?.firstOrNull()
-        if (!text.isNullOrBlank()) {
-            binding.messageInput.setText(text)
-            sendMessage()
-        }
-    }
-
-    // Agenda + Mail via OAuth Google (voir GoogleCalendarApiController/GmailApiController) :
-    // équivalent de permissionLauncher/pendingCommand ci-dessus, mais pour l'écran de
-    // consentement Google (voir GoogleAccountController.requestAuthorization) au lieu d'une
-    // permission système -- ne se déclenche que si le jeton en cache (Prefs.getGoogleAccessToken)
-    // est absent/expiré ET que le compte n'a pas déjà autorisé silencieusement (cas normal après
-    // la 1ère fois, voir sa doc : hasResolution() == false).
-    private var pendingGoogleTokenCallback: ((String) -> Unit)? = null
-
-    private val googleAuthorizationLauncher = registerForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        val callback = pendingGoogleTokenCallback
-        pendingGoogleTokenCallback = null
-        val token = GoogleAccountController.handleAuthorizationResult(this, result.data)
-        if (token != null && callback != null) {
-            Prefs.setGoogleAccessToken(this, token)
-            callback(token)
-        } else if (callback != null) {
-            appendAssistantMessage(
-                "❌ Autorisation Google refusée ou annulée -- va dans Réglages > Compte(s) Google pour réessayer."
-            )
-        }
-    }
-
-    /**
-     * S'assure d'avoir un jeton d'accès Google valide avant [onToken], en le redemandant
-     * silencieusement (ou avec un écran de consentement si nécessaire) sinon. Si aucun compte
-     * Google n'a jamais été lié (voir Réglages > Compte(s) Google), l'échec est normal et
-     * explicite -- pas de plantage.
-     */
-    private fun ensureGoogleToken(onToken: (String) -> Unit) {
-        val cached = Prefs.getGoogleAccessToken(this)
-        if (cached != null) {
-            onToken(cached)
-            return
-        }
-        pendingGoogleTokenCallback = onToken
-        GoogleAccountController.requestAuthorization(
-            activity = this,
-            pendingIntentLauncher = googleAuthorizationLauncher,
-            onGranted = { token ->
-                pendingGoogleTokenCallback = null
-                if (token != null) {
-                    Prefs.setGoogleAccessToken(this, token)
-                    onToken(token)
-                } else {
-                    appendAssistantMessage("❌ Jeton d'accès Google indisponible -- réessaie depuis Réglages > Compte(s) Google.")
-                }
-            },
-            onFailure = { e ->
-                pendingGoogleTokenCallback = null
-                appendAssistantMessage(
-                    "❌ Aucun compte Google connecté ou autorisation refusée (${e.message}) -- " +
-                        "va dans Réglages > Compte(s) Google pour te connecter."
-                )
-            }
-        )
-    }
-
-    /**
-     * Comme ensureGoogleToken, mais pour une LECTURE (agenda/mails) qui doit interroger TOUS
-     * les comptes Google actuellement autorisés en même temps -- pas seulement le compte
-     * "actif" -- voir Prefs.getAllValidGoogleAccountTokens et son commentaire pour le pourquoi
-     * (limite de l'API Google : un seul jeton par défaut à la fois, contournée en réutilisant
-     * les jetons déjà obtenus tant qu'ils sont valides, sans forcer de nouveau sélecteur de
-     * compte). Si aucun jeton par-compte n'est encore en cache (première utilisation), retombe
-     * sur le flux à compte unique habituel, qui gère lui-même la demande d'autorisation.
-     */
-    private fun ensureGoogleTokensForAllAccounts(onTokens: (Map<String, String>) -> Unit) {
-        val cached = Prefs.getAllValidGoogleAccountTokens(this)
-        if (cached.isNotEmpty()) {
-            onTokens(cached)
-            return
-        }
-        ensureGoogleToken { token ->
-            val email = Prefs.getActiveGoogleAccountEmail(this) ?: "compte Google"
-            onTokens(mapOf(email to token))
-        }
-    }
-
-    /**
-     * Appelle [fetch] pour chaque (email, jeton) de [tokens] et concatène les résultats texte,
-     * préfixés par l'email seulement s'il y a plusieurs comptes (sinon superflu). Utilisé pour
-     * fusionner l'agenda/les mails de plusieurs comptes Google liés en une seule réponse.
-     */
-    private suspend fun mergeAcrossAccounts(tokens: Map<String, String>, fetch: suspend (String) -> String): String {
-        if (tokens.isEmpty()) return "\u274c Aucun compte Google disponible."
-        if (tokens.size == 1) return fetch(tokens.values.first())
-        // Boucle classique et pas joinToString { ... } -- son lambda de transformation n'est
-        // pas "suspend", appeler fetch() (suspend) a l'interieur ne compile pas.
-        val parts = mutableListOf<String>()
-        for ((email, token) in tokens) {
-            parts.add("\u2500\u2500\u2500 $email \u2500\u2500\u2500\n" + fetch(token))
-        }
-        return parts.joinToString("\n\n")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // BUG RÉEL CORRIGÉ (signalement utilisateur : titre/bouton réglages cachés sous la
-        // barre de statut) : sans cet appel EXPLICITE, le comportement edge-to-edge (contenu
-        // qui dessine sous les barres système, à charge pour l'appli de compenser via des
-        // insets) varie selon la version d'Android/le fabricant au lieu d'être garanti --
-        // sur certains appareils le système compense déjà tout seul (aucun souci), sur
-        // d'autres non, et notre propre compensation manuelle (applyWindowInsets) ne suffit
-        // alors plus puisqu'elle recevait des insets à zéro. Forcer explicitement le mode
-        // edge-to-edge rend applyWindowInsets() fiable sur TOUS les appareils.
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        setContentView(R.layout.activity_main)
 
-        applyWindowInsets()
-        VoiceController.init(this)
-        loadState()
-        setupChat()
-        setupSidebar()
-        setupTopBar()
-        setupInputBar()
-        NotificationController.ensureChannel(this)
+        showCrashReportIfAny()
+        BottomNav.setup(this, NavDestination.CHAT)
+        EdgeToEdgeHelper.applyTopInset(findViewById(R.id.headerRow))
+        EdgeToEdgeHelper.applyBottomInset(findViewById(R.id.bottomNavRoot))
+        // BUG RÉEL CORRIGÉ (signalement utilisateur : bouton "supprimer toutes les
+        // conversations" masqué par la barre/gestes de navigation Android) : le tiroir de
+        // conversations n'avait jamais reçu d'inset bas, contrairement au contenu principal
+        // ci-dessus -- son dernier élément (le bouton de suppression) se retrouvait donc
+        // littéralement sous la barre système en bord à bord (Android 15+).
+        EdgeToEdgeHelper.applyBottomInset(findViewById(R.id.conversationDrawer))
+
+        recyclerView = findViewById(R.id.recyclerView)
+        messageInput = findViewById(R.id.messageInput)
+        statusText = findViewById(R.id.statusText)
+        // Nom d'affichage dynamique (voir Prefs.getAssistantDisplayName, dérivé du mot-clé
+        // d'écoute) — demande utilisateur : "même si je change le nom de l'écoute, ça écrit
+        // toujours JARVIS partout". Titre et hint du champ de saisie (fixes jusqu'ici, "J A R
+        // V I S" en dur dans le layout XML et hint_message dans strings.xml) sont désormais
+        // dérivés du réglage, avec le même style espacé/majuscule que l'ancien titre statique.
+        assistantName = Prefs.getAssistantDisplayName(this)
+        findViewById<TextView>(R.id.titleText).text = assistantName.uppercase().toCharArray().joinToString(" ")
+        messageInput.hint = "Parlez ou écrivez à $assistantName…"
+        ramUsageText = findViewById(R.id.ramUsageText)
+        refreshRamUsage()
+        pendingImageBar = findViewById(R.id.pendingImageBar)
+        pendingImageThumbnail = findViewById(R.id.pendingImageThumbnail)
+        drawerLayout = findViewById(R.id.drawerLayout)
+        conversationListContainer = findViewById(R.id.conversationListContainer)
+        chatBackgroundOrb = findViewById(R.id.chatBackgroundOrb)
+        chatBackgroundOrb.visualStyle = OrbView.VisualStyle.OBSIDIAN_WEB
+        chatBackgroundOrb.state = OrbView.OrbState.IDLE
+        refreshChatOrbGraph()
+        // Rafraichissement periodique du graphe pendant que l'ecran de chat est au premier
+        // plan (RESUMED) : c'est ce qui fait "grossir en temps reel" la toile quand JARVIS
+        // cree/modifie des notes en arriere-plan (ex: remember_fact, obsidian_create_note...)
+        // sans attendre que l'utilisateur quitte/revienne sur l'ecran. Coroutine liee au
+        // lifecycle : se met en pause automatiquement hors RESUMED, pas de fuite ni de travail
+        // inutile en arriere-plan.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    delay(20_000)
+                    refreshChatOrbGraph()
+                }
+            }
+        }
+        // Compteur RAM (demande utilisateur) : rafraîchi plus souvent que le graphe (5s) car
+        // la RAM peut varier rapidement, notamment pendant le chargement/l'inférence d'un
+        // modèle IA local -- voir RamMonitor.kt.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    refreshRamUsage()
+                    delay(5_000)
+                }
+            }
+        }
+        val menuButton = findViewById<TextView>(R.id.menuButton)
+        val newConversationButton = findViewById<TextView>(R.id.newConversationButton)
+        val micButton = findViewById<TextView>(R.id.micButton)
+        val sendButton = findViewById<TextView>(R.id.sendButton)
+        val settingsButton = findViewById<TextView>(R.id.settingsButton)
+        val hubButton = findViewById<TextView>(R.id.hubButton)
+        val photoButton = findViewById<TextView>(R.id.photoButton)
+        val removePendingImageButton = findViewById<TextView>(R.id.removePendingImageButton)
+        removePendingImageButtonRef = removePendingImageButton
+
+        adapter = ChatAdapter(ConversationStore.messages)
+        recyclerView.layoutManager = LinearLayoutManager(this)
+        recyclerView.adapter = adapter
+        // Fond du chat personnalisable via set_chat_theme{target:"fond",...} — 0 = pas de
+        // surcharge, on garde le fond par défaut défini dans le layout/thème.
+        Prefs.getChatBackgroundColor(this).let { bg -> if (bg != 0) recyclerView.setBackgroundColor(bg) }
+
+        tts = TextToSpeech(this, this)
+
+        if (ConversationStore.messages.isEmpty()) {
+            // BUG RÉEL CORRIGÉ (signalement utilisateur : "le premier message de conversation
+            // écrit toujours Monsieur au lieu du nom que j'ai donné à JARVIS") : "Bonjour
+            // Monsieur" était figé en dur, sans lien avec le nom configuré -- remplacé par un
+            // "Bonjour" neutre (aucun titre/civilité n'est configurable par ailleurs, mieux
+            // vaut ne rien présumer que d'imposer "Monsieur") suivi du nom dynamique.
+            addMessage(
+                "Bonjour. Je suis $assistantName, votre assistant personnel avec contrôle complet du smartphone. " +
+                    "Je peux passer des appels, envoyer des SMS, lire vos emails, gérer vos médias, votre agenda et vos fichiers. " +
+                    "Que souhaitez-vous faire ?",
+                isUser = false,
+                speak = false
+            )
+        }
+
+        // Demande des permissions runtime principales au démarrage
+        PermissionsManager.requestMissingPermissions(this, PermissionsManager.REQUEST_ALL)
+
+        sendButton.setOnClickListener {
+            val text = messageInput.text.toString().trim()
+            val hasAttachment = pendingImageBase64 != null || pendingAttachmentPath != null || pendingExtraAttachments.isNotEmpty()
+            if (text.isNotEmpty() || hasAttachment) {
+                val totalCount = (if (pendingAttachmentPath != null) 1 else 0) + pendingExtraAttachments.size
+                val defaultText = when {
+                    totalCount > 1 -> "Analyse ces $totalCount fichiers joints."
+                    pendingImageBase64 != null -> "Décris cette image."
+                    else -> "Analyse ce fichier joint."
+                }
+                sendMessage(text.ifBlank { defaultText })
+                messageInput.text.clear()
+            }
+        }
+
+        micButton.setOnClickListener { checkPermissionAndOpenVoiceMode() }
+
+        // Appui simple = choisir un ou plusieurs fichiers (image/vidéo/document/zip/pdf...).
+        // Appui long = choisir un DOSSIER entier dont tous les fichiers seront joints.
+        photoButton.setOnClickListener { pickFilesLauncher.launch("*/*") }
+        photoButton.setOnLongClickListener {
+            Toast.makeText(this, "📂 Choisis un dossier — tous ses fichiers seront joints", Toast.LENGTH_SHORT).show()
+            pickFolderLauncher.launch(null)
+            true
+        }
+
+        removePendingImageButton.setOnClickListener { clearPendingImage() }
+
+        settingsButton.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        // Un seul bouton vers le menu complet — domotique, création IA, Second Brain
+        // Obsidian, contrôle téléphone, GitHub, réglages... tout est regroupé et
+        // organisé par sections dans SmartHomeActivity (voir son layout dédié).
+        hubButton.setOnClickListener {
+            startActivity(Intent(this, SmartHomeActivity::class.java))
+        }
+
+        menuButton.setOnClickListener {
+            refreshConversationList()
+            drawerLayout.openDrawer(Gravity.START)
+        }
+
+        newConversationButton.setOnClickListener {
+            ConversationStore.startNew(this)
+            adapter.notifyDataSetChanged()
+            drawerLayout.closeDrawer(Gravity.START)
+            addMessage("Nouvelle conversation démarrée. Que puis-je faire pour vous ?", isUser = false, speak = false)
+        }
+
+        findViewById<TextView>(R.id.deleteAllConversationsButton).setOnClickListener {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Supprimer toutes les conversations ?")
+                .setMessage("Tout l'historique de conversations sera supprimé définitivement. Cette action est irréversible.")
+                .setPositiveButton("Supprimer tout") { _, _ ->
+                    ConversationStore.clearAll(this)
+                    adapter.notifyDataSetChanged()
+                    refreshConversationList()
+                    drawerLayout.closeDrawer(Gravity.START)
+                    addMessage("Toutes les conversations ont été supprimées. Nouvelle conversation démarrée.", isUser = false, speak = false)
+                }
+                .setNegativeButton("Annuler", null)
+                .show()
+        }
+    }
+
+    /** Reconstruit la liste des conversations passées dans le tiroir latéral. */
+    private fun refreshConversationList() {
+        conversationListContainer.removeAllViews()
+        val conversations = ConversationHistoryManager.listAll(this)
+        val sdf = SimpleDateFormat("dd/MM HH:mm", Locale.FRENCH)
+
+        if (conversations.isEmpty()) {
+            val empty = TextView(this).apply {
+                text = "Aucune conversation enregistrée."
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 12f
+            }
+            conversationListContainer.addView(empty)
+            return
+        }
+
+        for (conv in conversations) {
+            val isActive = conv.id == ConversationStore.currentConversationId
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(12, 12, 12, 12)
+                setBackgroundResource(if (isActive) R.drawable.bg_bubble_ai else android.R.color.transparent)
+                val params = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                params.bottomMargin = 8
+                layoutParams = params
+            }
+
+            val titleView = TextView(this).apply {
+                text = conv.title
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 13f
+                maxLines = 2
+            }
+            val dateView = TextView(this).apply {
+                text = sdf.format(java.util.Date(conv.updatedAt))
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 10f
+            }
+
+            row.addView(titleView)
+            row.addView(dateView)
+
+            row.setOnClickListener {
+                ConversationStore.loadConversation(this, conv.id)
+                adapter.notifyDataSetChanged()
+                if (ConversationStore.messages.isNotEmpty()) {
+                    recyclerView.scrollToPosition(ConversationStore.messages.size - 1)
+                }
+                drawerLayout.closeDrawer(Gravity.START)
+            }
+
+            row.setOnLongClickListener {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Supprimer cette conversation ?")
+                    .setMessage(conv.title)
+                    .setPositiveButton("Supprimer") { _, _ ->
+                        ConversationHistoryManager.delete(this, conv.id)
+                        if (conv.id == ConversationStore.currentConversationId) {
+                            ConversationStore.startNew(this)
+                            adapter.notifyDataSetChanged()
+                        }
+                        refreshConversationList()
+                    }
+                    .setNegativeButton("Annuler", null)
+                    .show()
+                true
+            }
+
+            conversationListContainer.addView(row)
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        // Filet de sécurité pour le bug "titre/réglages caché sous la barre de statut" : si
-        // requestApplyInsets() appelé dans onCreate() n'a rien fait parce que la vue n'était
-        // pas encore attachée à la fenêtre à ce moment précis (cas documenté où l'appel est
-        // silencieusement ignoré), on le retente ici -- onResume() garantit que la fenêtre
-        // est bien attachée. Sans coût si les insets étaient déjà corrects.
-        ViewCompat.requestApplyInsets(binding.root)
+        assistantName = Prefs.getAssistantDisplayName(this)
+        findViewById<TextView>(R.id.titleText).text = assistantName.uppercase().toCharArray().joinToString(" ")
+        messageInput.hint = "Parlez ou écrivez à $assistantName…"
+        Prefs.getChatBackgroundColor(this).let { bg ->
+            recyclerView.setBackgroundColor(if (bg != 0) bg else android.graphics.Color.TRANSPARENT)
+        }
+        adapter.notifyDataSetChanged()
+        if (ConversationStore.messages.isNotEmpty()) {
+            recyclerView.scrollToPosition(ConversationStore.messages.size - 1)
+        }
+    }
 
-        // La couleur a pu changer dans Réglages entre-temps (activité séparée).
-        val current = Prefs.getAccentColor(this)
-        if (current != accentColor) {
-            accentColor = current
-            applyAccentColor()
-            refreshChat()
+    private fun checkPermissionAndOpenVoiceMode() {
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (granted) openVoiceMode() else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    private fun openVoiceMode() {
+        startActivity(Intent(this, VoiceModeActivity::class.java))
+    }
+
+    /**
+     * Traite une ou plusieurs pièces jointes d'un coup (choix multiple, ou contenu d'un
+     * dossier entier) — chaque fichier est copié en local, PUIS analysé par
+     * AttachmentController (extraction de texte, rendu de pages PDF en images, aperçu vidéo...).
+     * La toute première pièce jointe traitée alimente les champs legacy (pendingImageBase64/
+     * pendingAttachmentPath) pour rester compatible avec attach_contact_file ; tout le reste
+     * (y compris les pages supplémentaires d'un même PDF) va dans pendingExtraAttachments.
+     */
+    private fun attachFiles(uris: List<Uri>) {
+        CoroutineScope(Dispatchers.IO).launch {
+            var anyFailed = false
+            val newAttachments = mutableListOf<Attachment>()
+            for (uri in uris) {
+                val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+                val persisted = persistAttachmentCopy(uri, mimeType)
+                if (persisted == null) {
+                    anyFailed = true
+                    continue
+                }
+                val (path, name) = persisted
+                newAttachments.addAll(AttachmentController.process(this@MainActivity, path, name, mimeType))
+            }
+
+            withContext(Dispatchers.Main) {
+                if (newAttachments.isEmpty()) {
+                    Toast.makeText(this@MainActivity, "Impossible de lire ce(s) fichier(s)", Toast.LENGTH_SHORT).show()
+                    return@withContext
+                }
+                if (anyFailed) {
+                    Toast.makeText(this@MainActivity, "⚠️ Certains fichiers n'ont pas pu être lus", Toast.LENGTH_SHORT).show()
+                }
+
+                for (a in newAttachments) {
+                    if (pendingPrimaryAttachment == null) {
+                        // Première pièce jointe de ce lot — objet complet conservé tel quel
+                        // (extractedText inclus), + miroir dans les champs legacy pour
+                        // l'affichage/attach_contact_file.
+                        pendingPrimaryAttachment = a
+                        pendingAttachmentPath = a.path
+                        pendingAttachmentName = a.name
+                        if (a.imageBase64 != null) {
+                            pendingImageBase64 = a.imageBase64
+                            pendingImageMime = a.imageMime
+                        }
+                    } else {
+                        pendingExtraAttachments.add(a)
+                    }
+                }
+
+                if (pendingImageBase64 != null) {
+                    val bytes = Base64.decode(pendingImageBase64, Base64.NO_WRAP)
+                    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    pendingImageThumbnail.setImageBitmap(bmp)
+                    pendingImageThumbnail.visibility = View.VISIBLE
+                } else {
+                    pendingImageThumbnail.visibility = View.GONE
+                }
+
+                val totalCount = 1 + pendingExtraAttachments.size
+                removePendingImageButtonRef?.text = if (totalCount > 1) {
+                    "📎 $totalCount fichiers joints — ✕ tout retirer"
+                } else if (pendingImageBase64 != null) {
+                    "✕ retirer la photo"
+                } else {
+                    "📎 ${pendingAttachmentName ?: "fichier"} — ✕ retirer"
+                }
+                pendingImageBar.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    // Dossiers déjà gérés par JARVIS lui-même : si le fichier qu'on rejoint vit déjà dans l'un
+    // d'eux (ex: une image générée précédemment, rejointe depuis la galerie pour analyse), on ne
+    // doit PAS en faire une seconde copie dans Pieces-jointes-chat — le fichier original suffit.
+    private val jarvisManagedDirNames = listOf("JARVIS-Generated", "JARVIS-Generations", "JARVIS-Fichiers")
+
+    /**
+     * Si [uri] pointe déjà vers un fichier physiquement présent dans un dossier géré par JARVIS
+     * (voir jarvisManagedDirNames), renvoie directement son chemin réel sans copie — évite le
+     * doublon signalé ("cela ne les enregistre pas une seconde fois sur le smartphone").
+     * La colonne MediaStore "_data" est dépréciée mais reste renseignée pour les fichiers locaux
+     * issus de la galerie/du stockage partagé ; si absente ou hors dossier JARVIS, on retombe sur
+     * la copie classique.
+     */
+    private fun resolveExistingJarvisPath(uri: Uri): Pair<String, String>? {
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+                val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val name = if (nameIdx >= 0) cursor.getString(nameIdx) else null
+                val dataIdx = cursor.getColumnIndex("_data")
+                val dataPath = if (dataIdx >= 0) cursor.getString(dataIdx) else null
+                if (dataPath != null && jarvisManagedDirNames.any { dataPath.contains(it) } && java.io.File(dataPath).exists()) {
+                    dataPath to (name ?: java.io.File(dataPath).name)
+                } else null
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
     /**
-     * Compense le mode edge-to-edge (activé explicitement ci-dessus) : pousse la barre du
-     * haut sous la barre de statut, ET pousse le bas du contenu (donc la barre de saisie,
-     * tout en bas) au-dessus de la barre de navigation OU du clavier, selon lequel des deux
-     * est le plus grand -- corrige aussi le signalement utilisateur "la barre de saisie doit
-     * rester affichée au-dessus du clavier quand on tape" : en edge-to-edge, adjustResize
-     * (AndroidManifest) seul ne suffit plus, il faut lire explicitement l'inset IME.
+     * Copie le fichier pointé par [uri] dans le cache PRIVÉ de l'appli (jamais dans les
+     * Documents publics) : une pièce jointe envoyée dans le chat sert à l'ANALYSER, ce n'est
+     * pas une demande explicite de sauvegarde — avant ce correctif, chaque photo/document
+     * envoyé pour une simple question ("qu'y a-t-il sur cette photo ?") finissait quand même
+     * dupliqué en permanence dans Documents/JARVIS-Fichiers, visible dans le gestionnaire de
+     * fichiers, ce que l'utilisateur n'avait jamais demandé. Le cache reste lisible tout le
+     * temps de la conversation en cours (l'analyse IA, l'aperçu, et attach_contact_file en ont
+     * besoin), mais n'est ni visible dans les Documents ni sauvegardé, et Android peut le vider
+     * automatiquement — cohérent avec la limite déjà documentée d'attach_contact_file ("ne
+     * fonctionne que dans la même conversation, pas après un redémarrage de l'appli"). Si
+     * l'utilisateur veut vraiment garder le fichier, attach_contact_file en fait une copie
+     * PERMANENTE et délibérée dans la fiche du contact (PeopleController.addAttachment) —
+     * c'est le seul cas où une pièce jointe de chat doit survivre durablement.
      */
-    private fun applyWindowInsets() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            binding.topBar.setPadding(binding.topBar.paddingLeft, bars.top, binding.topBar.paddingRight, binding.topBar.paddingBottom)
-            binding.mainContent.setPadding(0, 0, 0, maxOf(bars.bottom, ime.bottom))
-            insets
-        }
-        // Signalement utilisateur persistant (bouton réglages/titre toujours caché sous la
-        // barre de statut malgré le listener ci-dessus) : sur certains appareils/versions,
-        // le tout premier passage d'insets a lieu AVANT que ce listener soit attaché (la
-        // fenêtre a déjà reçu ses insets initiaux au moment où onCreate() s'exécute), donc
-        // le callback ne se déclenche jamais tout seul. requestApplyInsets() force un nouveau
-        // passage explicite juste après l'avoir attaché -- fix documenté officiellement pour
-        // ce cas précis (voir developer.android.com/develop/ui/views/layout/edge-to-edge).
-        ViewCompat.requestApplyInsets(binding.root)
-    }
-
-    private fun loadState() {
-        accentColor = Prefs.getAccentColor(this)
-        conversations = Prefs.loadConversations(this)
-        if (conversations.isEmpty()) {
-            conversations.add(Conversation(UUID.randomUUID().toString(), "Nouvelle conversation"))
-            Prefs.saveConversations(this, conversations)
-        }
-        val activeId = Prefs.getActiveConversationId(this)
-        activeConversation = conversations.firstOrNull { it.id == activeId } ?: conversations.first()
-        Prefs.setActiveConversationId(this, activeConversation.id)
-    }
-
-    private fun setupChat() {
-        binding.messagesRecycler.layoutManager = LinearLayoutManager(this)
-        refreshChat()
-    }
-
-    private fun refreshChat() {
-        binding.conversationTitle.text = activeConversation.title
-        binding.messagesRecycler.adapter = ChatAdapter(activeConversation.messages, accentColor)
-        if (activeConversation.messages.isNotEmpty()) {
-            binding.messagesRecycler.scrollToPosition(activeConversation.messages.size - 1)
+    private fun persistAttachmentCopy(uri: Uri, mimeType: String): Pair<String, String>? {
+        resolveExistingJarvisPath(uri)?.let { return it }
+        return try {
+            val input = contentResolver.openInputStream(uri) ?: return null
+            val originalName = queryDisplayName(uri) ?: "piece_jointe_${System.currentTimeMillis()}"
+            val safeName = originalName.replace(Regex("[/\\\\:*?\"<>|]"), "-").trim()
+            val dir = java.io.File(cacheDir, "Pieces-jointes-chat").also { it.mkdirs() }
+            val destFile = java.io.File(dir, "${System.currentTimeMillis()}_$safeName")
+            input.use { inStream -> destFile.outputStream().use { outStream -> inStream.copyTo(outStream) } }
+            destFile.absolutePath to originalName
+        } catch (e: Exception) {
+            null
         }
     }
 
-    private fun setupSidebar() {
-        binding.conversationsRecycler.layoutManager = LinearLayoutManager(this)
-        refreshSidebar()
-
-        binding.newConversationButton.setOnClickListener {
-            val fresh = Conversation(UUID.randomUUID().toString(), "Nouvelle conversation")
-            conversations.add(0, fresh)
-            activeConversation = fresh
-            Prefs.setActiveConversationId(this, fresh.id)
-            Prefs.saveConversations(this, conversations)
-            refreshChat()
-            refreshSidebar()
-            binding.root.closeDrawer(GravityCompat.START)
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
-    private fun refreshSidebar() {
-        binding.conversationsRecycler.adapter = ConversationAdapter(
-            conversations,
-            activeConversation.id,
-            onClick = { conversation ->
-                activeConversation = conversation
-                Prefs.setActiveConversationId(this, conversation.id)
-                refreshChat()
-                refreshSidebar()
-                binding.root.closeDrawer(GravityCompat.START)
-            },
-            onDelete = { conversation -> confirmDeleteConversation(conversation) }
+    private fun clearPendingImage() {
+        pendingImageBase64 = null
+        pendingImageMime = null
+        pendingAttachmentPath = null
+        pendingAttachmentName = null
+        pendingPrimaryAttachment = null
+        pendingExtraAttachments.clear()
+        pendingImageThumbnail.visibility = View.VISIBLE
+        pendingImageBar.visibility = View.GONE
+    }
+
+    private fun sendMessage(text: String) {
+        // Liste complète des pièces jointes (première + reste) réellement envoyée à l'IA — les
+        // champs legacy imageBase64/attachmentPath restent en plus pour compatibilité (aperçu UI,
+        // attach_contact_file).
+        val allAttachments = mutableListOf<Attachment>()
+        pendingPrimaryAttachment?.let { allAttachments.add(it) }
+        allAttachments.addAll(pendingExtraAttachments)
+
+        addMessage(
+            text, isUser = true, speak = false,
+            imageBase64 = pendingImageBase64, imageMime = pendingImageMime,
+            attachmentPath = pendingAttachmentPath, attachmentName = pendingAttachmentName,
+            attachments = allAttachments
+        )
+        clearPendingImage()
+        statusText.text = "● $assistantName réfléchit…"
+
+        // — Interception Obsidian Second Brain —
+        val obsidianReply = ObsidianController.handleVoiceCommand(this, text)
+        if (obsidianReply != null) {
+            addMessage(obsidianReply, isUser = false, speak = false)
+            statusText.text = "● en veille"
+            return
+        }
+
+        CoroutineScope(Dispatchers.Main).launch {
+            val result = ApiClient.sendChat(this@MainActivity, ConversationStore.history)
+            addMessage(
+                result.text, isUser = false, speak = false,
+                imageBase64 = result.imageBase64, imageMime = result.imageMime
+            )
+            statusText.text = "● en veille"
+            // Rafraichit la toile tout de suite après une réponse (au lieu d'attendre le
+            // prochain cycle de 20s) : c'est l'action qui vient d'avoir lieu (obsidian_create_note,
+            // remember_fact, wiki_page...) qui a le plus de chances d'avoir fait grossir le vault,
+            // donc la mise à jour "temps réel" doit être visible dès ce tour-ci.
+            refreshChatOrbGraph()
+        }
+    }
+
+    /**
+     * Recharge le VRAI graphe du vault (notes + [[wikilinks]], voir
+     * ObsidianController.buildVaultGraph) et l'applique à l'orb affichée en arrière-plan du
+     * chat — c'est ce qui la fait "grossir" avec de nouveaux nœuds/liens au fil de la
+     * conversation, exactement comme dans VoiceModeActivity. Travail disque en IO, mise à
+     * jour de la vue sur Main.
+     */
+    /** Compteur RAM utilisée (demande utilisateur) -- voir RamMonitor.kt. Colore le texte en
+     *  orange/alerte quand le système signale un niveau de mémoire bas, pour rendre visible
+     *  d'un coup d'œil qu'un modèle IA local pourrait échouer faute de RAM disponible. */
+    private fun refreshRamUsage() {
+        ramUsageText.text = RamMonitor.usageLabel(this)
+        ramUsageText.setTextColor(
+            if (RamMonitor.isLowMemory(this)) getColor(R.color.error_glow) else getColor(R.color.text_secondary)
         )
     }
 
-    private fun confirmDeleteConversation(conversation: Conversation) {
-        AlertDialog.Builder(this)
-            .setTitle("Supprimer la conversation ?")
-            .setMessage("« ${conversation.title} » sera définitivement supprimée.")
-            .setPositiveButton("Supprimer") { _, _ ->
-                conversations.remove(conversation)
-                if (conversations.isEmpty()) {
-                    conversations.add(Conversation(UUID.randomUUID().toString(), "Nouvelle conversation"))
-                }
-                if (activeConversation.id == conversation.id) {
-                    activeConversation = conversations.first()
-                    Prefs.setActiveConversationId(this, activeConversation.id)
-                }
-                Prefs.saveConversations(this, conversations)
-                refreshChat()
-                refreshSidebar()
-            }
-            .setNegativeButton("Annuler", null)
-            .show()
-    }
-
-    private fun setupTopBar() {
-        binding.menuButton.setOnClickListener { binding.root.openDrawer(GravityCompat.START) }
-        binding.settingsButton.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        binding.openVaultButton.setOnClickListener { startActivity(Intent(this, VaultActivity::class.java)) }
-        updateTtsToggleIcon()
-        binding.ttsToggleButton.setOnClickListener {
-            val enabled = !Prefs.isTtsEnabled(this)
-            Prefs.setTtsEnabled(this, enabled)
-            if (!enabled) VoiceController.stop()
-            updateTtsToggleIcon()
-        }
-    }
-
-    private fun updateTtsToggleIcon() {
-        binding.ttsToggleButton.setImageResource(
-            if (Prefs.isTtsEnabled(this)) R.drawable.ic_volume_up else R.drawable.ic_volume_off
-        )
-    }
-
-    private fun setupInputBar() {
-        applyAccentColor()
-        binding.sendButton.setOnClickListener { sendMessage() }
-        binding.micButton.setOnClickListener { launchVoiceInput() }
-    }
-
-    /** Lance la dictée vocale système (voir speechRecognitionLauncher ci-dessus). Si aucune
-     *  appli de reconnaissance vocale n'est disponible sur l'appareil (rare, mais possible sur
-     *  certaines ROM sans Google), on le signale clairement plutôt que de planter. */
-    private fun launchVoiceInput() {
-        val intent = VoiceController.buildRecognizerIntent()
-        if (intent.resolveActivity(packageManager) != null) {
-            speechRecognitionLauncher.launch(intent)
-        } else {
-            appendAssistantMessage("❌ Aucune application de reconnaissance vocale disponible sur cet appareil.")
-        }
-    }
-
-    private fun applyAccentColor() {
-        val sendBg = binding.sendButton.background?.mutate()
-        if (sendBg is GradientDrawable) sendBg.setColor(accentColor)
-
-        val newConvBg = binding.newConversationButton.background?.mutate()
-        if (newConvBg is GradientDrawable) newConvBg.setStroke(dpToPx(1), accentColor)
-        binding.newConversationButton.setTextColor(accentColor)
-    }
-
-    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
-
-    private fun sendMessage() {
-        val text = binding.messageInput.text?.toString()?.trim().orEmpty()
-        if (text.isBlank()) return
-
-        if (activeConversation.messages.isEmpty()) {
-            activeConversation.title = text.take(30)
-        }
-        activeConversation.messages.add(Message(text, isUser = true))
-        Prefs.saveConversations(this, conversations)
-        binding.messageInput.setText("")
-        refreshChat()
-        refreshSidebar()
-
-        val command = CommandInterpreter.parse(text)
-        if (command != null) {
-            executeDeviceCommand(command)
-        } else {
-            classifyThenReply(text)
-        }
-    }
-
-    /**
-     * Tool-calling IA (demande explicite utilisateur : "TOOLCALLING") : aucune regex de
-     * CommandInterpreter n'a matché, mais le message peut quand même être une demande d'action
-     * formulée différemment ("est-ce que tu peux prévenir Julie par téléphone" par exemple).
-     * On demande au backend IA actif de classifier l'intention en JSON strict (voir
-     * CommandInterpreter.buildClassificationPrompt) avant d'abandonner vers une réponse
-     * conversationnelle classique -- ainsi le modèle ne répond plus jamais "je suis un grand
-     * modèle linguistique..." à une demande d'action juste parce que la formulation exacte
-     * n'était pas dans la liste des regex.
-     */
-    private fun classifyThenReply(text: String) {
+    private fun refreshChatOrbGraph() {
         lifecycleScope.launch {
-            // Repli "comprehension locale renforcee" (ML Kit Entity Extraction, voir
-            // EntityExtractorController) -- verifie AVANT le classifieur IA local : plus
-            // rapide, deterministe une fois le modele telecharge, et comprend des tournures de
-            // date/heure que les regex de CommandInterpreter ne couvrent pas (ex. "mardi en
-            // huit"). Garde par mot-cle d'agenda (voir hasScheduleKeyword) pour rester ciblé.
-            val entityCommand = try {
-                EntityExtractorController.classifyScheduleFallback(text)
-            } catch (e: Exception) {
+            val graph = try {
+                withContext(Dispatchers.IO) { ObsidianController.buildVaultGraph(this@MainActivity) }
+            } catch (_: Exception) {
                 null
             }
-            if (entityCommand != null) {
-                executeDeviceCommand(entityCommand)
-                return@launch
-            }
-            val aiCommand = try {
-                classifyIntent(text)
-            } catch (e: Exception) {
-                null
-            }
-            if (aiCommand != null) {
-                executeDeviceCommand(aiCommand)
-            } else {
-                requestAiReply(buildConversationalPrompt(text))
+            if (graph != null) {
+                chatBackgroundOrb.graphData = graph
             }
         }
     }
 
-    /**
-     * Construit le prompt final envoyé au backend IA (Gemini Nano/Gemma) pour une réponse
-     * conversationnelle. Avant ça, requestAiReply recevait le message brut de l'utilisateur
-     * SANS AUCUN contexte -- ni préambule d'identité, ni historique de la conversation en
-     * cours, ni mémoire persistante : JARVIS "oubliait" tout d'un message à l'autre, même au
-     * sein de la même conversation (racine du "vrai assistant" demandé -- pas juste les
-     * notes). Ajoute : un court préambule, les derniers échanges (continuité immédiate), et
-     * le contenu de la note "Mémoire JARVIS" du vault Obsidian si elle existe (infos que
-     * l'utilisateur a explicitement demandé de retenir -- voir CommandInterpreter.memoryRegex,
-     * "retiens que..."). Volontairement compact (historique et mémoire tronqués) : les
-     * backends on-device ont un contexte réduit, un prompt trop long a déjà causé des échecs
-     * "conversation trop longue" par le passé sur ce projet.
-     */
-    private suspend fun buildConversationalPrompt(userText: String): String {
-        // Personnalite JARVIS (axe "vrai dialogue" -- demande explicite : une appli JARVIS/
-        // Ironman ne doit pas repondre comme un chatbot generique). Avant cette tache, le
-        // preambule etait strictement neutre ("reponds de facon naturelle, concise et utile") :
-        // aucune personnalite, aucun prenom utilisateur, aucune consigne de clarification. Le
-        // prenom (voir Prefs.getUserName, Reglages) reste optionnel -- jamais invente si non
-        // renseigne.
-        val userName = Prefs.getUserName(this)
-        val identity = if (userName != null) {
-            "l'assistant personnel de $userName"
+    private fun addMessage(
+        text: String,
+        isUser: Boolean,
+        speak: Boolean,
+        imageBase64: String? = null,
+        imageMime: String? = null,
+        attachmentPath: String? = null,
+        attachmentName: String? = null,
+        attachments: List<Attachment> = emptyList()
+    ) {
+        if (isUser) {
+            ConversationStore.addUser(text, imageBase64, imageMime, attachmentPath, attachmentName, attachments)
         } else {
-            "l'assistant personnel de l'utilisateur"
+            ConversationStore.addAssistant(text)
         }
-        val addressing = if (userName != null) {
-            " Adresse-toi \u00e0 $userName par son pr\u00e9nom, sans formule ampoul\u00e9e."
-        } else ""
-        val preamble = "Tu es JARVIS, $identity sur son t\u00e9l\u00e9phone Android, inspir\u00e9 du JARVIS " +
-            "d'Iron Man : loyal, pr\u00e9cis et efficace, avec une pointe d'humour discret -- jamais " +
-            "moqueur, jamais bavard pour rien. R\u00e9ponds de fa\u00e7on naturelle, chaleureuse et " +
-            "concise, en fran\u00e7ais.$addressing Si une demande est ambigu\u00eb ou incompl\u00e8te, " +
-            "pose une question courte pour clarifier plut\u00f4t que de deviner."
-        val memory = if (ObsidianController.hasVault(this)) {
-            ObsidianController.readNote(this, ObsidianController.MEMORY_NOTE_TITLE).getOrNull()
-        } else null
-        val memoryBlock = if (!memory.isNullOrBlank()) {
-            "\n\nCe que tu sais d\u00e9j\u00e0 sur l'utilisateur :\n" + memory.trim().take(800)
-        } else ""
-        // dropLast(1) : le dernier message de la conversation active est CE message (deja
-        // ajoute dans sendMessage() avant l'appel a classifyThenReply) -- il est deja passe
-        // separement via userText, on ne veut pas le dupliquer dans l'historique.
-        val history = activeConversation.messages.dropLast(1).takeLast(8)
-        val historyBlock = if (history.isEmpty()) "" else {
-            "\n\nHistorique r\u00e9cent :\n" + history.joinToString("\n") { m ->
-                "${if (m.isUser) "Utilisateur" else "JARVIS"} : ${m.text}"
-            }
-        }
-        return "$preamble$memoryBlock$historyBlock\n\nUtilisateur : $userText\nJARVIS :"
-    }
-
-    /**
-     * Envoie le prompt de classification au même backend que celui actif pour la conversation
-     * (voir Prefs.getSelectedModel) -- ni Gemini Nano ni Gemma n'exposent de function-calling
-     * natif sur Android, donc ceci reproduit le comportement par un prompt structuré demandant
-     * un JSON en sortie (voir CommandInterpreter.fromAiJson pour le parsing, tolérant aux
-     * erreurs). Renvoie null (jamais d'exception) si le backend n'est pas disponible/téléchargé,
-     * ou si la réponse n'est pas un JSON d'action reconnu -- dans tous les cas le message part
-     * alors normalement vers une réponse conversationnelle classique.
-     */
-    private suspend fun classifyIntent(text: String): CommandInterpreter.Command? {
-        val prompt = CommandInterpreter.buildClassificationPrompt(text)
-        val raw = when (Prefs.getSelectedModel(this)) {
-            Prefs.MODEL_LOCAL_LLM -> {
-                val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
-                if (!LocalLlmController.isDownloaded(this, model)) return null
-                LocalLlmController.generateReply(this, model, prompt)
-            }
-            else -> {
-                if (GeminiNanoController.checkStatus() != FeatureStatus.AVAILABLE) return null
-                GeminiNanoController.generateReply(prompt)
-            }
-        }
-        return CommandInterpreter.fromAiJson(raw)
-    }
-
-    /**
-     * Lot 1 "contrôle téléphone" (lampe/réveil/minuteur) : si le message tapé correspond à une
-     * commande reconnue (voir CommandInterpreter), on exécute directement l'action système au
-     * lieu d'appeler l'IA -- réponse immédiate, sans dépendre du modèle actif ni de sa capacité
-     * (ou non) à faire du function-calling.
-     */
-    private fun executeDeviceCommand(command: CommandInterpreter.Command) {
-        // Liste (pas juste une seule permission) depuis l'ajout de CallContact, qui a besoin
-        // à la fois de READ_CONTACTS (chercher le contact) et CALL_PHONE (composer le numéro).
-        val requiredPermissions = when (command) {
-            is CommandInterpreter.Command.Sms -> listOf(Manifest.permission.SEND_SMS)
-            is CommandInterpreter.Command.Call -> listOf(Manifest.permission.CALL_PHONE)
-            is CommandInterpreter.Command.CallContact ->
-                listOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE)
-            is CommandInterpreter.Command.CreateContact -> listOf(Manifest.permission.WRITE_CONTACTS)
-            is CommandInterpreter.Command.FindContact -> listOf(Manifest.permission.READ_CONTACTS)
-            is CommandInterpreter.Command.SyncContactsToVault -> listOf(Manifest.permission.READ_CONTACTS)
-            is CommandInterpreter.Command.GetLocation -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
-            is CommandInterpreter.Command.CreateKml -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
-            is CommandInterpreter.Command.Notify ->
-                if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
-            // Lecture du planning (TodayEvents/WeekEvents/EventsForDate/UpcomingEvents/
-            // ListCalendars) : lue directement depuis le calendrier LOCAL synchronisé du
-            // téléphone (voir CalendarController) pour une réponse instantanée, sans appel
-            // réseau -- demande explicite de l'utilisateur ("coupler à l'agenda synchronisé
-            // sur le téléphone pour une réponse plus rapide"). READ_CALENDAR est donc à
-            // nouveau une permission runtime nécessaire pour CES commandes précisément
-            // (création/suppression d'événement restent sur l'API Google OAuth, voir plus bas).
-            is CommandInterpreter.Command.TodayEvents,
-            is CommandInterpreter.Command.WeekEvents,
-            is CommandInterpreter.Command.EventsForDate,
-            is CommandInterpreter.Command.EventsForCalendar,
-            is CommandInterpreter.Command.UpcomingEvents,
-            is CommandInterpreter.Command.ListCalendars -> listOf(Manifest.permission.READ_CALENDAR)
-            // Mail + création/suppression d'événement : toujours via l'API Google OAuth (voir
-            // GoogleCalendarApiController/GmailApiController) -- le "consentement" équivalent
-            // est géré par ensureGoogleToken()/ensureGoogleTokensForAllAccounts() (écran
-            // d'autorisation Google, pas une permission système).
-            else -> emptyList()
-        }
-        val missingPermissions = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missingPermissions.isNotEmpty()) {
-            pendingCommand = command
-            permissionLauncher.launch(missingPermissions.toTypedArray())
-            return
-        }
-
-        // Accès aux notifications (JarvisNotificationListenerService) : comme
-        // MANAGE_EXTERNAL_STORAGE ci-dessous, ce n'est pas une permission runtime classique --
-        // seul un écran Réglages dédié permet de l'activer, aucun callback exploitable ici non
-        // plus donc on redemande simplement de retaper la requête une fois l'accès activé.
-        if (command is CommandInterpreter.Command.ShowNotifications &&
-            !JarvisNotificationListenerService.isEnabled(this)
-        ) {
-            appendAssistantMessage(
-                "🔔 J'ai besoin de l'autorisation \"Accès aux notifications\" pour ça -- " +
-                    "je t'ouvre l'écran Réglages, active JARVIS puis retape ta demande."
-            )
-            startActivity(JarvisNotificationListenerService.settingsIntent())
-            return
-        }
-
-        // MANAGE_EXTERNAL_STORAGE (Android 10+) n'est PAS une permission runtime classique --
-        // impossible à demander via permissionLauncher. Android impose de passer par un écran
-        // Réglages système dédié que l'utilisateur doit approuver lui-même (voir StorageController).
-        // Sur Android 9 et moins, WRITE_EXTERNAL_STORAGE (permission runtime classique) suffit.
-        val needsAllFilesAccess = command is CommandInterpreter.Command.FindFile ||
-            command is CommandInterpreter.Command.DeleteFile
-        if (needsAllFilesAccess && !StorageController.hasAllFilesAccess(this)) {
-            if (android.os.Build.VERSION.SDK_INT < 30) {
-                pendingCommand = command
-                permissionLauncher.launch(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE))
-                return
-            }
-            // Contrairement au cas ci-dessus, cet écran système ne renvoie pas de résultat
-            // exploitable ici (pas de callback d'ActivityResultContracts branché dessus) --
-            // on redemande donc simplement à l'utilisateur de retaper sa requête une fois
-            // l'autorisation activée, plutôt que de mémoriser pendingCommand pour rien.
-            appendAssistantMessage(
-                "📂 J'ai besoin de l'autorisation \"Accès à tous les fichiers\" pour ça -- " +
-                    "je t'ouvre l'écran Réglages, active le bouton puis retape ta demande."
-            )
-            startActivity(StorageController.allFilesAccessIntent(this))
-            return
-        }
-
-        runDeviceCommand(command)
-    }
-
-    /** Exécute la commande une fois qu'on sait que les permissions nécessaires sont accordées. */
-    private fun runDeviceCommand(command: CommandInterpreter.Command) {
-        if (command is CommandInterpreter.Command.GetLocation) {
-            LocationController.getCurrentLocation(
-                this,
-                onResult = { lat, lon ->
-                    val mapsLink = "https://maps.google.com/?q=$lat,$lon"
-                    appendAssistantMessage("📍 Position actuelle : %.6f, %.6f\n$mapsLink".format(lat, lon))
-                },
-                onError = { error -> appendAssistantMessage("❌ $error") }
-            )
-            return
-        }
-        if (command is CommandInterpreter.Command.CreateKml) {
-            // Comme GetLocation ci-dessus : async, donc géré à part avant le "when" synchrone.
-            LocationController.getCurrentLocation(
-                this,
-                onResult = { lat, lon ->
-                    val placemark = FileGenController.KmlPlacemark(command.label ?: "Position", lat, lon)
-                    val file = FileGenController.createKml(this, command.name, listOf(placemark))
-                    appendAssistantMessage(
-                        if (file != null) "🗺️ KML créé : ${file.absolutePath}" else "❌ Échec de la création du KML."
-                    )
-                },
-                onError = { error -> appendAssistantMessage("❌ $error") }
-            )
-            return
-        }
-        // Lecture du planning : lue directement sur le calendrier LOCAL du téléphone (voir
-        // CalendarController/android.provider.CalendarContract), la même base de données que
-        // consulte l'appli Google Agenda -- synchronisée en arrière-plan par Android lui-même
-        // pour TOUS les comptes Google du téléphone à la fois (pas besoin de fusionner
-        // manuellement plusieurs jetons comme avant). Ni réseau ni jeton OAuth à attendre :
-        // réponse quasi instantanée. Repli sur l'API Google OAuth (mergeAcrossAccounts) UNIQUEMENT
-        // si la lecture locale échoue (permission refusée malgré la demande, ou aucun calendrier
-        // synchronisé sur l'appareil) -- pour ne jamais régresser par rapport à avant.
-        if (command is CommandInterpreter.Command.TodayEvents) {
-            val local = CalendarController.getTodayEvents(this)
-            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
-            ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getTodayEvents(it) }) }
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.WeekEvents) {
-            val local = CalendarController.getEventsForWeek(this, command.offset)
-            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
-            ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getEventsForWeek(it, command.offset) }) }
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.EventsForDate) {
-            val date = CalendarController.resolveLocalDate(command.dateStr)
-            val local = CalendarController.getEventsForDate(this, date)
-            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
-            ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getEventsForDate(it, date) }) }
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.EventsForCalendar) {
-            // Pas d'équivalent Google API ici (recherche par nom = spécifique à CalendarContract,
-            // voir CalendarController.getEventsForCalendarMatching) -- fonctionnalité NOUVELLE,
-            // donc pas de repli réseau nécessaire : le message d'erreur (calendrier introuvable
-            // / permission) est déjà clair par lui-même.
-            appendAssistantMessage(CalendarController.getEventsForCalendarAndPeriod(this, command.query, command.periodRaw))
-            return
-        }
-        if (command is CommandInterpreter.Command.UpcomingEvents) {
-            val local = CalendarController.getUpcomingEvents(this)
-            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
-            ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getUpcomingEvents(it) }) }
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.ListCalendars) {
-            val local = CalendarController.getCalendarList(this)
-            if (!local.startsWith("❌")) { appendAssistantMessage(local); return }
-            ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GoogleCalendarApiController.getCalendarList(it) }) }
-            }
-            return
-        }
-        // Agenda + Mail (création/suppression d'événement, lecture des mails) : toujours via
-        // l'API Google OAuth officielle (voir GoogleCalendarApiController/GmailApiController),
-        // async -- ensureGoogleToken() gère l'obtention/le cache du jeton d'accès avant d'appeler
-        // l'API Google. Choix conservé pour les ÉCRITURES (contrairement à la lecture ci-dessus) :
-        // demande explicite antérieure de l'utilisateur de repasser sur l'API officielle.
-        if (command is CommandInterpreter.Command.CreateEvent) {
-            ensureGoogleToken { token ->
-                lifecycleScope.launch {
-                    val date = CalendarController.resolveLocalDate(command.dateStr)
-                    val time = CalendarController.resolveLocalTime(command.timeStr ?: "", defaultHour = 9, defaultMinute = 0)
-                    val start = date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    val end = start + 60 * 60 * 1000 // durée par défaut : 1h
-                    appendAssistantMessage(GoogleCalendarApiController.createEvent(token, command.title, start, end))
-                }
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.DeleteEvent) {
-            ensureGoogleToken { token -> lifecycleScope.launch { appendAssistantMessage(GoogleCalendarApiController.deleteEventByTitle(token, command.query)) } }
-            return
-        }
-        if (command is CommandInterpreter.Command.ReadInbox) {
-            ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GmailApiController.readInbox(it, command.count) }) }
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.ReadUnreadEmails) {
-            ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GmailApiController.readUnread(it) }) }
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.SearchEmail) {
-            ensureGoogleTokensForAllAccounts { tokens ->
-                lifecycleScope.launch { appendAssistantMessage(mergeAcrossAccounts(tokens) { GmailApiController.searchEmails(it, command.query) }) }
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.SendEmail) {
-            ensureGoogleToken { token ->
-                lifecycleScope.launch {
-                    // Pas de sujet distinct dans la phrase reconnue (voir sendEmailRegex) --
-                    // sujet générique, l'essentiel étant le corps du message demandé.
-                    appendAssistantMessage(GmailApiController.sendEmail(token, command.to, "Message de JARVIS", command.body))
-                }
-            }
-            return
-        }
-        // Notes Obsidian (voir ObsidianController) -- pas d'OAuth ici, juste SAF, donc pas
-        // besoin d'ensureGoogleToken : les erreurs ("aucun vault choisi"...) sont deja des
-        // messages clairs renvoyes par ObsidianController lui-meme (Result.failure).
-        if (command is CommandInterpreter.Command.CreateNote) {
-            lifecycleScope.launch {
-                val result = ObsidianController.createNote(this@MainActivity, command.title, command.content, command.folder)
-                val folderSuffix = command.folder?.let { " dans le dossier \u00ab $it \u00bb" } ?: ""
-                appendAssistantMessage(
-                    result.fold(
-                        onSuccess = { "\uD83D\uDCDD Note \u00ab ${command.title} \u00bb cr\u00e9\u00e9e dans le vault Obsidian$folderSuffix." },
-                        onFailure = { e -> "\u274c ${e.message}" }
-                    )
-                )
-            }
-            return
-        }
-        // Dossiers du vault (tache #239) -- meme raisonnement que les notes ci-dessus : SAF
-        // pur, pas d'OAuth, erreurs deja claires via Result.failure.
-        if (command is CommandInterpreter.Command.CreateFolder) {
-            lifecycleScope.launch {
-                val result = ObsidianController.createFolder(this@MainActivity, command.name)
-                appendAssistantMessage(
-                    result.fold(
-                        onSuccess = { "\uD83D\uDCC1 Dossier \u00ab ${command.name} \u00bb cr\u00e9\u00e9 dans le vault Obsidian." },
-                        onFailure = { e -> "\u274c ${e.message}" }
-                    )
-                )
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.ListFolders) {
-            lifecycleScope.launch {
-                val result = ObsidianController.listFolders(this@MainActivity)
-                appendAssistantMessage(
-                    result.fold(
-                        onSuccess = { folders ->
-                            if (folders.isEmpty()) "\uD83D\uDCC1 Le vault Obsidian ne contient aucun dossier pour l'instant."
-                            else "\uD83D\uDCC1 ${folders.size} dossier(s) :\n\n" + folders.joinToString("\n") { "\u2022 $it" }
-                        },
-                        onFailure = { e -> "\u274c ${e.message}" }
-                    )
-                )
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.DeleteFolder) {
-            lifecycleScope.launch {
-                val result = ObsidianController.deleteFolder(this@MainActivity, command.name)
-                appendAssistantMessage(
-                    result.fold(
-                        onSuccess = { count ->
-                            val detail = if (count > 0) " ($count fichier(s) supprim\u00e9(s) avec lui)" else ""
-                            "\uD83D\uDDD1\uFE0F Dossier \u00ab ${command.name} \u00bb supprim\u00e9$detail."
-                        },
-                        onFailure = { e -> "\u274c ${e.message}" }
-                    )
-                )
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.RenameFolder) {
-            lifecycleScope.launch {
-                val result = ObsidianController.renameFolder(this@MainActivity, command.oldName, command.newName)
-                appendAssistantMessage(
-                    result.fold(
-                        onSuccess = { "\uD83D\uDCC1 Dossier \u00ab ${command.oldName} \u00bb renomm\u00e9 en \u00ab ${command.newName} \u00bb." },
-                        onFailure = { e -> "\u274c ${e.message}" }
-                    )
-                )
-            }
-            return
-        }
-        // Synchronisation contacts -> vault (tache #240) : une note par contact du carnet
-        // d'adresses natif, dans le dossier "Contacts". Jamais d'ecrasement -- createNote
-        // echoue explicitement si la note existe deja ("existe deja"), ce qui est traite ici
-        // comme un skip normal (pas une erreur) : l'utilisateur choisit quand generer/
-        // regenerer, et une fiche deja presente peut avoir ete editee a la main entretemps.
-        if (command is CommandInterpreter.Command.SyncContactsToVault) {
-            lifecycleScope.launch {
-                val listResult = ContactsController.listAllContacts(this@MainActivity)
-                val contacts = listResult.getOrNull()
-                if (listResult.isFailure || contacts == null) {
-                    val e = listResult.exceptionOrNull()
-                    appendAssistantMessage("\u274c Impossible de lire les contacts -- ${e?.javaClass?.simpleName} : ${e?.message}")
-                    return@launch
-                }
-                var created = 0
-                var skipped = 0
-                var failed = 0
-                for (contact in contacts) {
-                    val content = buildString {
-                        append("\uD83D\uDC64 ${contact.name}")
-                        if (contact.phoneNumbers.isNotEmpty()) {
-                            append("\n\uD83D\uDCDE ${contact.phoneNumbers.joinToString(", ")}")
-                        } else {
-                            append("\n\uD83D\uDCDE aucun num\u00e9ro enregistr\u00e9")
-                        }
-                        if (!contact.address.isNullOrBlank()) append("\n\uD83C\uDFE0 ${contact.address}")
-                    }
-                    val result = ObsidianController.createNote(this@MainActivity, contact.name, content, folder = "Contacts")
-                    when {
-                        result.isSuccess -> created++
-                        result.exceptionOrNull()?.message?.contains("existe d\u00e9j\u00e0") == true -> skipped++
-                        else -> failed++
-                    }
-                }
-                appendAssistantMessage(
-                    "\uD83D\uDCC7 Synchronisation contacts \u2192 vault termin\u00e9e : $created fiche(s) cr\u00e9\u00e9e(s), " +
-                        "$skipped d\u00e9j\u00e0 \u00e0 jour, $failed erreur(s)."
-                )
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.ReadNote) {
-            lifecycleScope.launch {
-                val result = ObsidianController.readNote(this@MainActivity, command.title)
-                appendAssistantMessage(
-                    result.fold(
-                        onSuccess = { text -> "\uD83D\uDCD6 ${command.title} :\n\n$text" },
-                        onFailure = { e -> "\u274c ${e.message}" }
-                    )
-                )
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.ListNotes) {
-            lifecycleScope.launch {
-                val result = ObsidianController.listNotes(this@MainActivity)
-                appendAssistantMessage(
-                    result.fold(
-                        onSuccess = { notes ->
-                            if (notes.isEmpty()) "\uD83D\uDCC2 Le vault Obsidian est vide."
-                            else "\uD83D\uDCC2 ${notes.size} note(s) :\n\n" + notes.joinToString("\n") { "\u2022 $it" }
-                        },
-                        onFailure = { e -> "\u274c ${e.message}" }
-                    )
-                )
-            }
-            return
-        }
-        if (command is CommandInterpreter.Command.AppendNote) {
-            lifecycleScope.launch {
-                val result = ObsidianController.appendToNote(this@MainActivity, command.title, command.content)
-                appendAssistantMessage(
-                    result.fold(
-                        onSuccess = { "\uD83D\uDCDD Ajout\u00e9 \u00e0 la note \u00ab ${command.title} \u00bb." },
-                        onFailure = { e -> "\u274c ${e.message}" }
-                    )
-                )
-            }
-            return
-        }
-        val reply = when (command) {
-            is CommandInterpreter.Command.Flashlight -> {
-                val ok = DeviceController.setFlashlight(this, command.on)
-                when {
-                    !ok -> "❌ Impossible d'accéder au flash de cet appareil."
-                    command.on -> "🔦 Lampe torche allumée."
-                    else -> "🔦 Lampe torche éteinte."
-                }
-            }
-            is CommandInterpreter.Command.Timer -> {
-                val result = DeviceController.setTimer(this, command.seconds, null)
-                if (result.isSuccess) {
-                    "⏱️ Minuteur lancé."
-                } else {
-                    val e = result.exceptionOrNull()
-                    "❌ Impossible de lancer le minuteur -- ${e?.javaClass?.simpleName} : ${e?.message}"
-                }
-            }
-            is CommandInterpreter.Command.Alarm -> {
-                val result = DeviceController.setAlarm(this, command.hour, command.minute, null)
-                if (result.isSuccess) {
-                    "⏰ Réveil réglé à %02d:%02d.".format(command.hour, command.minute)
-                } else {
-                    val e = result.exceptionOrNull()
-                    "❌ Impossible de régler le réveil -- ${e?.javaClass?.simpleName} : ${e?.message}"
-                }
-            }
-            is CommandInterpreter.Command.Sms -> {
-                val result = DeviceController.sendSms(this, command.phoneNumber, command.message)
-                if (result.isSuccess) {
-                    "📩 SMS envoyé à ${command.phoneNumber}."
-                } else {
-                    val e = result.exceptionOrNull()
-                    "❌ Échec de l'envoi du SMS -- ${e?.javaClass?.simpleName} : ${e?.message}"
-                }
-            }
-            is CommandInterpreter.Command.Call -> {
-                val result = DeviceController.makeCall(this, command.phoneNumber)
-                if (result.isSuccess) {
-                    "📞 Appel en cours vers ${command.phoneNumber}."
-                } else {
-                    val e = result.exceptionOrNull()
-                    "❌ Impossible de lancer l'appel -- ${e?.javaClass?.simpleName} : ${e?.message}"
-                }
-            }
-            is CommandInterpreter.Command.CreateContact -> {
-                val ok = ContactsController.createContact(this, command.name, command.phoneNumber)
-                if (ok) "👤 Contact « ${command.name} » créé (${command.phoneNumber})." else "❌ Échec de la création du contact."
-            }
-            is CommandInterpreter.Command.FindContact -> {
-                val searchResult = ContactsController.findContact(this, command.name)
-                val contact = searchResult.getOrNull()
-                when {
-                    searchResult.isFailure -> {
-                        val e = searchResult.exceptionOrNull()
-                        "❌ Recherche de contact impossible -- ${e?.javaClass?.simpleName} : ${e?.message}"
-                    }
-                    contact == null -> "🔍 Aucun contact trouvé pour « ${command.name} »."
-                    else -> buildString {
-                        append("👤 ${contact.name}")
-                        if (contact.phoneNumbers.isNotEmpty()) {
-                            append("\n📞 ${contact.phoneNumbers.joinToString(", ")}")
-                        } else {
-                            append("\n📞 aucun numéro enregistré")
-                        }
-                        if (!contact.address.isNullOrBlank()) append("\n🏠 ${contact.address}")
-                    }
-                }
-            }
-            is CommandInterpreter.Command.CallContact -> {
-                val searchResult = ContactsController.findContact(this, command.name)
-                val contact = searchResult.getOrNull()
-                val number = contact?.phoneNumbers?.firstOrNull()
-                when {
-                    searchResult.isFailure -> {
-                        val e = searchResult.exceptionOrNull()
-                        "❌ Recherche de contact impossible -- ${e?.javaClass?.simpleName} : ${e?.message}"
-                    }
-                    contact == null -> "🔍 Aucun contact trouvé pour « ${command.name} »."
-                    number == null -> "👤 ${contact.name} -- aucun numéro enregistré, impossible d'appeler."
-                    else -> {
-                        val result = DeviceController.makeCall(this, number)
-                        if (result.isSuccess) {
-                            "📞 Appel de ${contact.name} ($number) en cours."
-                        } else {
-                            val e = result.exceptionOrNull()
-                            "❌ Impossible de lancer l'appel -- ${e?.javaClass?.simpleName} : ${e?.message}"
-                        }
-                    }
-                }
-            }
-            CommandInterpreter.Command.GetLocation -> return // géré au-dessus (async)
-            is CommandInterpreter.Command.FindFile -> {
-                val files = StorageController.findFiles(command.query)
-                if (files.isEmpty()) "🔍 Aucun fichier trouvé pour « ${command.query} »."
-                else "📂 ${files.size} résultat(s) :\n" + files.joinToString("\n") { it.absolutePath }
-            }
-            is CommandInterpreter.Command.DeleteFile -> {
-                val files = StorageController.findFiles(command.name)
-                val exactMatch = files.firstOrNull { it.name.equals(command.name, ignoreCase = true) } ?: files.firstOrNull()
-                when {
-                    exactMatch == null -> "🔍 Aucun fichier trouvé pour « ${command.name} »."
-                    StorageController.deleteFile(exactMatch.absolutePath) -> "🗑️ Fichier supprimé : ${exactMatch.absolutePath}"
-                    else -> "❌ Échec de la suppression de ${exactMatch.absolutePath} (dossier non vide ou erreur)."
-                }
-            }
-            is CommandInterpreter.Command.OpenMaps -> {
-                val ok = DeviceController.openMaps(this, command.destination)
-                if (ok) "🗺️ Ouverture de Cartes..." else "❌ Impossible d'ouvrir une appli Cartes (aucune installée ?)."
-            }
-            is CommandInterpreter.Command.CreatePdf -> {
-                val file = FileGenController.createPdf(this, command.name, listOf(command.text))
-                if (file != null) "📄 PDF créé : ${file.absolutePath}" else "❌ Échec de la création du PDF."
-            }
-            is CommandInterpreter.Command.CreateZip -> {
-                val file = FileGenController.zipOutputDir(this, command.name)
-                if (file != null) "🗜️ ZIP créé : ${file.absolutePath}" else "❌ Échec de la création du ZIP."
-            }
-            is CommandInterpreter.Command.CreateDocx -> {
-                val file = FileGenController.createDocx(this, command.name, "", command.text)
-                if (file != null) "📝 Document Word créé : ${file.absolutePath}" else "❌ Échec de la création du document."
-            }
-            is CommandInterpreter.Command.CreateXlsx -> {
-                val file = FileGenController.createXlsx(this, command.name, command.name, command.csv)
-                if (file != null) "📊 Tableur Excel créé : ${file.absolutePath}" else "❌ Échec de la création du tableur."
-            }
-            is CommandInterpreter.Command.CreateKml -> return // géré au-dessus (async, comme GetLocation)
-            is CommandInterpreter.Command.Notify -> {
-                NotificationController.notify(this, getString(R.string.app_name), command.text)
-                "🔔 Notification envoyée."
-            }
-            CommandInterpreter.Command.ShowNotifications -> {
-                val notifications = JarvisNotificationListenerService.recent(10)
-                if (notifications.isEmpty()) "🔔 Aucune notification récente."
-                else "🔔 Notifications récentes :\n" + notifications.joinToString("\n") {
-                    "• [${it.appLabel}] ${it.title} -- ${it.text}"
-                }
-            }
-            CommandInterpreter.Command.TodayEvents -> return // géré au-dessus (async, OAuth)
-            is CommandInterpreter.Command.WeekEvents -> return // géré au-dessus (async, OAuth)
-            is CommandInterpreter.Command.EventsForDate -> return // géré au-dessus (async, OAuth)
-            is CommandInterpreter.Command.EventsForCalendar -> return // géré au-dessus (local, CalendarContract)
-            CommandInterpreter.Command.UpcomingEvents -> return // géré au-dessus (async, OAuth)
-            CommandInterpreter.Command.ListCalendars -> return // géré au-dessus (async, OAuth)
-            is CommandInterpreter.Command.CreateEvent -> return // géré au-dessus (async, OAuth)
-            is CommandInterpreter.Command.DeleteEvent -> return // géré au-dessus (async, OAuth)
-            is CommandInterpreter.Command.ReadInbox -> return // géré au-dessus (async, comme GetLocation)
-            CommandInterpreter.Command.ReadUnreadEmails -> return // géré au-dessus (async)
-            is CommandInterpreter.Command.SearchEmail -> return // géré au-dessus (async)
-            is CommandInterpreter.Command.SendEmail -> return // géré au-dessus (async)
-            is CommandInterpreter.Command.CreateNote -> return // géré au-dessus (async, SAF)
-            is CommandInterpreter.Command.ReadNote -> return // géré au-dessus (async, SAF)
-            CommandInterpreter.Command.ListNotes -> return // géré au-dessus (async, SAF)
-            is CommandInterpreter.Command.AppendNote -> return // géré au-dessus (async, SAF)
-            is CommandInterpreter.Command.CreateFolder -> return // géré au-dessus (async, SAF)
-            CommandInterpreter.Command.ListFolders -> return // géré au-dessus (async, SAF)
-            is CommandInterpreter.Command.DeleteFolder -> return // géré au-dessus (async, SAF)
-            is CommandInterpreter.Command.RenameFolder -> return // géré au-dessus (async, SAF)
-            is CommandInterpreter.Command.SyncContactsToVault -> return // géré au-dessus (async, SAF+ContentResolver)
-        }
-        appendAssistantMessage(reply)
-    }
-
-    /**
-     * Route la requête vers le backend IA choisi dans Réglages (voir Prefs.getSelectedModel) :
-     * Gemini Nano via AICore, ou un modèle local via LiteRT-LM (voir LocalLlmController --
-     * Qwen3/Qwen2.5, aucun compte Hugging Face requis). Les deux sont indépendants -- changer
-     * de modèle dans Réglages change le backend utilisé dès le message suivant, sans
-     * redémarrer l'appli.
-     */
-    private fun requestAiReply(prompt: String) {
-        when (Prefs.getSelectedModel(this)) {
-            Prefs.MODEL_LOCAL_LLM -> requestLocalLlmReply(prompt)
-            else -> requestGeminiNanoReply(prompt)
+        adapter.notifyItemInserted(ConversationStore.messages.size - 1)
+        recyclerView.scrollToPosition(ConversationStore.messages.size - 1)
+        ConversationStore.persist(this)
+        if (speak && ttsReady) {
+            tts?.speak(MarkdownUtils.stripForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, null)
         }
     }
 
-    /**
-     * Backend IA : Gemini Nano on-device via AICore (voir GeminiNanoController). Aucune clé,
-     * aucun réseau une fois le modèle téléchargé -- mais uniquement disponible sur les
-     * appareils compatibles AICore. Si l'appareil ne l'est pas, on l'explique clairement au
-     * lieu d'échouer silencieusement.
-     */
-    private fun requestGeminiNanoReply(prompt: String) {
-        lifecycleScope.launch {
-            try {
-                when (GeminiNanoController.checkStatus()) {
-                    FeatureStatus.AVAILABLE -> {
-                        val reply = GeminiNanoController.generateReply(prompt)
-                        appendAssistantMessage(reply)
-                    }
-                    FeatureStatus.DOWNLOADABLE -> {
-                        appendAssistantMessage(getString(R.string.gemini_nano_downloading))
-                        GeminiNanoController.downloadModel(
-                            onFailed = { error -> appendAssistantMessage("❌ Échec du téléchargement de Gemini Nano : $error") },
-                            onCompleted = {
-                                lifecycleScope.launch {
-                                    val reply = GeminiNanoController.generateReply(prompt)
-                                    appendAssistantMessage(reply)
-                                }
-                            }
-                        )
-                    }
-                    FeatureStatus.DOWNLOADING -> appendAssistantMessage(getString(R.string.gemini_nano_still_downloading))
-                    else -> appendAssistantMessage(getString(R.string.gemini_nano_unavailable))
-                }
-            } catch (e: Exception) {
-                appendAssistantMessage("❌ Erreur Gemini Nano : ${e.message}")
-            }
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val result = tts?.setLanguage(Locale.FRENCH)
+            ttsReady = result != TextToSpeech.LANG_MISSING_DATA &&
+                result != TextToSpeech.LANG_NOT_SUPPORTED
         }
-    }
-
-    /**
-     * Backend IA : modèle local (Qwen3/Qwen2.5) via LiteRT-LM (voir LocalLlmController). Ne
-     * passe pas par AICore -- fonctionne sur tout appareil suffisamment puissant (y compris
-     * Xiaomi/Redmi/Poco), et ne nécessite aucun compte ni jeton Hugging Face. Le modèle choisi
-     * dans Réglages doit avoir été téléchargé au préalable.
-     */
-    private fun requestLocalLlmReply(prompt: String) {
-        val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
-        if (!LocalLlmController.isDownloaded(this, model)) {
-            appendAssistantMessage(getString(R.string.local_llm_not_downloaded_chat))
-            return
-        }
-        lifecycleScope.launch {
-            try {
-                val reply = LocalLlmController.generateReply(this@MainActivity, model, prompt)
-                appendAssistantMessage(reply)
-            } catch (e: Exception) {
-                appendAssistantMessage("❌ Erreur IA locale : ${e.message}")
-            }
-        }
-    }
-
-    private fun appendAssistantMessage(text: String) {
-        activeConversation.messages.add(Message(text, isUser = false))
-        Prefs.saveConversations(this, conversations)
-        refreshChat()
-        refreshSidebar()
-        VoiceController.speak(this, text)
     }
 
     override fun onDestroy() {
-        VoiceController.shutdown()
+        tts?.stop()
+        tts?.shutdown()
         super.onDestroy()
+    }
+
+    /**
+     * Si l'app a planté au lancement précédent, affiche le rapport dans une
+     * fenêtre copiable — plus besoin d'ADB pour diagnostiquer un crash.
+     */
+    private fun showCrashReportIfAny() {
+        val crashFile = java.io.File(filesDir, "crash_log.txt")
+        if (!crashFile.exists()) return
+
+        val report = try {
+            crashFile.readText()
+        } catch (e: Exception) {
+            crashFile.delete()
+            return
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("⚠️ $assistantName a planté au dernier lancement")
+            .setMessage(report)
+            .setPositiveButton("Copier") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Crash $assistantName", report))
+                Toast.makeText(this, "Rapport copié dans le presse-papier", Toast.LENGTH_SHORT).show()
+                crashFile.delete()
+            }
+            .setNegativeButton("Fermer") { _, _ -> crashFile.delete() }
+            .setCancelable(false)
+            .show()
     }
 }

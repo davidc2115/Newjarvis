@@ -6,4 +6,15 @@
 /build
 app/build
 /captures
+.externalNativeBuildFolder
+.cxx
 local.properties
+app/src/main/cpp/llama.cpp/
+*.cxx
+.cxx/
+
+# Modèles openWakeWord (détection de mot-clé basse consommation, alternative à Picovoice) :
+# téléchargés automatiquement au moment du build depuis les releases officielles GitHub
+# (voir la tâche downloadWakeWordModels dans app/build.gradle) — pas commités pour ne pas
+# alourdir le dépôt avec des binaires.
+app/src/main/assets/*.onnx

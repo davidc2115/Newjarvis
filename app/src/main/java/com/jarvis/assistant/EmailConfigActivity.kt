@@ -1,155 +1,285 @@
 package com.jarvis.assistant
 
+import android.accounts.Account
+import android.accounts.AccountManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
-import android.view.Gravity
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
-import com.jarvis.assistant.databinding.ActivityEmailConfigBinding
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * Écran de configuration des comptes email (IMAP/SMTP) -- porté depuis l'ancienne version de ce
- * projet à la demande explicite de l'utilisateur ("regarde comme c'était sur l'ancienne appli"),
- * simplifié pour ne garder QUE le chemin mot de passe d'application (voir EmailController.kt
- * pour le pourquoi -- aucune Console Cloud, contrairement à l'ancienne tentative OAuth2).
+ * Écran de connexion Email pour JARVIS.
  *
- * Multi-fournisseurs dès le départ (pas seulement Gmail) : boutons de préréglage qui pré-
- * remplissent juste les serveurs IMAP/SMTP (voir Prefs.EmailAccount.preset), l'utilisateur peut
- * aussi les modifier manuellement pour un fournisseur non listé.
+ * Priorité 1 : Comptes Google déjà connectés sur l'appareil (AccountManager)
+ * Priorité 2 : App Password 16 lettres (si 2FA activé)
+ * Priorité 3 : Mot de passe Google (tenté mais souvent bloqué par Google)
  */
 class EmailConfigActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityEmailConfigBinding
+    private lateinit var emailInput: EditText
+    private lateinit var passwordInput: EditText
+    private lateinit var btnOpenWebGoogleLogin: TextView
+    private lateinit var btnConnectGoogle: TextView
+    private lateinit var btnOpenGooglePassGuide: TextView
+    private lateinit var testResultText: TextView
+    private lateinit var accountsContainer: LinearLayout
+    private lateinit var deviceAccountsContainer: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityEmailConfigBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        setContentView(R.layout.activity_email_config)
 
-        binding.emailBackButton.setOnClickListener { finish() }
+        emailInput           = findViewById(R.id.emailInput)
+        passwordInput        = findViewById(R.id.passwordInput)
+        btnOpenWebGoogleLogin = findViewById(R.id.btnOpenWebGoogleLogin)
+        btnConnectGoogle     = findViewById(R.id.btnConnectGoogle)
+        btnOpenGooglePassGuide = findViewById(R.id.btnOpenGooglePassGuide)
+        testResultText       = findViewById(R.id.testResultText)
+        accountsContainer    = findViewById(R.id.accountsContainer)
+        deviceAccountsContainer = findViewById<LinearLayout?>(R.id.deviceAccountsContainer)
+            ?: LinearLayout(this) // fallback si absent du layout
 
-        binding.presetGmailButton.setOnClickListener { applyPreset("gmail") }
-        binding.presetOutlookButton.setOnClickListener { applyPreset("outlook") }
-        binding.presetYahooButton.setOnClickListener { applyPreset("yahoo") }
-        binding.presetIcloudButton.setOnClickListener { applyPreset("icloud") }
+        // 1. Charger les comptes Google détectés sur l'appareil
+        refreshDeviceAccountsList()
 
-        binding.testConnectionButton.setOnClickListener { testConnection() }
-        binding.saveEmailAccountButton.setOnClickListener { saveAccount() }
+        // 2. Préfill email depuis comptes connus
+        val discovered = AccountDiscoveryManager.getDeviceAccounts(this)
+        if (discovered.isNotEmpty() && emailInput.text.isBlank()) {
+            emailInput.setText(discovered.first().email)
+        }
 
+        // 3. Afficher comptes déjà configurés dans JARVIS
         refreshAccountsList()
+
+        // Bouton : Ouvrir page Sign-In Google dans le navigateur
+        btnOpenWebGoogleLogin.setOnClickListener {
+            val email = emailInput.text.toString().trim()
+            val url = if (email.contains("@")) {
+                "https://accounts.google.com/ServiceLogin?Email=$email"
+            } else {
+                "https://accounts.google.com/"
+            }
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
+
+        // Bouton : Guide App Password Google
+        btnOpenGooglePassGuide.setOnClickListener {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords")))
+        }
+
+        // Bouton : Connexion par mot de passe / App Password
+        btnConnectGoogle.setOnClickListener {
+            val email = emailInput.text.toString().trim()
+            val pass  = passwordInput.text.toString().trim().replace(" ", "")
+
+            if (email.isBlank() || pass.isBlank()) {
+                Toast.makeText(this, "Veuillez entrer votre email et votre mot de passe d'application.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+
+            val account = buildGoogleEmailAccount(email, pass)
+            testResultText.text = "🔄 Test de connexion IMAP Google en cours…"
+
+            CoroutineScope(Dispatchers.Main).launch {
+                val testRes = withContext(Dispatchers.IO) { EmailController.testConnection(account) }
+                testResultText.text = testRes
+                // Enregistrer dans tous les cas pour permettre réessai ultérieur
+                Prefs.addEmailAccount(this@EmailConfigActivity, account)
+                refreshAccountsList()
+                if (testRes.contains("✅")) {
+                    Toast.makeText(this@EmailConfigActivity, "✅ Compte connecté avec succès !", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@EmailConfigActivity,
+                        "⚠️ Connexion échouée. Utilisez un App Password Google.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
-    /** Pré-remplit les champs serveurs IMAP/SMTP pour un fournisseur connu (voir Prefs.EmailAccount.preset). */
-    private fun applyPreset(service: String) {
-        val email = binding.emailAddressInput.text?.toString().orEmpty()
-        val preset = Prefs.EmailAccount.preset(service, email, "") ?: return
-        if (binding.emailLabelInput.text.isNullOrBlank()) binding.emailLabelInput.setText(preset.label)
-        binding.imapHostInput.setText(preset.imapHost)
-        binding.imapPortInput.setText(preset.imapPort.toString())
-        binding.smtpHostInput.setText(preset.smtpHost)
-        binding.smtpPortInput.setText(preset.smtpPort.toString())
+    // ─────────────────────────────────────────────────────────────────────────
+    // Comptes Google détectés sur l'appareil (AccountManager)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun refreshDeviceAccountsList() {
+        deviceAccountsContainer.removeAllViews()
+
+        val googleAccounts = getGoogleAccountsOnDevice()
+        if (googleAccounts.isEmpty()) return
+
+        // Titre section
+        val titleView = TextView(this).apply {
+            text = "📱 Comptes Google détectés sur l'appareil :"
+            setTextColor(getColor(R.color.text_primary))
+            textSize = 14f
+            setPadding(0, 0, 0, 12)
+        }
+        deviceAccountsContainer.addView(titleView)
+
+        for (acc in googleAccounts) {
+            val btnCard = TextView(this).apply {
+                text = "✅ Connecter avec  ${acc.name}"
+                setTextColor(getColor(R.color.cyan_accent))
+                textSize = 13f
+                setPadding(24, 20, 24, 20)
+                background = getDrawable(R.drawable.bg_bubble_ai)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.bottomMargin = 10 }
+                setOnClickListener { connectDeviceGoogleAccount(acc) }
+            }
+            deviceAccountsContainer.addView(btnCard)
+        }
     }
 
-    private fun buildAccountFromForm(): Prefs.EmailAccount? {
-        val label = binding.emailLabelInput.text?.toString()?.trim().orEmpty()
-        val email = binding.emailAddressInput.text?.toString()?.trim().orEmpty()
-        // Les espaces dans un mot de passe d'application collé depuis Google (affiché en 4
-        // groupes de 4 lettres) doivent être retirés -- IMAP/SMTP le refusent sinon.
-        val password = binding.emailPasswordInput.text?.toString()?.trim()?.replace(" ", "").orEmpty()
-        val imapHost = binding.imapHostInput.text?.toString()?.trim().orEmpty()
-        val imapPort = binding.imapPortInput.text?.toString()?.trim()?.toIntOrNull() ?: 993
-        val smtpHost = binding.smtpHostInput.text?.toString()?.trim().orEmpty()
-        val smtpPort = binding.smtpPortInput.text?.toString()?.trim()?.toIntOrNull() ?: 587
+    /**
+     * Récupère tous les comptes Google (@gmail.com ou Google Workspace)
+     * connectés sur l'appareil via AccountManager.
+     */
+    private fun getGoogleAccountsOnDevice(): List<Account> {
+        return try {
+            val am = AccountManager.get(this)
+            am.getAccountsByType("com.google").toList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 
-        if (email.isBlank() || password.isBlank() || imapHost.isBlank() || smtpHost.isBlank()) return null
+    /**
+     * Connecte un compte Google déjà présent sur l'appareil.
+     * Utilise AccountManager pour obtenir un token d'authentification.
+     */
+    private fun connectDeviceGoogleAccount(account: Account) {
+        testResultText.text = "🔄 Connexion avec ${account.name}…"
+        emailInput.setText(account.name)
 
-        return Prefs.EmailAccount(
-            label = label.ifBlank { email },
-            email = email,
-            password = password,
-            imapHost = imapHost,
-            imapPort = imapPort,
-            smtpHost = smtpHost,
-            smtpPort = smtpPort,
-            smtpStartTls = true
+        val am = AccountManager.get(this)
+
+        // Demande un token Google Mail (scope pour IMAP)
+        am.getAuthToken(
+            account,
+            "oauth2:https://mail.google.com/",
+            null,
+            this,
+            { future ->
+                CoroutineScope(Dispatchers.Main).launch {
+                    try {
+                        val bundle = withContext(Dispatchers.IO) { future.result }
+                        val token = bundle.getString(AccountManager.KEY_AUTHTOKEN)
+
+                        if (token != null) {
+                            // Enregistrer le compte avec le token OAuth2
+                            val emailAccount = Prefs.EmailAccount(
+                                label    = "Gmail — ${account.name}",
+                                email    = account.name,
+                                password = token,
+                                imapHost = "imap.gmail.com",
+                                imapPort = 993,
+                                imapSsl  = true,
+                                smtpHost = "smtp.gmail.com",
+                                smtpPort = 587,
+                                smtpStartTls = true,
+                                isDefault = Prefs.getEmailAccounts(this@EmailConfigActivity).isEmpty(),
+                                oauthToken = token,
+                                isOAuth    = true
+                            )
+
+                            Prefs.addEmailAccount(this@EmailConfigActivity, emailAccount)
+                            refreshAccountsList()
+                            testResultText.text = "✅ Compte ${account.name} connecté via Google !"
+                            Toast.makeText(this@EmailConfigActivity,
+                                "✅ ${account.name} connecté !", Toast.LENGTH_SHORT).show()
+                        } else {
+                            // Si Android refuse le token silencieusement → intent de grant
+                            val intentExtra = bundle.getParcelable<android.content.Intent>(AccountManager.KEY_INTENT)
+                            if (intentExtra != null) {
+                                startActivity(intentExtra)
+                            } else {
+                                testResultText.text = "❌ Impossible d'obtenir le token Google. Essayez un App Password."
+                            }
+                        }
+                    } catch (e: Exception) {
+                        testResultText.text = "❌ Erreur Google AccountManager : ${e.message}"
+                    }
+                }
+            },
+            null
         )
     }
 
-    private fun testConnection() {
-        val account = buildAccountFromForm()
-        binding.emailTestResultText.visibility = android.view.View.VISIBLE
-        if (account == null) {
-            binding.emailTestResultText.text = getString(R.string.email_missing_fields)
-            return
-        }
-        binding.emailTestResultText.text = "🔄 Test de connexion en cours…"
-        lifecycleScope.launch {
-            binding.emailTestResultText.text = EmailController.testConnection(account)
-        }
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private fun saveAccount() {
-        val account = buildAccountFromForm()
-        if (account == null) {
-            binding.emailTestResultText.visibility = android.view.View.VISIBLE
-            binding.emailTestResultText.text = getString(R.string.email_missing_fields)
-            return
-        }
-        Prefs.addEmailAccount(this, account)
-        refreshAccountsList()
-        binding.emailTestResultText.visibility = android.view.View.VISIBLE
-        binding.emailTestResultText.text = "✅ Compte ${account.email} enregistré."
-    }
+    private fun buildGoogleEmailAccount(email: String, pass: String) = Prefs.EmailAccount(
+        label        = "Gmail",
+        email        = email,
+        password     = pass,
+        imapHost     = "imap.gmail.com",
+        imapPort     = 993,
+        imapSsl      = true,
+        smtpHost     = "smtp.gmail.com",
+        smtpPort     = 587,
+        smtpStartTls = true,
+        isDefault    = Prefs.getEmailAccounts(this).isEmpty()
+    )
 
     private fun refreshAccountsList() {
-        binding.emailAccountsContainer.removeAllViews()
+        accountsContainer.removeAllViews()
         val accounts = Prefs.getEmailAccounts(this)
+
         if (accounts.isEmpty()) {
-            val empty = TextView(this).apply {
-                text = getString(R.string.email_no_accounts)
-                setTextColor(ContextCompat.getColor(this@EmailConfigActivity, R.color.text_secondary))
+            accountsContainer.addView(TextView(this).apply {
+                text = "Aucun compte Google connecté dans JARVIS."
+                setTextColor(getColor(R.color.text_secondary))
                 textSize = 13f
-                setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
-            }
-            binding.emailAccountsContainer.addView(empty)
+            })
             return
         }
 
-        accounts.forEach { account ->
-            val row = LinearLayout(this).apply {
+        for (acc in accounts) {
+            val itemLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setBackgroundResource(R.drawable.bg_model_row)
-                setPadding(dpToPx(14), dpToPx(14), dpToPx(14), dpToPx(14))
+                setPadding(14, 14, 14, 14)
+                background = getDrawable(R.drawable.bg_bubble_ai)
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { setMargins(0, 0, 0, dpToPx(8)) }
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.bottomMargin = 8 }
             }
-            val label = TextView(this).apply {
-                val badge = if (account.isDefault) getString(R.string.email_default_badge) else ""
-                text = "${account.label}\n${account.email}$badge"
-                setTextColor(ContextCompat.getColor(this@EmailConfigActivity, R.color.text_primary))
-                textSize = 13f
+
+            val textInfo = TextView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                val defTag   = if (acc.isDefault) " ⭐" else ""
+                val authType = if (acc.isOAuth) "OAuth2 Google ✅" else "App Password"
+                text = "📧 ${acc.label}$defTag\n${acc.email}\nAuth : $authType"
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 13f
             }
-            val delete = TextView(this).apply {
-                text = getString(R.string.email_delete_button)
-                setTextColor(ContextCompat.getColor(this@EmailConfigActivity, R.color.accent_rouge))
+
+            val btnDelete = TextView(this).apply {
+                text = "🗑 Déconnecter"
+                setTextColor(getColor(R.color.cyan_accent))
                 textSize = 12f
-                setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                setPadding(16, 8, 16, 8)
                 setOnClickListener {
-                    Prefs.removeEmailAccount(this@EmailConfigActivity, account.id)
+                    Prefs.removeEmailAccount(this@EmailConfigActivity, acc.id)
                     refreshAccountsList()
                 }
             }
-            row.addView(label)
-            row.addView(delete)
-            binding.emailAccountsContainer.addView(row)
+
+            itemLayout.addView(textInfo)
+            itemLayout.addView(btnDelete)
+            accountsContainer.addView(itemLayout)
         }
     }
-
-    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 }
