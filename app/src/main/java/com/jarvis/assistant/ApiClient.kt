@@ -936,7 +936,7 @@ object ApiClient {
      *  disponible sur l'appareil, ou un modèle Qwen/LiteRT déjà téléchargé. Renvoie le provider
      *  local à essayer, ou null si le mode est désactivé ou qu'aucun modèle n'est prêt (dans ce
      *  cas sendChat ne tente rien en local, comportement inchangé). */
-    private fun readyLocalProviderForFirstTry(context: Context): Provider? {
+    private suspend fun readyLocalProviderForFirstTry(context: Context): Provider? {
         if (!Prefs.isLocalFirstMode(context)) return null
         if (GeminiNanoController.checkStatus() == FeatureStatus.AVAILABLE) return Provider.GEMINI_NANO
         val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(context))
