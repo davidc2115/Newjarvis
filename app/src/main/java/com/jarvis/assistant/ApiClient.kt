@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -66,6 +67,12 @@ object ApiClient {
     // plus anciens ne servent qu'à donner le CONTEXTE général du fil, pas à être reproduits
     // mot pour mot -- un résumé tronqué suffit très largement pour ça.
     private const val FULL_TEXT_RECENT_ENTRIES = 4
+    // Délai max accordé à la tentative "IA locale d'abord" avant repli cloud (voir usage
+    // plus bas) -- assez pour Gemini Nano/AICore (accéléré matériel, quasi toujours < 3s) et
+    // pour un petit modèle LiteRT/Qwen sur un appareil correct, mais borné pour ne jamais
+    // faire attendre l'utilisateur plus longtemps qu'un simple appel cloud direct en cas de
+    // modèle local lent/bloqué.
+    private const val LOCAL_FIRST_PROBE_TIMEOUT_MS = 10_000L
     // Longueur max conservée pour un message d'historique en dehors de la fenêtre ci-dessus.
     private const val TRUNCATED_ENTRY_MAX_CHARS = 220
 
@@ -426,12 +433,26 @@ object ApiClient {
             val rawResponse = try {
                 val localCandidate = if (!provider.isLocal) readyLocalProviderForFirstTry(context) else null
                 if (localCandidate != null) {
-                    val localTry = sendLocal(context, localCandidate, history, rawEscalateMarker = true)
-                    if (!localTry.startsWith("❌") && !localTry.contains(LOCAL_ESCALATE_MARKER)) {
+                    // Borne dans le temps -- signalement utilisateur : "temps de réponse très
+                    // long" depuis l'ajout de ce mode. Un modèle local CPU (Qwen/LiteRT,
+                    // contrairement à Gemini Nano/AICore accéléré matériellement) peut prendre
+                    // largement plus de temps qu'un simple appel cloud direct ; sans borne,
+                    // CHAQUE message payait cette latence en entier avant même de tenter le
+                    // cloud, y compris quand la tentative locale finissait par échouer/escalader
+                    // de toute façon. Au-delà de ce délai, on abandonne silencieusement la
+                    // tentative locale et on part directement sur le cloud -- même comportement
+                    // pour l'utilisateur qu'un échec/ESCALATE_CLOUD normal.
+                    val localTry = withTimeoutOrNull(LOCAL_FIRST_PROBE_TIMEOUT_MS) {
+                        sendLocal(context, localCandidate, history, rawEscalateMarker = true)
+                    }
+                    if (localTry != null && !localTry.startsWith("❌") && !localTry.contains(LOCAL_ESCALATE_MARKER)) {
                         localFirstUsed = true
                         DiagnosticsLog.log(context, "Local", "IA locale d'abord : réponse locale utilisée, cloud non sollicité.")
                         localTry
                     } else {
+                        if (localTry == null) {
+                            DiagnosticsLog.log(context, "Local", "IA locale d'abord : abandon après ${LOCAL_FIRST_PROBE_TIMEOUT_MS}ms (trop lent), repli cloud.")
+                        }
                         dispatchToProvider(context, provider, history, effectiveSystemPrompt)
                     }
                 } else {
@@ -555,7 +576,16 @@ object ApiClient {
                         val formatted = applyMarkerFormatting(context, provider, commandResult.outputMessage, marker)
                         if (cleanText.isBlank()) formatted else "$cleanText\n\n$formatted"
                     } else if (commandResult.isInformational) {
-                        summarizeNaturally(context, provider, lastUserMsg, commandResult.outputMessage)
+                        // Signalement utilisateur "temps de réponse très long" : pour un
+                        // provider LOCAL, ce passage de reformulation IA doublait purement et
+                        // simplement le temps de réponse (2e génération locale complète après
+                        // celle qui a produit l'action JARVIS_CMD), pour un gain cosmétique
+                        // (prose fluide vs liste déjà lisible) qui ne vaut pas la latence sur un
+                        // modèle CPU embarqué. Le résultat brut, déjà bien formaté par action
+                        // (executeAction), reste utilisé tel quel dans ce cas -- comportement
+                        // inchangé pour le cloud, où cette latence est négligeable.
+                        if (provider.isLocal) commandResult.outputMessage
+                        else summarizeNaturally(context, provider, lastUserMsg, commandResult.outputMessage)
                     } else if (cleanText.isBlank()) {
                         commandResult.outputMessage
                     } else {
@@ -573,7 +603,10 @@ object ApiClient {
                         val formatted = applyMarkerFormatting(context, provider, combined, combinedMarker)
                         if (cleanText.isBlank()) formatted else "$cleanText\n\n$formatted"
                     } else if (anyInformational) {
-                        summarizeNaturally(context, provider, lastUserMsg, combined)
+                        // Même raison que ci-dessus (voir branche Executed) : pas de 2e passe
+                        // IA locale, juste le combiné brut déjà lisible.
+                        if (provider.isLocal) combined
+                        else summarizeNaturally(context, provider, lastUserMsg, combined)
                     } else if (cleanText.isBlank()) {
                         combined
                     } else {
