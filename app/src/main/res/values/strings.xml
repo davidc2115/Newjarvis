@@ -15,4 +15,9 @@
     <string name="google_signin_error">❌ Échec de la connexion Google : %1$s</string>
     <string name="google_authorization_error">❌ Échec de l\'autorisation Gmail/Agenda : %1$s</string>
     <string name="google_account_linked">✅ Compte Google lié : %1$s (accès Gmail/Agenda autorisé).</string>
+
+    <!-- Economie de tokens (voir ApiClient.buildSystemPrompt/Prefs.isCompactPromptMode/isLocalFirstMode). -->
+    <string name="token_savings_section_label">Économie de tokens</string>
+    <string name="token_savings_description">Réglages déjà pilotables en conversation (\"active le mode compact\", \"IA locale d\'abord\"...), rendus visibles ici pour ne pas avoir à les connaître par cœur. Le mode compact réduit les modules ajoutés automatiquement au prompt cloud ; \"IA locale d\'abord\" tente gratuitement le modèle embarqué (⚙ Local) avant le cloud, avec repli automatique si besoin.</string>
+    <string name="token_usage_view_button">📊 VOIR MA CONSOMMATION</string>
 </resources>

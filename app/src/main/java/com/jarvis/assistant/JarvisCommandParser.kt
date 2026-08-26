@@ -69,7 +69,8 @@ object JarvisCommandParser {
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "run_glif",
         "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "token_usage",
-        "list_contact_templates", "get_history_limit", "get_compact_mode", "get_memory_limit"
+        "list_contact_templates", "get_history_limit", "get_compact_mode", "get_memory_limit",
+        "get_local_first_mode"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -547,7 +548,27 @@ object JarvisCommandParser {
                         "automatiquement dès qu'ils sont configurés, comme avant."
                 }
             }
-            "get_compact_mode" -> if (Prefs.isCompactPromptMode(context)) "📊 Mode compact : activé." else "📊 Mode compact : désactivé (réglage par défaut)."
+            "get_compact_mode" -> if (Prefs.isCompactPromptMode(context)) "📊 Mode compact : activé (réglage par défaut)." else "📊 Mode compact : désactivé."
+            // "IA locale d'abord" (voir Prefs.isLocalFirstMode/ApiClient.readyLocalProviderForFirstTry,
+            // demande utilisateur : "passer par IA locale et cloud" pour réduire la consommation
+            // de tokens). Désactivé par défaut : quand actif, chaque message est d'abord tenté
+            // GRATUITEMENT sur le modèle embarqué (Gemini Nano/Qwen local) si prêt ; en cas
+            // d'échec ou si le modèle local ne peut pas répondre (message <<ESCALATE_CLOUD>>,
+            // jamais montré tel quel), bascule silencieuse et automatique sur le cloud habituel.
+            "set_local_first_mode" -> {
+                val enabled = json.optBoolean("enabled", true)
+                Prefs.setLocalFirstMode(context, enabled)
+                if (enabled) {
+                    "✅ IA locale d'abord activée : chaque message est d'abord tenté gratuitement sur le " +
+                        "modèle embarqué (Gemini Nano ou modèle Qwen local, selon ce qui est prêt sur cet " +
+                        "appareil) — le cloud n'est sollicité que si le modèle local ne peut pas répondre. " +
+                        "Nécessite un modèle local déjà prêt (⚙ Réglages → Local) pour avoir un effet réel."
+                } else {
+                    "✅ IA locale d'abord désactivée : chaque message repart directement sur le fournisseur " +
+                        "cloud configuré, comme avant."
+                }
+            }
+            "get_local_first_mode" -> if (Prefs.isLocalFirstMode(context)) "📊 IA locale d'abord : activée." else "📊 IA locale d'abord : désactivée (réglage par défaut)."
             // Taille de la note "Mémoire JARVIS" injectée à CHAQUE message (voir
             // Prefs.getMaxMemoryChars/ObsidianController.trimMemoryIfNeeded).
             "set_memory_limit" -> {

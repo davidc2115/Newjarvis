@@ -583,6 +583,70 @@
                 android:layout_marginTop="4dp"
                 android:layout_marginBottom="16dp" />
 
+            <!-- Economie de tokens (demande utilisateur : prompts plus courts / consommation
+                 moins importante, IA locale + cloud). Rend visibles des reglages qui existaient
+                 deja cote backend mais uniquement pilotables en conversation (set_compact_mode,
+                 set_local_first_mode, token_usage) : tache #251. -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/token_savings_section_label"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/token_savings_description"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/toggleCompactModeButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/toggleLocalFirstButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/viewTokenUsageButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="@string/token_usage_view_button"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="16dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="16dp" />
+
             <!-- Compte(s) Google OAuth (Agenda/Mail) : greffe de l'integration actuelle de
                  l'appli (taches #247-249, demande explicite de l'utilisateur de garder l'OAuth
                  Google en plus du calendrier local et de l'IMAP/SMTP existants de cette base). -->

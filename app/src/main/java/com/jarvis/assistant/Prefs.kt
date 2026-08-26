@@ -1307,12 +1307,17 @@ object Prefs {
         val total = prefs(context).getLong("token_usage_total", 0L)
         if (requests == 0L) return "📊 Aucun appel IA enregistré pour l'instant."
         val avg = if (requests > 0) total / requests else 0L
+        val localHits = prefs(context).getLong("token_usage_local_hits", 0L)
+        val localLine = if (localHits > 0) {
+            val pct = (localHits * 100 / requests)
+            "\n• Répondu en local (gratuit, sans cloud) : $localHits/$requests appel(s) (~$pct%)"
+        } else ""
         return "📊 Estimation de tokens (≈4 caractères = 1 token, approximatif — pas de compteur " +
             "officiel côté téléphone) :\n" +
             "• Dernière requête : ~$lastPrompt tokens envoyés (prompt système + mémoire + contexte " +
             "vault + historique), ~$lastResponse tokens reçus\n" +
             "• Depuis l'installation : $requests appel(s) IA, ~$total tokens au total (~$avg/appel " +
-            "en moyenne)"
+            "en moyenne)$localLine"
     }
 
     fun clearTokenUsage(context: Context) {
@@ -1321,7 +1326,32 @@ object Prefs {
             .remove("token_usage_last_response")
             .remove("token_usage_requests")
             .remove("token_usage_total")
+            .remove("token_usage_local_hits")
             .apply()
+    }
+
+    // ─── Mode "IA locale d'abord" (économie de tokens) ─────────────────────────────────────
+    // Demande utilisateur : "faire des prompts plus courts ou une consommation de token
+    // beaucoup moins importante, passer par IA locale et cloud ?" -- quand actif, ApiClient
+    // tente D'ABORD le modèle embarqué (Gemini Nano/Qwen local, gratuit, ~200 tokens de prompt
+    // système au lieu de ~1400-6800) pour chaque message ; si le modèle local s'estime incapable
+    // de répondre (données réelles du téléphone nécessaires) ou échoue, on repasse
+    // automatiquement et silencieusement sur le fournisseur cloud habituel -- l'utilisateur ne
+    // voit jamais la tentative locale ratée, seulement la réponse finale. Désactivé par défaut
+    // (comportement inchangé tant que l'utilisateur ne l'active pas) car un petit modèle local
+    // peut se tromper sur des demandes ambiguës qu'un modèle cloud aurait mieux gérées.
+    fun isLocalFirstMode(context: Context): Boolean =
+        prefs(context).getBoolean("local_first_mode", false)
+
+    fun setLocalFirstMode(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("local_first_mode", enabled).apply()
+    }
+
+    /** Compte un message répondu localement (sans passer par le cloud) -- voir
+     *  ApiClient.sendChat. Affiché dans getTokenUsageReport pour rendre l'économie visible. */
+    fun recordLocalFirstHit(context: Context) {
+        val hits = prefs(context).getLong("token_usage_local_hits", 0L) + 1
+        prefs(context).edit().putLong("token_usage_local_hits", hits).apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════

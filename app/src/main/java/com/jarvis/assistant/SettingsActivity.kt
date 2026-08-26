@@ -525,6 +525,7 @@ class SettingsActivity : AppCompatActivity() {
 
         setupTermuxSdSection()
         setupDebugLogsButton()
+        setupTokenSavingsSection()
         setupGoogleAccountSection()
     }
 
@@ -551,6 +552,57 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun updateWakeWordButtonLabel(button: TextView) {
         button.text = if (Prefs.isWakeWordEnabled(this)) "DÉSACTIVER L'ÉCOUTE PERMANENTE" else "ACTIVER L'ÉCOUTE PERMANENTE"
+    }
+
+    /**
+     * Économie de tokens (tâche #251, demande utilisateur : "prompts plus courts ou une
+     * consommation de token beaucoup moins importante, passer par IA locale et cloud ?") --
+     * expose ici des réglages qui existaient déjà côté backend (Prefs.isCompactPromptMode,
+     * Prefs.isLocalFirstMode, Prefs.getTokenUsageReport) mais n'étaient pilotables QU'en
+     * conversation ("active le mode compact"...) : un utilisateur qui ne sait pas que ces
+     * leviers existent ne peut jamais les découvrir. Toggles au même style TextView que le
+     * reste de l'écran (voir toggleWakeWordButton), pas de Switch pour rester cohérent.
+     */
+    private fun setupTokenSavingsSection() {
+        val compactButton = findViewById<TextView>(R.id.toggleCompactModeButton)
+        val localFirstButton = findViewById<TextView>(R.id.toggleLocalFirstButton)
+        val viewUsageButton = findViewById<TextView>(R.id.viewTokenUsageButton)
+
+        fun refreshCompactLabel() {
+            compactButton.text = if (Prefs.isCompactPromptMode(this)) {
+                "✅ MODE COMPACT ACTIVÉ (moins de tokens)"
+            } else {
+                "MODE COMPACT DÉSACTIVÉ (activer)"
+            }
+        }
+        fun refreshLocalFirstLabel() {
+            localFirstButton.text = if (Prefs.isLocalFirstMode(this)) {
+                "✅ IA LOCALE D'ABORD ACTIVÉE (gratuit)"
+            } else {
+                "IA LOCALE D'ABORD DÉSACTIVÉE (activer)"
+            }
+        }
+        refreshCompactLabel()
+        refreshLocalFirstLabel()
+
+        compactButton.setOnClickListener {
+            Prefs.setCompactPromptMode(this, !Prefs.isCompactPromptMode(this))
+            refreshCompactLabel()
+        }
+        localFirstButton.setOnClickListener {
+            Prefs.setLocalFirstMode(this, !Prefs.isLocalFirstMode(this))
+            refreshLocalFirstLabel()
+            if (Prefs.isLocalFirstMode(this)) {
+                Toast.makeText(
+                    this,
+                    "Actif seulement si un modèle local est prêt (⚙ → Local) — sinon le cloud reste utilisé normalement.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        viewUsageButton.setOnClickListener {
+            showCopyableErrorDialog("📊 Consommation de tokens", Prefs.getTokenUsageReport(this))
+        }
     }
 
     /**
