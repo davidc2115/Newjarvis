@@ -91,9 +91,23 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.backButton.setOnClickListener { finish() }
 
+        setupPersonalizationSection()
         setupModelSelection()
         setupGoogleAccountSection()
         setupObsidianSection()
+    }
+
+    /** Prénom utilisé par JARVIS dans ses réponses conversationnelles (voir
+     *  MainActivity.buildConversationalPrompt) -- même schéma de sauvegarde que
+     *  googleWebClientIdInput ci-dessous : on écrit dans Prefs à la perte du focus, pas à
+     *  chaque frappe (évite d'écrire sur le disque à chaque caractère tapé). */
+    private fun setupPersonalizationSection() {
+        binding.userNameInput.setText(Prefs.getUserName(this).orEmpty())
+        binding.userNameInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                Prefs.setUserName(this, binding.userNameInput.text?.toString().orEmpty())
+            }
+        }
     }
 
     private fun selectColor(color: Int) {

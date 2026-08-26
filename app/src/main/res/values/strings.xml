@@ -8,6 +8,9 @@
     <string name="tts_toggle_description">Activer/couper la voix de JARVIS</string>
     <string name="mic_button_description">Parler à JARVIS</string>
     <string name="settings_color_label">Couleur d\'accent</string>
+    <string name="personalization_section_label">Comment JARVIS doit s\'adresser à toi</string>
+    <string name="user_name_hint">Ton prénom (optionnel)</string>
+    <string name="user_name_help">JARVIS utilisera ce prénom dans la conversation. Laisse vide pour rester neutre.</string>
     <string name="gemini_nano_unavailable">🤖 Gemini Nano n\'est pas disponible sur cet appareil (nécessite AICore — Pixel 8/8 Pro/8a/9 ou Galaxy S24 notamment). Aucune réponse IA possible pour l\'instant.</string>
     <string name="gemini_nano_downloading">⬇️ Gemini Nano n\'est pas encore téléchargé sur cet appareil — téléchargement en cours (peut prendre plusieurs minutes selon la connexion)…</string>
     <string name="gemini_nano_still_downloading">⏳ Gemini Nano est en cours de téléchargement — réessaie dans un instant.</string>

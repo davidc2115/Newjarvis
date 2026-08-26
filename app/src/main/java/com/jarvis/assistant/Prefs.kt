@@ -26,6 +26,7 @@ object Prefs {
     private const val KEY_GOOGLE_ACCESS_TOKEN_EXPIRY = "google_oauth_access_token_expiry_millis"
     private const val KEY_OBSIDIAN_VAULT_URI = "obsidian_vault_tree_uri"
     private const val KEY_TTS_ENABLED = "tts_enabled"
+    private const val KEY_USER_NAME = "user_display_name"
     private const val KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL = "google_active_account_email"
     private const val KEY_GOOGLE_ACCOUNT_TOKENS = "google_account_tokens_json"
 
@@ -77,6 +78,18 @@ object Prefs {
 
     fun setTtsEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_TTS_ENABLED, enabled).apply()
+    }
+
+    // Nom/prénom que l'utilisateur veut que JARVIS utilise pour s'adresser à lui (axe "vrai
+    // dialogue" -- un assistant qui ne connaît pas le nom de son utilisateur ne peut pas
+    // vraiment personnaliser la conversation). Optionnel : null/vide si jamais renseigné dans
+    // Réglages, auquel cas MainActivity.buildConversationalPrompt reste neutre plutôt que
+    // d'inventer un nom.
+    fun getUserName(context: Context): String? =
+        prefs(context).getString(KEY_USER_NAME, null)?.trim()?.ifBlank { null }
+
+    fun setUserName(context: Context, name: String) {
+        prefs(context).edit().putString(KEY_USER_NAME, name.trim()).apply()
     }
 
     fun setActiveConversationId(context: Context, id: String) {

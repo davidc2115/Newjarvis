@@ -436,8 +436,26 @@ class MainActivity : AppCompatActivity() {
      * "conversation trop longue" par le passé sur ce projet.
      */
     private suspend fun buildConversationalPrompt(userText: String): String {
-        val preamble = "Tu es JARVIS, l'assistant personnel de l'utilisateur sur son t\u00e9l\u00e9phone Android. " +
-            "R\u00e9ponds de fa\u00e7on naturelle, concise et utile, en fran\u00e7ais."
+        // Personnalite JARVIS (axe "vrai dialogue" -- demande explicite : une appli JARVIS/
+        // Ironman ne doit pas repondre comme un chatbot generique). Avant cette tache, le
+        // preambule etait strictement neutre ("reponds de facon naturelle, concise et utile") :
+        // aucune personnalite, aucun prenom utilisateur, aucune consigne de clarification. Le
+        // prenom (voir Prefs.getUserName, Reglages) reste optionnel -- jamais invente si non
+        // renseigne.
+        val userName = Prefs.getUserName(this)
+        val identity = if (userName != null) {
+            "l'assistant personnel de $userName"
+        } else {
+            "l'assistant personnel de l'utilisateur"
+        }
+        val addressing = if (userName != null) {
+            " Adresse-toi \u00e0 $userName par son pr\u00e9nom, sans formule ampoul\u00e9e."
+        } else ""
+        val preamble = "Tu es JARVIS, $identity sur son t\u00e9l\u00e9phone Android, inspir\u00e9 du JARVIS " +
+            "d'Iron Man : loyal, pr\u00e9cis et efficace, avec une pointe d'humour discret -- jamais " +
+            "moqueur, jamais bavard pour rien. R\u00e9ponds de fa\u00e7on naturelle, chaleureuse et " +
+            "concise, en fran\u00e7ais.$addressing Si une demande est ambigu\u00eb ou incompl\u00e8te, " +
+            "pose une question courte pour clarifier plut\u00f4t que de deviner."
         val memory = if (ObsidianController.hasVault(this)) {
             ObsidianController.readNote(this, ObsidianController.MEMORY_NOTE_TITLE).getOrNull()
         } else null
