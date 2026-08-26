@@ -24,6 +24,13 @@ object CommandInterpreter {
         data class CallContact(val name: String) : Command()
         data class CreateContact(val name: String, val phoneNumber: String) : Command()
         data class FindContact(val name: String) : Command()
+        // Genere une note par contact du carnet d'adresses natif dans le dossier "Contacts"
+        // du vault Obsidian (tache #240, demande explicite : "vrai systeme Obsidian... les
+        // dossier[s] contact[s]... generation"). Les contacts vivent dans ContactsContract
+        // (Android), pas dans le vault -- cette commande cree le pont entre les deux, une
+        // fois demandee (pas automatique/silencieux : l'utilisateur choisit quand generer/
+        // regenerer, voir MainActivity pour le detail create-si-absent, jamais d'ecrasement).
+        object SyncContactsToVault : Command()
         object GetLocation : Command()
         data class FindFile(val query: String) : Command()
         data class DeleteFile(val name: String) : Command()
@@ -118,6 +125,16 @@ object CommandInterpreter {
         "(?:num[ée]ro de|cherche(?: le)? contact|trouve(?: le)? contact|affiche(?: le)? contact|adresse de|o[uù] habite|" +
             "as-tu (?:le )?(?:num[ée]ro|contact) de|donne(?:-moi)? (?:le )?(?:num[ée]ro|contact) de|" +
             "c['’]est quoi le num[ée]ro de)\\s+([\\p{L} '\\-]+)",
+        RegexOption.IGNORE_CASE
+    )
+    // Genere une note par contact dans le dossier "Contacts" du vault (tache #240) --
+    // necessite le mot-cle "vault"/"obsidian"/"notes" en plus de "contact(s)" pour ne jamais
+    // collisionner avec callContactRegex/createContactRegex/findContactRegex ci-dessus (aucun
+    // d'eux ne mentionne le vault). Verbes larges ("genere"/"synchronise"/"cree"/"exporte") --
+    // "fiches?" optionnel, la formulation la plus naturelle variant beaucoup ici.
+    private val syncContactsToVaultRegex = Regex(
+        "(?:g[ée]n[èe]re|synchronise|cr[ée]e?|exporte)[^.]*(?:fiches? (?:de )?)?contacts?[^.]*" +
+            "(?:vault|obsidian|notes?)",
         RegexOption.IGNORE_CASE
     )
     private val locationRegex = Regex(
@@ -447,6 +464,12 @@ object CommandInterpreter {
             if (name.isNotBlank() && number.length >= 6) return Command.CreateContact(name, number)
         }
 
+        // Verifie AVANT findContactRegex : sync_contacts exige a la fois "contact(s)" ET
+        // "vault/obsidian/notes", donc plus specifique -- si on la mettait apres, findContactRegex
+        // ne matcherait de toute facon pas ("genere ... vault" n'a pas la forme "contact de X"),
+        // mais on la place ici par lisibilite / regroupement avec les autres commandes contact.
+        if (syncContactsToVaultRegex.containsMatchIn(trimmed)) return Command.SyncContactsToVault
+
         findContactRegex.find(trimmed)?.let { match ->
             val name = cleanName(match.groupValues[1])
             if (name.isNotBlank()) return Command.FindContact(name)
@@ -683,6 +706,7 @@ Actions possibles (respecte exactement les noms des champs, JSON valide, une seu
 {"action":"call_contact","name":"Julie"}
 {"action":"create_contact","name":"Julie","number":"0612345678"}
 {"action":"find_contact","name":"Julie"}
+{"action":"sync_contacts_to_vault"}
 {"action":"get_location"}
 {"action":"find_file","query":"facture"}
 {"action":"delete_file","name":"facture.pdf"}
@@ -774,6 +798,7 @@ JSON :"""
                 if (name.isNotBlank() && number.length >= 6) Command.CreateContact(name, number) else null
             }
             "find_contact" -> str("name").ifBlank { null }?.let { Command.FindContact(cleanName(it)) }
+            "sync_contacts_to_vault" -> Command.SyncContactsToVault
             "get_location" -> Command.GetLocation
             "find_file" -> str("query").ifBlank { null }?.let { Command.FindFile(it) }
             "delete_file" -> str("name").ifBlank { null }?.let { Command.DeleteFile(it) }

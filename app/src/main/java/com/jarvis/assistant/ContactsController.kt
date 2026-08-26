@@ -107,6 +107,63 @@ object ContactsController {
         }
     }
 
+    /**
+     * Tous les contacts natifs avec leurs numeros/adresse (tache #240, demande explicite
+     * utilisateur -- "generer les fiches contact" dans le vault Obsidian, comme l'ancienne
+     * appli). Requete large deja utilisee ailleurs (normalize()/findContact) : recupere
+     * d'abord tous les (_ID, DISPLAY_NAME) puis, pour chaque contact, ses numeros et son
+     * adresse -- meme logique que findContact, juste sans filtre de nom.
+     */
+    fun listAllContacts(context: Context): Result<List<ContactInfo>> {
+        return try {
+            val resolver = context.contentResolver
+            val ids = mutableListOf<Pair<Long, String>>()
+            resolver.query(
+                ContactsContract.Contacts.CONTENT_URI,
+                arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.DISPLAY_NAME),
+                null, null, null
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameCol) ?: continue
+                    if (name.isBlank()) continue
+                    ids.add(cursor.getLong(idCol) to name)
+                }
+            }
+            val result = ids.map { (id, name) ->
+                val phones = mutableListOf<String>()
+                resolver.query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                    "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                    arrayOf(id.toString()), null
+                )?.use { phoneCursor ->
+                    while (phoneCursor.moveToNext()) {
+                        phones.add(phoneCursor.getString(phoneCursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)))
+                    }
+                }
+                var address: String? = null
+                resolver.query(
+                    ContactsContract.CommonDataKinds.StructuredPostal.CONTENT_URI,
+                    arrayOf(ContactsContract.CommonDataKinds.StructuredPostal.FORMATTED_ADDRESS),
+                    "${ContactsContract.CommonDataKinds.StructuredPostal.CONTACT_ID} = ?",
+                    arrayOf(id.toString()), null
+                )?.use { addressCursor ->
+                    if (addressCursor.moveToFirst()) {
+                        address = addressCursor.getString(
+                            addressCursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.StructuredPostal.FORMATTED_ADDRESS)
+                        )
+                    }
+                }
+                ContactInfo(name, phones, address)
+            }
+            Result.success(result)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /** Crée un nouveau contact (nom + un numéro de téléphone). */
     fun createContact(context: Context, name: String, phoneNumber: String): Boolean {
         return try {

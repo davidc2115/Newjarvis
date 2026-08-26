@@ -453,6 +453,7 @@ class MainActivity : AppCompatActivity() {
                 listOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE)
             is CommandInterpreter.Command.CreateContact -> listOf(Manifest.permission.WRITE_CONTACTS)
             is CommandInterpreter.Command.FindContact -> listOf(Manifest.permission.READ_CONTACTS)
+            is CommandInterpreter.Command.SyncContactsToVault -> listOf(Manifest.permission.READ_CONTACTS)
             is CommandInterpreter.Command.GetLocation -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
             is CommandInterpreter.Command.CreateKml -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
             is CommandInterpreter.Command.Notify ->
@@ -733,6 +734,47 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
+        // Synchronisation contacts -> vault (tache #240) : une note par contact du carnet
+        // d'adresses natif, dans le dossier "Contacts". Jamais d'ecrasement -- createNote
+        // echoue explicitement si la note existe deja ("existe deja"), ce qui est traite ici
+        // comme un skip normal (pas une erreur) : l'utilisateur choisit quand generer/
+        // regenerer, et une fiche deja presente peut avoir ete editee a la main entretemps.
+        if (command is CommandInterpreter.Command.SyncContactsToVault) {
+            lifecycleScope.launch {
+                val listResult = ContactsController.listAllContacts(this@MainActivity)
+                val contacts = listResult.getOrNull()
+                if (listResult.isFailure || contacts == null) {
+                    val e = listResult.exceptionOrNull()
+                    appendAssistantMessage("\u274c Impossible de lire les contacts -- ${e?.javaClass?.simpleName} : ${e?.message}")
+                    return@launch
+                }
+                var created = 0
+                var skipped = 0
+                var failed = 0
+                for (contact in contacts) {
+                    val content = buildString {
+                        append("\uD83D\uDC64 ${contact.name}")
+                        if (contact.phoneNumbers.isNotEmpty()) {
+                            append("\n\uD83D\uDCDE ${contact.phoneNumbers.joinToString(", ")}")
+                        } else {
+                            append("\n\uD83D\uDCDE aucun num\u00e9ro enregistr\u00e9")
+                        }
+                        if (!contact.address.isNullOrBlank()) append("\n\uD83C\uDFE0 ${contact.address}")
+                    }
+                    val result = ObsidianController.createNote(this@MainActivity, contact.name, content, folder = "Contacts")
+                    when {
+                        result.isSuccess -> created++
+                        result.exceptionOrNull()?.message?.contains("existe d\u00e9j\u00e0") == true -> skipped++
+                        else -> failed++
+                    }
+                }
+                appendAssistantMessage(
+                    "\uD83D\uDCC7 Synchronisation contacts \u2192 vault termin\u00e9e : $created fiche(s) cr\u00e9\u00e9e(s), " +
+                        "$skipped d\u00e9j\u00e0 \u00e0 jour, $failed erreur(s)."
+                )
+            }
+            return
+        }
         if (command is CommandInterpreter.Command.ReadNote) {
             lifecycleScope.launch {
                 val result = ObsidianController.readNote(this@MainActivity, command.title)
@@ -930,6 +972,7 @@ class MainActivity : AppCompatActivity() {
             CommandInterpreter.Command.ListFolders -> return // géré au-dessus (async, SAF)
             is CommandInterpreter.Command.DeleteFolder -> return // géré au-dessus (async, SAF)
             is CommandInterpreter.Command.RenameFolder -> return // géré au-dessus (async, SAF)
+            is CommandInterpreter.Command.SyncContactsToVault -> return // géré au-dessus (async, SAF+ContentResolver)
         }
         appendAssistantMessage(reply)
     }
