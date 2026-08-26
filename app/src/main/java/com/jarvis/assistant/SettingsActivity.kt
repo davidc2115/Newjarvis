@@ -412,7 +412,6 @@ class SettingsActivity : AppCompatActivity() {
         // #247/#248 -- demande explicite : garder les modeles IA on-device ACTUELS de l'appli
         // reecrite, pas l'ancien systeme natif).
         setupOnDeviceAiSection()
-        findViewById<TextView>(R.id.deleteLocalModelButton).setOnClickListener { deleteLocalTextModel() }
 
         // ── Sauvegarde paramètres cloud ───────────────────────────────────────
         saveButton.setOnClickListener {
@@ -719,6 +718,22 @@ class SettingsActivity : AppCompatActivity() {
             }
             buttonRow.addView(btnDownload)
         }
+        if (isDownloaded) {
+            val btnDelete = TextView(this).apply {
+                text = "\ud83d\uddd1\ufe0f"
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 16f
+                gravity = android.view.Gravity.CENTER
+                background = getDrawable(R.drawable.bg_bubble_ai)
+                setPadding((14 * dp).toInt(), (10 * dp).toInt(), (14 * dp).toInt(), (10 * dp).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.marginStart = (8 * dp).toInt() }
+                setOnClickListener { deleteLocalTextModel(model) }
+            }
+            buttonRow.addView(btnDelete)
+        }
         card.addView(buttonRow)
 
         container.addView(card)
@@ -816,8 +831,7 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun deleteLocalTextModel() {
-        val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
+    private fun deleteLocalTextModel(model: LocalLlmController.LocalModel) {
         if (!LocalLlmController.isDownloaded(this, model)) {
             Toast.makeText(this, "Aucun mod\u00e8le local \u00e0 supprimer.", Toast.LENGTH_SHORT).show()
             return
