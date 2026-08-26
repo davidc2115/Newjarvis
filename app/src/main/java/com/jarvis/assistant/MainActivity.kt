@@ -55,6 +55,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Dictée vocale (voir VoiceController.buildRecognizerIntent) -- axe "voix/personnalité
+    // JARVIS" : l'appli réécrite (squelette vierge, tâche #182) n'avait ni entrée ni sortie
+    // vocale contrairement à l'ancienne version. Ici : lance la dictée système, remplit le
+    // champ de saisie avec la meilleure hypothèse reconnue, puis envoie directement -- comme
+    // si l'utilisateur avait tapé le message lui-même.
+    private val speechRecognitionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val text = result.data
+            ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+        if (!text.isNullOrBlank()) {
+            binding.messageInput.setText(text)
+            sendMessage()
+        }
+    }
+
     // Agenda + Mail via OAuth Google (voir GoogleCalendarApiController/GmailApiController) :
     // équivalent de permissionLauncher/pendingCommand ci-dessus, mais pour l'écran de
     // consentement Google (voir GoogleAccountController.requestAuthorization) au lieu d'une
@@ -167,6 +184,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         applyWindowInsets()
+        VoiceController.init(this)
         loadState()
         setupChat()
         setupSidebar()
@@ -300,11 +318,37 @@ class MainActivity : AppCompatActivity() {
         binding.menuButton.setOnClickListener { binding.root.openDrawer(GravityCompat.START) }
         binding.settingsButton.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         binding.openVaultButton.setOnClickListener { startActivity(Intent(this, VaultActivity::class.java)) }
+        updateTtsToggleIcon()
+        binding.ttsToggleButton.setOnClickListener {
+            val enabled = !Prefs.isTtsEnabled(this)
+            Prefs.setTtsEnabled(this, enabled)
+            if (!enabled) VoiceController.stop()
+            updateTtsToggleIcon()
+        }
+    }
+
+    private fun updateTtsToggleIcon() {
+        binding.ttsToggleButton.setImageResource(
+            if (Prefs.isTtsEnabled(this)) R.drawable.ic_volume_up else R.drawable.ic_volume_off
+        )
     }
 
     private fun setupInputBar() {
         applyAccentColor()
         binding.sendButton.setOnClickListener { sendMessage() }
+        binding.micButton.setOnClickListener { launchVoiceInput() }
+    }
+
+    /** Lance la dictée vocale système (voir speechRecognitionLauncher ci-dessus). Si aucune
+     *  appli de reconnaissance vocale n'est disponible sur l'appareil (rare, mais possible sur
+     *  certaines ROM sans Google), on le signale clairement plutôt que de planter. */
+    private fun launchVoiceInput() {
+        val intent = VoiceController.buildRecognizerIntent()
+        if (intent.resolveActivity(packageManager) != null) {
+            speechRecognitionLauncher.launch(intent)
+        } else {
+            appendAssistantMessage("❌ Aucune application de reconnaissance vocale disponible sur cet appareil.")
+        }
     }
 
     private fun applyAccentColor() {
@@ -1053,5 +1097,11 @@ class MainActivity : AppCompatActivity() {
         Prefs.saveConversations(this, conversations)
         refreshChat()
         refreshSidebar()
+        VoiceController.speak(this, text)
+    }
+
+    override fun onDestroy() {
+        VoiceController.shutdown()
+        super.onDestroy()
     }
 }

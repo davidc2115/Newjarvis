@@ -56,6 +56,19 @@
                 android:contentDescription="@string/settings_title"
                 android:padding="8dp" />
 
+            <!-- Coupe/active la voix de JARVIS (synthèse vocale des réponses, voir
+                 VoiceController + Prefs.isTtsEnabled) : axe "voix/personnalité JARVIS". -->
+            <ImageButton
+                android:id="@+id/ttsToggleButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_centerVertical="true"
+                android:layout_toStartOf="@id/settingsButton"
+                android:background="@drawable/bg_icon_button"
+                android:src="@drawable/ic_volume_up"
+                android:contentDescription="@string/tts_toggle_description"
+                android:padding="8dp" />
+
         </RelativeLayout>
 
         <androidx.recyclerview.widget.RecyclerView
@@ -93,6 +106,18 @@
                 android:inputType="textCapSentences|textMultiLine"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp" />
+
+            <!-- Dictée vocale (voir VoiceController.buildRecognizerIntent) : remplit le champ
+                 de saisie avec le texte reconnu et envoie directement, comme si tapé. -->
+            <ImageButton
+                android:id="@+id/micButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_icon_button"
+                android:src="@drawable/ic_mic"
+                android:contentDescription="@string/mic_button_description"
+                android:padding="8dp"
+                android:layout_marginEnd="6dp" />
 
             <ImageButton
                 android:id="@+id/sendButton"

@@ -5,6 +5,8 @@
     <string name="new_conversation">+ Nouvelle conversation</string>
     <string name="conversations_title">Conversations</string>
     <string name="settings_title">Réglages</string>
+    <string name="tts_toggle_description">Activer/couper la voix de JARVIS</string>
+    <string name="mic_button_description">Parler à JARVIS</string>
     <string name="settings_color_label">Couleur d\'accent</string>
     <string name="gemini_nano_unavailable">🤖 Gemini Nano n\'est pas disponible sur cet appareil (nécessite AICore — Pixel 8/8 Pro/8a/9 ou Galaxy S24 notamment). Aucune réponse IA possible pour l\'instant.</string>
     <string name="gemini_nano_downloading">⬇️ Gemini Nano n\'est pas encore téléchargé sur cet appareil — téléchargement en cours (peut prendre plusieurs minutes selon la connexion)…</string>

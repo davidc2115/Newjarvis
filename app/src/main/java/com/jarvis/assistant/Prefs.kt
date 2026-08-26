@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_GOOGLE_ACCESS_TOKEN = "google_oauth_access_token"
     private const val KEY_GOOGLE_ACCESS_TOKEN_EXPIRY = "google_oauth_access_token_expiry_millis"
     private const val KEY_OBSIDIAN_VAULT_URI = "obsidian_vault_tree_uri"
+    private const val KEY_TTS_ENABLED = "tts_enabled"
     private const val KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL = "google_active_account_email"
     private const val KEY_GOOGLE_ACCOUNT_TOKENS = "google_account_tokens_json"
 
@@ -67,6 +68,16 @@ object Prefs {
 
     fun getActiveConversationId(context: Context): String? =
         prefs(context).getString(KEY_ACTIVE_CONVERSATION_ID, null)
+
+    // Synthese vocale des reponses de JARVIS (tache voix/personnalite -- "vraie appli JARVIS").
+    // Active par defaut : un assistant JARVIS qui ne parle pas ne ressemble pas a JARVIS.
+    // L'utilisateur peut couper via le bouton haut-parleur dans la barre du haut.
+    fun isTtsEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_TTS_ENABLED, true)
+
+    fun setTtsEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_TTS_ENABLED, enabled).apply()
+    }
 
     fun setActiveConversationId(context: Context, id: String) {
         prefs(context).edit().putString(KEY_ACTIVE_CONVERSATION_ID, id).apply()
