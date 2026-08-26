@@ -589,7 +589,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Téléchargez un modèle IA directement sur le stockage de votre téléphone pour l'utiliser sans aucune connexion Internet."
+                android:text="Mod\u00e8le IA embarqu\u00e9 sur le t\u00e9l\u00e9phone -- fonctionne enti\u00e8rement hors ligne, aucune donn\u00e9e envoy\u00e9e \u00e0 un serveur. Deux options selon ton appareil (voir GeminiNanoController/LocalLlmController) : Gemini Nano (Pixel 8+/Galaxy S24, via AICore, aucun t\u00e9l\u00e9chargement de mod\u00e8le \u00e0 g\u00e9rer) ou un mod\u00e8le Qwen local (n'importe quel appareil, t\u00e9l\u00e9chargement explicite requis)."
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp"
                 android:layout_marginBottom="12dp" />
@@ -600,34 +600,40 @@
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_input"
                 android:padding="12dp"
-                android:text="Modèle actif : Aucun"
+                android:text="Mod\u00e8le actif : Aucun"
                 android:textColor="@color/cyan_accent"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
-                android:id="@+id/deleteLocalModelButton"
-                android:layout_width="match_parent"
-                android:layout_height="40dp"
-                android:text="🗑️ Supprimer ce modèle du téléphone"
-                android:textColor="#FF6B6B"
-                android:textSize="11sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
                 android:layout_marginBottom="16dp" />
 
-            <!-- Titre section modèles -->
+            <!-- Ligne Gemini Nano (AICore) -->
             <TextView
+                android:id="@+id/geminiNanoRow"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="📦 Modèles disponibles — cliquez pour télécharger directement sur le téléphone"
-                android:textColor="@color/cyan_accent"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_input"
+                android:padding="14dp"
+                android:text="\ud83e\udd16 Gemini Nano (Google AICore, sur l'appareil)"
+                android:textColor="@color/text_primary"
                 android:textSize="13sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="10dp" />
+                android:gravity="center_vertical"
+                android:layout_marginBottom="8dp" />
 
-            <!-- Cartes dynamiques générées par SettingsActivity.buildModelCard() -->
+            <!-- Ligne mod\u00e8le local Qwen (LiteRT-LM) -->
+            <TextView
+                android:id="@+id/localLitertRow"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_input"
+                android:padding="14dp"
+                android:text="\ud83d\udce6 Mod\u00e8le local Qwen (LiteRT-LM, tout appareil)"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Cartes de t\u00e9l\u00e9chargement des mod\u00e8les Qwen disponibles (voir
+                 SettingsActivity.rebuildModelCatalogUI, LocalLlmController.AVAILABLE_MODELS) -->
             <LinearLayout
                 android:id="@+id/modelCardsContainer"
                 android:layout_width="match_parent"
@@ -635,7 +641,6 @@
                 android:orientation="vertical"
                 android:layout_marginBottom="8dp" />
 
-            <!-- Barre de progression téléchargement -->
             <TextView
                 android:id="@+id/downloadProgressText"
                 android:layout_width="match_parent"
@@ -645,112 +650,6 @@
                 android:textStyle="bold"
                 android:gravity="center"
                 android:layout_marginBottom="12dp" />
-
-            <!-- Jeton HF & Custom -->
-            <EditText
-                android:id="@+id/hfTokenInput"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="@drawable/bg_input"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:textColor="@color/text_primary"
-                android:hint="Jeton Hugging Face (optionnel)"
-                android:textColorHint="@color/text_secondary"
-                android:inputType="textPassword"
-                android:layout_marginBottom="12dp" />
-
-            <EditText
-                android:id="@+id/customModelUrlInput"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="@drawable/bg_input"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:textColor="@color/text_primary"
-                android:hint="URL personnalisée (https://...)"
-                android:textColorHint="@color/text_secondary"
-                android:inputType="textUri"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
-                android:id="@+id/downloadCustomButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="⬇ TÉLÉCHARGER CETTE URL"
-                android:textColor="@color/cyan_accent"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="12dp" />
-
-            <TextView
-                android:id="@+id/pickModelButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="📁 CHOISIR UN FICHIER FICHIER SUR LE TÉLÉPHONE"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="16dp" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/text_secondary"
-                android:alpha="0.2"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🎨 Génération d'image embarquée (Stable Diffusion)"
-                android:textColor="@color/cyan_accent"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Génère de vraies images directement sur le téléphone, sans réseau. ⚠️ Sans GPU dédié, compte plusieurs minutes par image sur CPU mobile — c'est la réalité du calcul de diffusion, pas un défaut. Importe un modèle Stable Diffusion (.safetensors, .ckpt ou .gguf, souvent 2 à 4 Go) téléchargé depuis Hugging Face ou Civitai."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:lineSpacingExtra="3dp"
-                android:layout_marginBottom="12dp" />
-
-            <TextView
-                android:id="@+id/sdModelPathText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:padding="12dp"
-                android:text="Aucun modèle importé"
-                android:textColor="@color/text_primary"
-                android:textSize="12sp"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
-                android:id="@+id/deleteSdModelButton"
-                android:layout_width="match_parent"
-                android:layout_height="40dp"
-                android:text="🗑️ Supprimer ce modèle du téléphone"
-                android:textColor="#FF6B6B"
-                android:textSize="11sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="12dp" />
-
-            <TextView
-                android:id="@+id/pickSdModelButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="📁 IMPORTER UN MODÈLE STABLE DIFFUSION"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="16dp" />
 
             <View
                 android:layout_width="match_parent"

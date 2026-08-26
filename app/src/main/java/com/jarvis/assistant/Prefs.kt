@@ -24,6 +24,7 @@ object Prefs {
     private const val KEY_API_KEY           = "api_key"            // rétrocompat
     private const val KEY_LOCAL_MODEL_PATH  = "local_model_path"
     private const val KEY_LOCAL_MODEL_FORMAT= "local_model_format"
+    private const val KEY_LOCAL_LLM_MODEL_ID = "local_llm_model_id"
     private const val KEY_ACCENT_COLOR      = "accent_color"
     private const val KEY_HF_TOKEN          = "hf_token"
     private const val KEY_ORB_STYLE         = "orb_style"
@@ -307,6 +308,18 @@ object Prefs {
 
     fun getLocalModelPath(context: Context): String =
         prefs(context).getString(KEY_LOCAL_MODEL_PATH, "") ?: ""
+
+    // Identifiant du modele Qwen local actif (voir LocalLlmController.AVAILABLE_MODELS) --
+    // remplace KEY_LOCAL_MODEL_PATH/KEY_LOCAL_MODEL_FORMAT (ancien systeme GGUF/ONNX/MediaPipe
+    // multi-format par chemin de fichier libre) pour les taches #247/#248 : LocalLlmController
+    // gere lui-meme le chemin du fichier a partir de l'ID (voir modelFile()), donc seul l'ID
+    // a besoin d'etre persiste ici.
+    fun getLocalLlmModelId(context: Context): String =
+        prefs(context).getString(KEY_LOCAL_LLM_MODEL_ID, "") ?: ""
+
+    fun setLocalLlmModelId(context: Context, modelId: String) {
+        prefs(context).edit().putString(KEY_LOCAL_LLM_MODEL_ID, modelId).apply()
+    }
 
     fun saveLocalModelPath(context: Context, path: String) {
         prefs(context).edit().putString(KEY_LOCAL_MODEL_PATH, path).apply()

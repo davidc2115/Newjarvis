@@ -109,22 +109,19 @@ enum class Provider(
     ),
 
     // ── Modèles embarqués sur le téléphone (hors-ligne) ───────────────────────
-    ON_DEVICE(
-        "Modèle sur téléphone (.task MediaPipe)",
+    // Remplace ON_DEVICE/LOCAL_GGUF/LOCAL_ONNX (moteurs natifs llama.cpp/MediaPipe/ONNX Runtime
+    // GenAI, retirés tâches #247/#248 -- demande explicite utilisateur de garder l'IA on-device
+    // ACTUELLE de l'appli réécrite plutôt que l'ancien système natif) par les deux backends
+    // actuels : GeminiNanoController (AICore) et LocalLlmController (LiteRT-LM, sans NDK).
+    GEMINI_NANO(
+        "Gemini Nano (Google AICore, sur l'appareil)",
         "",
         "",
         isLocal = true,
         needsApiKey = false
     ),
-    LOCAL_GGUF(
-        "Modèle GGUF sur téléphone (llama.cpp)",
-        "",
-        "",
-        isLocal = true,
-        needsApiKey = false
-    ),
-    LOCAL_ONNX(
-        "Modèle ONNX sur téléphone",
+    LOCAL_LITERT(
+        "Modèle local Qwen (LiteRT-LM, sur l'appareil)",
         "",
         "",
         isLocal = true,

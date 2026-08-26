@@ -6,7 +6,6 @@ plugins {
 android {
     namespace 'com.jarvis.assistant'
     compileSdk 35
-    ndkVersion "27.0.12077973"
 
     defaultConfig {
         applicationId "com.jarvis.assistant"
@@ -14,27 +13,6 @@ android {
         targetSdk 35
         versionCode 5
         versionName "5.0"
-
-        ndk {
-            // 32 bits (armeabi-v7a) retiré : llama.cpp utilise des instructions
-            // NEON fp16 (vld1q_f16) qui n'existent que sur 64 bits. Les téléphones
-            // modernes (2019+) sont quasiment tous en 64 bits de toute façon.
-            abiFilters 'arm64-v8a'
-        }
-
-        externalNativeBuild {
-            cmake {
-                cppFlags "-std=c++17"
-                arguments "-DANDROID_STL=c++_shared"
-            }
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-            version "3.22.1"
-        }
     }
 
     signingConfigs {
@@ -62,16 +40,13 @@ android {
 
     packaging {
         resources {
-            pickFirsts += ['**/libc++_shared.so', '**/libllama.so', 'META-INF/NOTICE.md', 'META-INF/LICENSE.md']
+            pickFirsts += ['META-INF/NOTICE.md', 'META-INF/LICENSE.md']
             excludes += ['META-INF/DEPENDENCIES']
         }
     }
 }
 
 dependencies {
-    // ── Module natif isolé : génération d'image Stable Diffusion embarquée ─────
-    implementation project(':sdcpp')
-
     // ── Core Android ──────────────────────────────────────────────────────────
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
@@ -90,10 +65,23 @@ dependencies {
     // Bibliothèque Java pure, aucune dépendance native, aucune clé/API requise.
     implementation 'eu.agno3.jcifs:jcifs-ng:2.1.10'
 
-    // ── IA embarquée : MediaPipe LLM Inference (.task) ────────────────────────
-    implementation 'com.google.mediapipe:tasks-genai:0.10.14'
+    // ── IA embarquée : Gemini Nano via AICore (ML Kit GenAI Prompt API) -- gratuit,
+    // sans clé, tourne 100% sur l'appareil une fois le modèle téléchargé (Pixel 8+/Galaxy
+    // S24 notamment). Remplace MediaPipe tasks-genai (API legacy, voir LocalLlmController
+    // ci-dessous pour son successeur activement maintenu) -- tâches #247/#248, demande
+    // explicite : garder l'IA on-device ACTUELLE de l'appli réécrite.
+    implementation 'com.google.mlkit:genai-prompt:1.0.0-beta2'
 
-    // ── IA embarquée : ONNX Runtime GenAI (.onnx) ────────────────────────────
+    // ── IA embarquée : LiteRT-LM (voir LocalLlmController) -- modèles Qwen (Apache 2.0,
+    // dépôts publics litert-community, aucun compte/jeton requis), fonctionne sur N'IMPORTE
+    // QUEL appareil suffisamment puissant (dont Xiaomi/Redmi/Poco, sans AICore). Remplace
+    // le moteur natif llama.cpp (NDK/CMake, module cpp/ retiré) et onnxruntime-android côté
+    // génération de texte -- gardé ci-dessous uniquement pour le wake-word (openWakeWord).
+    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.16.1'
+
+    // ── ONNX Runtime : uniquement requis par la détection de mot-clé (openWakeWord,
+    // voir WakeWordService) qui exécute ses propres petits modèles ONNX de classification
+    // audio -- distinct de la génération de texte ci-dessus (retirée de ce runtime).
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.19.2'
 
     // ── Email IMAP / SMTP ─────────────────────────────────────────────────────

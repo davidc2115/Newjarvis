@@ -197,62 +197,17 @@ object ImageGenController {
 
     // ─── 4. Stable Diffusion EMBARQUÉ (stable-diffusion.cpp natif) ─────────────
 
+    // Stable Diffusion embarqué (moteur natif stable-diffusion.cpp) retiré avec les modules
+    // NDK/CMake de l'appli (tâches #247/#248 -- demande explicite : garder les modèles IA
+    // on-device ACTUELS, sans build natif). Fonction conservée en no-op (renvoie toujours null,
+    // donc la cascade passe directement à AI Horde ci-dessous) pour ne pas casser l'appelant
+    // ci-dessus sans réécrire toute la cascade -- si un modèle local était configuré avant ce
+    // changement, ce diagnostic explique clairement pourquoi il n'est plus utilisé.
     private fun tryOnDeviceStableDiffusion(context: Context, prompt: String, format: String, diagnostics: MutableList<String>): Result? {
         val modelPath = Prefs.getLocalSdModelPath(context)
         if (modelPath.isBlank()) return null
-
-        // IMPORTANT : chaque échec ici ajoute au diagnostic PARTAGÉ et renvoie null (continue
-        // vers le fournisseur suivant), au lieu de renvoyer directement un Result — avant ce
-        // correctif, un échec du SD local écrasait silencieusement les diagnostics Gemini/
-        // OpenAI/Hugging Face déjà collectés : l'utilisateur ne voyait QUE l'erreur du SD
-        // local (ex: "mémoire insuffisante"), même quand une clé Gemini pourtant valide avait
-        // échoué pour une tout autre raison plus haut dans la cascade — cause réelle du
-        // symptôme "la génération échoue toujours sans qu'on comprenne pourquoi".
-        if (!NativeStableDiffusion.isAvailable()) {
-            diagnostics.add("Stable Diffusion embarqué : moteur non chargé sur cet appareil (${NativeStableDiffusion.getLoadError() ?: "bibliothèque native introuvable"})")
-            return null
-        }
-
-        return try {
-            val loaded = NativeStableDiffusion.loadModel(modelPath)
-            if (!loaded) {
-                diagnostics.add("Stable Diffusion embarqué : échec du chargement du modèle (vérifie qu'il est compatible .safetensors/.ckpt/.gguf)")
-                return null
-            }
-
-            // Résolution modeste pour rester dans un temps raisonnable sur CPU mobile ; steps
-            // relevé de 20 à 26 (compromis qualité/temps — le prompt négatif est géré côté
-            // natif dans jarvis_sd_jni.cpp, voir ce fichier pour le détail). Dimensions selon
-            // le format demandé (voir localSdDims) au lieu d'un carré fixe.
-            val (width, height) = localSdDims(format)
-            val steps = 26
-
-            val rgbBytes = NativeStableDiffusion.generate(prompt, width, height, steps)
-            if (rgbBytes == null) {
-                diagnostics.add("Stable Diffusion embarqué : échec de la génération (mémoire insuffisante ou erreur interne)")
-                return null
-            }
-
-            val channels = NativeStableDiffusion.getChannelCount()
-            val bitmap = rgbBytesToBitmap(rgbBytes, width, height, channels)
-
-            val out = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            val pngBytes = out.toByteArray()
-
-            val savedPath = saveToGallery(context, pngBytes, prompt)
-            val base64 = Base64.encodeToString(pngBytes, Base64.NO_WRAP)
-
-            Result(
-                "🎨 Image générée pour « $prompt » (Stable Diffusion embarqué, 100% hors-ligne).\n📁 Enregistrée dans : $savedPath",
-                base64,
-                "image/png",
-                savedPath
-            )
-        } catch (e: Exception) {
-            diagnostics.add("Stable Diffusion embarqué : erreur — ${e.message}")
-            null
-        }
+        diagnostics.add("Stable Diffusion embarqué : fonctionnalité retirée (module natif remplacé par l'IA on-device actuelle, voir Réglages)")
+        return null
     }
 
     // ─── 5. AI Horde (gratuit, sans clé, dernier recours) ─────────────────────

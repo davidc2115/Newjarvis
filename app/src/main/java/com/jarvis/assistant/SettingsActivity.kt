@@ -45,10 +45,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var advancedConfigSection: View
     private lateinit var apiKeysContainer: LinearLayout
 
-    private lateinit var hfTokenInput: EditText
     private lateinit var firecrawlKeyInput: EditText
     private lateinit var glifTokenInput: EditText
-    private lateinit var customModelUrlInput: EditText
     private lateinit var localModelPathText: TextView
     private lateinit var downloadProgressText: TextView
 
@@ -77,18 +75,6 @@ class SettingsActivity : AppCompatActivity() {
     // supprimer les autres") : chaque clé a maintenant son propre champ, ajoute/
     // retire dynamiquement sans jamais toucher aux autres champs deja remplis.
     private val apiKeyFields = mutableMapOf<Provider, MutableList<EditText>>()
-
-    private val pickModelLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) importModelFile(uri)
-    }
-
-    private val pickSdModelLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) importSdModelFile(uri)
-    }
 
     // Cause réelle trouvée du bug "l'écoute permanente ne fonctionne pas" : le bouton
     // ACTIVER se contentait de vérifier la permission micro et abandonnait avec un Toast
@@ -167,10 +153,8 @@ class SettingsActivity : AppCompatActivity() {
         advancedConfigSection = findViewById(R.id.advancedConfigSection)
         apiKeysContainer      = findViewById(R.id.apiKeysContainer)
 
-        hfTokenInput          = findViewById(R.id.hfTokenInput)
         firecrawlKeyInput     = findViewById(R.id.firecrawlKeyInput)
         glifTokenInput        = findViewById(R.id.glifTokenInput)
-        customModelUrlInput   = findViewById(R.id.customModelUrlInput)
         localModelPathText    = findViewById(R.id.localModelPathText)
         downloadProgressText  = findViewById(R.id.downloadProgressText)
 
@@ -372,7 +356,6 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun loadSavedValues() {
-        hfTokenInput.setText(Prefs.getHfToken(this))
         firecrawlKeyInput.setText(Prefs.getFirecrawlApiKey(this))
         glifTokenInput.setText(Prefs.getGlifApiToken(this))
         baseUrlInput.setText(Prefs.getBaseUrl(this))
@@ -383,8 +366,6 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun setupButtons() {
-        val pickModelButton      = findViewById<TextView>(R.id.pickModelButton)
-        val downloadCustomButton = findViewById<TextView>(R.id.downloadCustomButton)
         val saveButton           = findViewById<TextView>(R.id.saveButton)
         val saveApiKeysButton    = findViewById<TextView>(R.id.saveApiKeysButton)
         modelCardsContainer         = findViewById(R.id.modelCardsContainer)
@@ -425,43 +406,13 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        // ── Cartes dynamiques de modèles ──────────────────────────────────────
-        rebuildModelCatalogUI()
-
-        // ── Import fichier local ───────────────────────────────────────────────
-        pickModelButton.setOnClickListener { pickModelLauncher.launch(arrayOf("*/*")) }
-        findViewById<TextView>(R.id.pickSdModelButton).setOnClickListener {
-            pickSdModelLauncher.launch(arrayOf("*/*"))
-        }
-        updateSdModelLabel()
+        // ── Backends IA on-device (Gemini Nano / Qwen local via LiteRT-LM) ─────
+        // Remplace l'ancien catalogue GGUF/ONNX/MediaPipe multi-format + import de fichier
+        // personnalisé, retiré avec les modules natifs (llama.cpp/stable-diffusion.cpp, taches
+        // #247/#248 -- demande explicite : garder les modeles IA on-device ACTUELS de l'appli
+        // reecrite, pas l'ancien systeme natif).
+        setupOnDeviceAiSection()
         findViewById<TextView>(R.id.deleteLocalModelButton).setOnClickListener { deleteLocalTextModel() }
-        findViewById<TextView>(R.id.deleteSdModelButton).setOnClickListener { deleteLocalSdModel() }
-
-        // ── URL personnalisée ──────────────────────────────────────────────────
-        downloadCustomButton.setOnClickListener {
-            val url = customModelUrlInput.text.toString().trim()
-            if (url.isBlank()) {
-                Toast.makeText(this, "Entrez une URL de modèle", Toast.LENGTH_SHORT).show()
-            } else {
-                val format = when {
-                    url.endsWith(".task", ignoreCase = true) -> LocalLlmManager.LocalModelFormat.TASK
-                    url.endsWith(".onnx", ignoreCase = true) -> LocalLlmManager.LocalModelFormat.ONNX
-                    else -> LocalLlmManager.LocalModelFormat.TASK
-                }
-                val slug = url.substringAfterLast('/').substringBefore('?').ifBlank { "custom" }
-                    .replace(Regex("[^A-Za-z0-9_.-]"), "_").take(60)
-                val customEntry = ModelDownloader.ModelEntry(
-                    key = "custom_$slug",
-                    label = "Modèle personnalisé ($slug)",
-                    url = url,
-                    pageUrl = url,
-                    format = format,
-                    sizeHint = "?",
-                    needsHfToken = true
-                )
-                startDownload(customEntry, useToken = true)
-            }
-        }
 
         // ── Sauvegarde paramètres cloud ───────────────────────────────────────
         saveButton.setOnClickListener {
@@ -472,7 +423,6 @@ class SettingsActivity : AppCompatActivity() {
                 modelInput.text.toString().trim(),
                 apiKeyInput.text.toString().trim()
             )
-            Prefs.saveHfToken(this, hfTokenInput.text.toString().trim())
             Prefs.saveAccentColor(this, selectedAccentColor)
             Prefs.saveOrbStyle(this, selectedOrbStyle)
             Toast.makeText(this, "✅ Paramètres enregistrés", Toast.LENGTH_SHORT).show()
@@ -655,14 +605,48 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** Crée une carte visuelle pour un modèle du catalogue.
-     *
-     *  Demande utilisateur ("encoche sur les modèles locaux téléchargés") : chaque carte
-     *  indique maintenant si CE modèle précis a déjà été téléchargé (comparaison par
-     *  ModelEntry.key, stable, dans Prefs.getLocalModelsRegistry -- voir le commentaire sur
-     *  ModelDownloader.download) et lequel est actuellement actif (Prefs.getLocalModelPath),
-     *  avec un bouton pour re-basculer l'actif sur un modèle déjà téléchargé sans re-télécharger. */
-    private fun buildModelCard(container: LinearLayout, entry: ModelDownloader.ModelEntry, index: Int) {
+    /** Bascule l'IA on-device sur Gemini Nano (AICore) -- aucun telechargement de modele a
+     *  gerer ici, GeminiNanoController s'en charge (voir MainActivity pour le flux complet
+     *  disponible/telechargeable/en telechargement). */
+    private fun selectGeminiNano() {
+        selectedProvider = Provider.GEMINI_NANO
+        providerSpinner.setSelection(Provider.entries.indexOf(Provider.GEMINI_NANO))
+        Prefs.save(this, Provider.GEMINI_NANO, "", "", "")
+        updateLocalModelLabel()
+        Toast.makeText(this, "\u2705 Gemini Nano activ\u00e9.", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Bascule l'IA on-device sur le modele Qwen local deja telecharge (voir buildLocalModelCard
+     *  pour le declenchement du telechargement s'il ne l'est pas encore). */
+    private fun selectLocalLitert(model: LocalLlmController.LocalModel) {
+        Prefs.setLocalLlmModelId(this, model.id)
+        selectedProvider = Provider.LOCAL_LITERT
+        providerSpinner.setSelection(Provider.entries.indexOf(Provider.LOCAL_LITERT))
+        Prefs.save(this, Provider.LOCAL_LITERT, "", "", "")
+        updateLocalModelLabel()
+        rebuildModelCatalogUI()
+        Toast.makeText(this, "\u2705 Mod\u00e8le activ\u00e9 : ${model.displayName}", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Cable les deux lignes fixes (Gemini Nano / Qwen local) + reconstruit les cartes de
+     *  telechargement des modeles Qwen disponibles. A l'inverse de l'ancien catalogue
+     *  multi-format, il n'y a plus qu'une seule famille de modele local (LiteRT-LM). */
+    private fun setupOnDeviceAiSection() {
+        findViewById<TextView>(R.id.geminiNanoRow).setOnClickListener { selectGeminiNano() }
+        findViewById<TextView>(R.id.localLitertRow).setOnClickListener {
+            val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
+            if (LocalLlmController.isDownloaded(this, model)) {
+                selectLocalLitert(model)
+            } else {
+                Toast.makeText(this, "T\u00e9l\u00e9charge d'abord un mod\u00e8le Qwen ci-dessous.", Toast.LENGTH_SHORT).show()
+            }
+        }
+        rebuildModelCatalogUI()
+    }
+
+    /** Cree une carte visuelle pour un modele Qwen du registre LocalLlmController.AVAILABLE_MODELS
+     *  -- indique s'il est deja telecharge et propose de le telecharger/l'activer. */
+    private fun buildLocalModelCard(container: LinearLayout, model: LocalLlmController.LocalModel) {
         val dp = resources.displayMetrics.density
 
         val card = LinearLayout(this).apply {
@@ -675,43 +659,29 @@ class SettingsActivity : AppCompatActivity() {
             ).also { it.bottomMargin = (12 * dp).toInt() }
         }
 
-        val registryEntry = Prefs.getLocalModelsRegistry(this).firstOrNull { it.path.contains("_${entry.key}.") }
-        val isDownloaded = registryEntry != null
-        val isActive = isDownloaded && registryEntry!!.path == Prefs.getLocalModelPath(this)
+        val isDownloaded = LocalLlmController.isDownloaded(this, model)
+        val isActive = isDownloaded && selectedProvider == Provider.LOCAL_LITERT &&
+            Prefs.getLocalLlmModelId(this) == model.id
 
-        // Nom du modèle + taille
-        val titleRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
         val titleText = TextView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            text  = entry.label
+            text = model.displayName
             setTextColor(getColor(R.color.text_primary))
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
         }
-        val sizeText = TextView(this).apply {
-            text  = entry.sizeHint
-            setTextColor(getColor(R.color.cyan_accent))
-            textSize = 11f
-        }
-        titleRow.addView(titleText)
-        titleRow.addView(sizeText)
-        card.addView(titleRow)
+        card.addView(titleText)
 
-        // Description
         val descText = TextView(this).apply {
-            text = entry.description
+            text = model.description
             setTextColor(getColor(R.color.text_secondary))
             textSize = 11f
             setPadding(0, (4 * dp).toInt(), 0, (10 * dp).toInt())
         }
         card.addView(descText)
 
-        // Coche "déjà téléchargé" / "actif" -- demande utilisateur explicite.
         if (isDownloaded) {
             val badge = TextView(this).apply {
-                text = if (isActive) "✅ Téléchargé — modèle actif en ce moment" else "✅ Téléchargé (non actif)"
+                text = if (isActive) "\u2705 T\u00e9l\u00e9charg\u00e9 \u2014 mod\u00e8le actif en ce moment" else "\u2705 T\u00e9l\u00e9charg\u00e9 (non actif)"
                 setTextColor(getColor(R.color.cyan_accent))
                 textSize = 11f
                 setTypeface(null, android.graphics.Typeface.BOLD)
@@ -720,23 +690,11 @@ class SettingsActivity : AppCompatActivity() {
             card.addView(badge)
         }
 
-        // Badge "Jeton HF requis"
-        if (entry.needsHfToken) {
-            val badge = TextView(this).apply {
-                text = "🔑 Jeton HuggingFace requis — entrez-le dans le champ ci-dessus"
-                setTextColor(getColor(R.color.text_secondary))
-                textSize = 10f
-                setPadding(0, 0, 0, (8 * dp).toInt())
-            }
-            card.addView(badge)
-        }
-
         val buttonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
 
         if (isDownloaded && !isActive) {
-            // Déjà sur le téléphone : proposer de le réactiver directement, sans retélécharger.
             val btnActivate = TextView(this).apply {
-                text = "⭐ UTILISER CE MODÈLE"
+                text = "\u2b50 UTILISER CE MOD\u00c8LE"
                 setTextColor(getColor(R.color.background_dark))
                 textSize = 12f
                 setTypeface(null, android.graphics.Typeface.BOLD)
@@ -744,15 +702,12 @@ class SettingsActivity : AppCompatActivity() {
                 background = getDrawable(R.drawable.bg_mic_button)
                 setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                setOnClickListener {
-                    activateLocalModel(registryEntry!!.path, entry.format)
-                }
+                setOnClickListener { selectLocalLitert(model) }
             }
             buttonRow.addView(btnActivate)
-        } else {
-            // Bouton télécharger (ou re-télécharger si déjà présent)
+        } else if (!isDownloaded) {
             val btnDownload = TextView(this).apply {
-                text = if (isDownloaded) "🔁 RE-TÉLÉCHARGER" else "⬇ TÉLÉCHARGER SUR LE TÉLÉPHONE"
+                text = "\u2b07 T\u00c9L\u00c9CHARGER SUR LE T\u00c9L\u00c9PHONE"
                 setTextColor(getColor(R.color.background_dark))
                 textSize = 12f
                 setTypeface(null, android.graphics.Typeface.BOLD)
@@ -760,9 +715,7 @@ class SettingsActivity : AppCompatActivity() {
                 background = getDrawable(R.drawable.bg_mic_button)
                 setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                setOnClickListener {
-                    startDownload(entry, useToken = entry.needsHfToken)
-                }
+                setOnClickListener { startLocalModelDownload(model) }
             }
             buttonRow.addView(btnDownload)
         }
@@ -771,31 +724,12 @@ class SettingsActivity : AppCompatActivity() {
         container.addView(card)
     }
 
-    /** Réactive un modèle DÉJÀ téléchargé (registre) comme modèle local actif, sans retélécharger
-     *  ni retoucher au fichier -- voir la coche "téléchargé/actif" dans buildModelCard. */
-    private fun activateLocalModel(path: String, format: LocalLlmManager.LocalModelFormat) {
-        Prefs.saveLocalModelPath(this, path)
-        Prefs.saveLocalModelFormat(this, format.name)
-        LocalLlmManager.unload()
-        val targetProvider = when (format) {
-            LocalLlmManager.LocalModelFormat.TASK -> Provider.ON_DEVICE
-            LocalLlmManager.LocalModelFormat.ONNX -> Provider.LOCAL_ONNX
-            else -> Provider.LOCAL_GGUF
-        }
-        selectedProvider = targetProvider
-        providerSpinner.setSelection(Provider.entries.indexOf(targetProvider))
-        Prefs.save(this, targetProvider, "", "", "")
-        updateLocalModelLabel()
-        rebuildModelCatalogUI()
-        Toast.makeText(this, "✅ Modèle activé : ${File(path).name}", Toast.LENGTH_SHORT).show()
-    }
-
-    /** Reconstruit les cartes du catalogue -- nécessaire après un téléchargement ou une
-     *  activation pour que la coche "téléchargé/actif" se mette à jour immédiatement. */
+    /** Reconstruit les cartes du catalogue Qwen -- necessaire apres un telechargement ou une
+     *  activation pour que la coche "telecharge/actif" se mette a jour immediatement. */
     private fun rebuildModelCatalogUI() {
         modelCardsContainer.removeAllViews()
-        ModelDownloader.MODEL_CATALOG.forEachIndexed { index, entry ->
-            buildModelCard(modelCardsContainer, entry, index)
+        LocalLlmController.AVAILABLE_MODELS.forEach { model ->
+            buildLocalModelCard(modelCardsContainer, model)
         }
     }
 
@@ -837,192 +771,65 @@ class SettingsActivity : AppCompatActivity() {
         LinearSnapHelper().attachToRecyclerView(orbStyleCarousel)
     }
 
-    /** Démarre le téléchargement d'une entrée du catalogue (ou d'une entrée personnalisée
-     *  construite depuis une URL, voir downloadCustomButton). Depuis la refonte GGUF, chaque
-     *  ModelEntry porte son propre fichier de destination unique (ModelDownloader.download,
-     *  clé "key") : plusieurs modèles peuvent donc coexister sur le téléphone, d'où
-     *  rebuildModelCatalogUI() en fin de téléchargement pour rafraîchir la coche téléchargé/actif. */
-    private fun startDownload(entry: ModelDownloader.ModelEntry, useToken: Boolean) {
+    /** Demarre le telechargement d'un modele Qwen (voir LocalLlmController.download) --
+     *  progression affichee dans downloadProgressText, active automatiquement le modele une
+     *  fois termine (comportement identique a l'ancien systeme). */
+    private fun startLocalModelDownload(model: LocalLlmController.LocalModel) {
         if (isDownloading) {
-            Toast.makeText(this, "Un téléchargement est déjà en cours…", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Un t\u00e9l\u00e9chargement est d\u00e9j\u00e0 en cours\u2026", Toast.LENGTH_SHORT).show()
             return
         }
-        val hfToken = if (useToken) hfTokenInput.text.toString().trim() else ""
         isDownloading = true
-        downloadProgressText.text = "⬇ Démarrage du téléchargement — ${entry.label}…"
+        downloadProgressText.text = "\u2b07 D\u00e9marrage du t\u00e9l\u00e9chargement \u2014 ${model.displayName}\u2026"
 
         CoroutineScope(Dispatchers.Main).launch {
-            ModelDownloader.download(this@SettingsActivity, entry, hfToken) { progress ->
-                runOnUiThread {
-                    when (progress) {
-                        is ModelDownloader.Progress.Percent -> downloadProgressText.text = "⬇ Téléchargement… ${progress.value}%"
-                        is ModelDownloader.Progress.Done -> {
-                            isDownloading = false
-                            downloadProgressText.text = "✅ Modèle téléchargé et actif sur le téléphone !"
-
-                            if (entry.format == LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION) {
-                                updateSdModelLabel()
-                                Toast.makeText(this@SettingsActivity, "Modèle Stable Diffusion enregistré ✅", Toast.LENGTH_SHORT).show()
-                            } else {
-                                // Activer automatiquement le mode local -- BUG RÉEL CORRIGÉ : ONNX
-                                // retombait sur Provider.LOCAL_GGUF (seul TASK avait un cas dédié),
-                                // alors que Provider.LOCAL_ONNX existe déjà comme entrée séparée.
-                                val targetProvider = when (entry.format) {
-                                    LocalLlmManager.LocalModelFormat.TASK -> Provider.ON_DEVICE
-                                    LocalLlmManager.LocalModelFormat.ONNX -> Provider.LOCAL_ONNX
-                                    else -> Provider.LOCAL_GGUF
-                                }
-                                selectedProvider = targetProvider
-                                providerSpinner.setSelection(Provider.entries.indexOf(targetProvider))
-                                Prefs.save(this@SettingsActivity, targetProvider, "", "", "")
-
-                                updateLocalModelLabel()
-                                Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
-                            }
-                            rebuildModelCatalogUI()
-                        }
-                        is ModelDownloader.Progress.Error -> {
-                            isDownloading = false
-                            downloadProgressText.text = ""
-                            Toast.makeText(this@SettingsActivity, progress.message, Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun importModelFile(uri: Uri) {
-        Toast.makeText(this, "Import du modèle en cours…", Toast.LENGTH_LONG).show()
-        val format = LocalLlmManager.LocalModelFormat.GGUF
-        val ext = "gguf"
-
-        CoroutineScope(Dispatchers.IO).launch {
             try {
-                val destFile = File(filesDir, "local_model.$ext")
-                contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(destFile).use { output ->
-                        input.copyTo(output, bufferSize = 1024 * 1024)
+                LocalLlmController.download(this@SettingsActivity, model) { downloaded, total ->
+                    runOnUiThread {
+                        val pct = if (total > 0) (downloaded * 100 / total).toInt() else 0
+                        downloadProgressText.text = "\u2b07 T\u00e9l\u00e9chargement\u2026 $pct%"
                     }
                 }
-                Prefs.saveLocalModelPath(this@SettingsActivity, destFile.absolutePath)
-                Prefs.saveLocalModelFormat(this@SettingsActivity, format.name)
-                LocalLlmManager.unload()
-
-                runOnUiThread {
-                    // Activer automatiquement le mode local
-                    selectedProvider = Provider.LOCAL_GGUF
-                    providerSpinner.setSelection(Provider.entries.indexOf(Provider.LOCAL_GGUF))
-                    Prefs.save(this@SettingsActivity, Provider.LOCAL_GGUF, "", "", "")
-
-                    updateLocalModelLabel()
-                    Toast.makeText(this@SettingsActivity, "Modèle importé et activé ✅", Toast.LENGTH_SHORT).show()
-                }
+                isDownloading = false
+                downloadProgressText.text = "\u2705 Mod\u00e8le t\u00e9l\u00e9charg\u00e9 et actif sur le t\u00e9l\u00e9phone !"
+                selectLocalLitert(model)
             } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this@SettingsActivity, "Échec de l'import : ${e.message}", Toast.LENGTH_LONG).show()
-                }
+                isDownloading = false
+                downloadProgressText.text = ""
+                Toast.makeText(this@SettingsActivity, "\u274c \u00c9chec : ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
-    }
-
-    private fun importSdModelFile(uri: Uri) {
-        Toast.makeText(this, "Import du modèle Stable Diffusion en cours… (peut prendre une minute, fichier volumineux)", Toast.LENGTH_LONG).show()
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val destFile = File(filesDir, "local_sd_model.bin")
-                contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(destFile).use { output ->
-                        input.copyTo(output, bufferSize = 1024 * 1024)
-                    }
-                }
-                Prefs.saveLocalSdModelPath(this@SettingsActivity, destFile.absolutePath)
-                NativeStableDiffusion.unload()
-
-                runOnUiThread {
-                    updateSdModelLabel()
-                    Toast.makeText(this@SettingsActivity, "Modèle Stable Diffusion importé ✅", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this@SettingsActivity, "Échec de l'import : ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
-    private fun updateSdModelLabel() {
-        val path = Prefs.getLocalSdModelPath(this)
-        val label = findViewById<TextView>(R.id.sdModelPathText)
-        if (path.isBlank()) {
-            label.text = "Aucun modèle importé"
-        } else {
-            val file = File(path)
-            val sizeMb = if (file.exists()) file.length() / (1024 * 1024) else 0
-            label.text = "Modèle actif : ${file.name} (~${sizeMb} Mo)"
-        }
-    }
-
-    /** Taille récursive -- BUG RÉEL CORRIGÉ : File.length() sur un DOSSIER renvoie toujours 0
-     *  en Java/Android, contrairement à un fichier unique (GGUF/.task) -- affichait
-     *  systématiquement "~0 Mo" pour tout modèle stocké en dossier. Généraliste, conservé même
-     *  après le retour à des modèles GGUF (fichiers uniques) pour rester robuste. */
-    private fun folderOrFileSizeBytes(file: File): Long {
-        if (!file.exists()) return 0L
-        if (file.isFile) return file.length()
-        return file.listFiles()?.sumOf { folderOrFileSizeBytes(it) } ?: 0L
     }
 
     private fun updateLocalModelLabel() {
-        val path = Prefs.getLocalModelPath(this)
-        localModelPathText.text = if (path.isBlank()) {
-            "Modèle actif : Aucun"
-        } else {
-            val file = File(path)
-            val sizeMb = folderOrFileSizeBytes(file) / (1024 * 1024)
-            "Modèle actif sur l'appareil : ${file.name} (${selectedProvider.displayName}, ~${sizeMb} Mo)"
+        localModelPathText.text = when (selectedProvider) {
+            Provider.GEMINI_NANO -> "Mod\u00e8le actif : Gemini Nano (Google AICore)"
+            Provider.LOCAL_LITERT -> {
+                val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
+                if (LocalLlmController.isDownloaded(this, model)) {
+                    "Mod\u00e8le actif sur l'appareil : ${model.displayName}"
+                } else {
+                    "Mod\u00e8le actif : Aucun (t\u00e9l\u00e9charge un mod\u00e8le Qwen ci-dessous)"
+                }
+            }
+            else -> "Mod\u00e8le actif : Aucun"
         }
     }
 
     private fun deleteLocalTextModel() {
-        val path = Prefs.getLocalModelPath(this)
-        if (path.isBlank()) {
-            Toast.makeText(this, "Aucun modèle de texte local à supprimer.", Toast.LENGTH_SHORT).show()
+        val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
+        if (!LocalLlmController.isDownloaded(this, model)) {
+            Toast.makeText(this, "Aucun mod\u00e8le local \u00e0 supprimer.", Toast.LENGTH_SHORT).show()
             return
         }
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Supprimer ce modèle ?")
-            .setMessage("${File(path).name} sera effacé du téléphone. Tu pourras le retélécharger plus tard si besoin.")
+            .setTitle("Supprimer ce mod\u00e8le ?")
+            .setMessage("${model.displayName} sera effac\u00e9 du t\u00e9l\u00e9phone. Tu pourras le retélécharger plus tard si besoin.")
             .setPositiveButton("Supprimer") { _, _ ->
-                LocalLlmManager.unload()
-                // BUG RÉEL CORRIGÉ : File.delete() ne supprime jamais un dossier NON VIDE (modèles
-                // ONNX multi-fichiers) -- échouait silencieusement, laissant le dossier et ses
-                // fichiers sur le disque malgré le message "Modèle supprimé".
-                File(path).deleteRecursively()
-                Prefs.saveLocalModelPath(this, "")
+                LocalLlmController.deleteModel(this, model)
                 updateLocalModelLabel()
-                Toast.makeText(this, "🗑️ Modèle supprimé.", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Annuler", null)
-            .show()
-    }
-
-    private fun deleteLocalSdModel() {
-        val path = Prefs.getLocalSdModelPath(this)
-        if (path.isBlank()) {
-            Toast.makeText(this, "Aucun modèle Stable Diffusion local à supprimer.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Supprimer ce modèle ?")
-            .setMessage("${File(path).name} sera effacé du téléphone. Tu pourras le retélécharger plus tard si besoin.")
-            .setPositiveButton("Supprimer") { _, _ ->
-                NativeStableDiffusion.unload()
-                File(path).delete()
-                Prefs.saveLocalSdModelPath(this, "")
-                updateSdModelLabel()
-                Toast.makeText(this, "🗑️ Modèle supprimé.", Toast.LENGTH_SHORT).show()
+                rebuildModelCatalogUI()
+                Toast.makeText(this, "\ud83d\uddd1\ufe0f Mod\u00e8le supprim\u00e9.", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Annuler", null)
             .show()

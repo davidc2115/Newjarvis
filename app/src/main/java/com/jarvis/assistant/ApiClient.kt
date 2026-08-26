@@ -3,6 +3,7 @@ package com.jarvis.assistant
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -674,7 +675,7 @@ object ApiClient {
         val grounded = withAssistantIdentity(context, withCurrentDateTime(systemPrompt))
         return when {
             provider.isAuto -> sendAuto(context, history, grounded)
-            provider.isLocal -> sendLocal(context, history, grounded)
+            provider.isLocal -> sendLocal(context, provider, history, grounded)
             provider == Provider.CLAUDE -> sendClaudeWithRotation(context, history, grounded)
             provider == Provider.GEMINI -> sendGeminiWithRotation(context, history, grounded)
             provider == Provider.SERPAPI -> sendSerpApiWithRotation(context, history)
@@ -849,51 +850,34 @@ object ApiClient {
      *  voir buildErrorMessage), on retente automatiquement avec les autres modèles déjà
      *  téléchargés et enregistrés dans Prefs.getLocalModelsRegistry, dans l'ordre où ils ont été
      *  téléchargés, avant d'abandonner. */
-    private suspend fun sendLocal(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
-        val modelPath = Prefs.getLocalModelPath(context)
-        if (modelPath.isBlank()) {
-            return "Aucun modèle local configuré. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
-        }
-        // Prompt système court dédié (voir LOCAL_SYSTEM_PROMPT) + historique réduit à 3 tours au
-        // lieu de 8 -- le SYSTEM_PROMPT cloud complet dépassait à lui seul la fenêtre de contexte
-        // native (2048, désormais 4096 tokens), provoquant un échec garanti dès le premier
-        // message ("la conversation est trop longue pour le modèle local").
+    /**
+     * Backend IA on-device (voir GeminiNanoController/LocalLlmController -- tâches #247/#248,
+     * remplace l'ancien LocalLlmManager natif llama.cpp/ONNX GenAI/MediaPipe, retiré avec les
+     * modules NDK/CMake de l'appli). Prompt système court dédié (LOCAL_SYSTEM_PROMPT) +
+     * historique réduit à 3 tours -- même raisonnement que l'ancien code : le SYSTEM_PROMPT
+     * cloud complet dépasserait la fenêtre de contexte d'un petit modèle embarqué.
+     */
+    private suspend fun sendLocal(context: Context, provider: Provider, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val prompt = buildPromptFromHistory(history, withAssistantIdentity(context, LOCAL_SYSTEM_PROMPT), maxTurns = 3)
-
-        val otherPaths = Prefs.getLocalModelsRegistry(context)
-            .map { it.path }
-            .filter { it != modelPath }
-        val pathsToTry = listOf(modelPath) + otherPaths
-
-        // BUG RÉEL CORRIGÉ (signalement utilisateur : le blocage sur "réfléchit" persistait
-        // MÊME après un premier essai de délai ici via withTimeoutOrNull) : withTimeoutOrNull ne
-        // peut annuler qu'un point de suspension coopératif -- il est sans effet sur un appel
-        // JNI bloquant et synchrone comme LocalLlmManager.generate(). Le vrai timeout (via
-        // Future.get(timeoutMs), qui lui rend vraiment la main même si le thread natif continue
-        // en arrière-plan) vit maintenant directement dans NativeLlama.generateSafe/loadModelSafe
-        // -- LocalLlmManager.generate() renvoie donc déjà un "❌ ..." après son propre délai
-        // interne, sans qu'un timeout supplémentaire soit nécessaire ici.
-        //
-        // Signalement utilisateur : le blocage persiste malgré CE timeout natif -- ce qui
-        // signifierait que le point de blocage réel est ailleurs (avant même d'atteindre ce
-        // code), ce qu'aucun log actuel ne permettait de confirmer. Traces horodatées via
-        // DiagnosticsLog (consultables avec l'action read_debug_logs, MÊME pendant qu'une
-        // précédente tentative est encore bloquée en arrière-plan) pour localiser précisément
-        // l'étape en cause au prochain test, plutôt que de continuer à deviner à l'aveugle.
-        DiagnosticsLog.log(context, "Local", "sendLocal: début, ${pathsToTry.size} modèle(s) à essayer")
-        var lastResult = ""
-        for (path in pathsToTry) {
-            val startedAt = System.currentTimeMillis()
-            DiagnosticsLog.log(context, "Local", "Tentative sur ${java.io.File(path).name}")
-            val result = LocalLlmManager.generate(context, path, prompt)
-            val elapsedSec = (System.currentTimeMillis() - startedAt) / 1000
-            DiagnosticsLog.log(context, "Local", "Retour après ${elapsedSec}s : ${result.take(100)}")
-            lastResult = result
-            if (!result.startsWith("❌")) {
-                return result
+        DiagnosticsLog.log(context, "Local", "sendLocal: début (${provider.displayName})")
+        val result = when (provider) {
+            Provider.GEMINI_NANO -> when (GeminiNanoController.checkStatus()) {
+                FeatureStatus.AVAILABLE -> GeminiNanoController.generateReply(prompt)
+                FeatureStatus.DOWNLOADABLE, FeatureStatus.DOWNLOADING ->
+                    "❌ Gemini Nano n'est pas encore prêt sur cet appareil -- ouvre ⚙ Paramètres → Local pour le télécharger."
+                else -> "❌ Gemini Nano n'est pas disponible sur cet appareil (nécessite un Pixel 8+/Galaxy S24 compatible AICore)."
+            }
+            else -> {
+                val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(context))
+                if (!LocalLlmController.isDownloaded(context, model)) {
+                    "❌ Aucun modèle local téléchargé. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
+                } else {
+                    LocalLlmController.generateReply(context, model, prompt)
+                }
             }
         }
-        return lastResult
+        DiagnosticsLog.log(context, "Local", "sendLocal: retour : ${result.take(100)}")
+        return result
     }
 
     private fun buildPromptFromHistory(history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT, maxTurns: Int = 8): String {
