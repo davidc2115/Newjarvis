@@ -3,6 +3,7 @@ package com.jarvis.assistant
 import android.content.Context
 import android.media.MediaScannerConnection
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
 
@@ -170,7 +171,7 @@ object JarvisCommandParser {
         val matches = findJarvisCommands(llmResponse)
         if (matches.isEmpty()) return CommandResult.None
 
-        val results = matches.map { match ->
+        val results = matches.mapNotNull { match ->
             val jsonStr = match.payload.trim()
             // action extrait AVANT le try/catch de l'exécution (pas juste du parsing JSON) pour
             // pouvoir l'inclure dans DiagnosticsLog même si executeAction lève une exception —
@@ -186,10 +187,33 @@ object JarvisCommandParser {
                 pendingImageBase64 = null
                 pendingImageMime = null
                 CommandResult.Executed(resultText, action, action in INFORMATIONAL_ACTIONS, img, mime)
+            } catch (e: JSONException) {
+                // Bloc [JARVIS_CMD:...] repéré (crochets équilibrés) mais JSON invalide À
+                // L'INTÉRIEUR (guillemets manquants, virgule en trop...) — typiquement un
+                // modèle IA LOCAL plus limité qui rate le format exact, pas une vraie erreur
+                // système. Signalé par l'utilisateur : le message technique Java brut
+                // ("Value ... of type java.lang.String cannot be converted to JSONObject")
+                // s'affichait tel quel dans le chat comme si JARVIS avait planté. On journalise
+                // pour debug et on ignore silencieusement CE bloc : le reste de la réponse
+                // (texte hors bloc, déjà nettoyé par cleanResponse côté appelant) continue de
+                // s'afficher normalement, sans jargon technique visible par l'utilisateur.
+                DiagnosticsLog.log(context, "JARVIS_CMD", "Bloc [JARVIS_CMD] mal formé ignoré (JSON invalide, probablement IA locale) : ${e.message}")
+                null
             } catch (e: Exception) {
                 DiagnosticsLog.log(context, "JARVIS_CMD", "Action « $action » — exception : ${e.javaClass.simpleName} ${e.message}")
                 CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}", "", false)
             }
+        }
+
+        if (results.isEmpty()) {
+            // TOUS les blocs [JARVIS_CMD] détectés étaient du JSON invalide (voir ci-dessus).
+            // On retombe sur le texte restant déjà nettoyé plutôt que sur CommandResult.None,
+            // qui aurait réaffiché la réponse BRUTE (donc le bloc cassé visible) côté appelant.
+            val remainder = cleanResponse(llmResponse)
+            return if (remainder.isBlank())
+                CommandResult.Executed("🤔 Je n'ai pas réussi à formuler ma réponse correctement, tu peux reformuler ?", "", isInformational = false)
+            else
+                CommandResult.Executed("", "", isInformational = false)
         }
 
         return if (results.size == 1) results[0] else CommandResult.ExecutedMultiple(results)
