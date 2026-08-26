@@ -575,6 +575,83 @@
                 android:background="@drawable/bg_input"
                 android:layout_marginBottom="16dp" />
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Compte(s) Google OAuth (Agenda/Mail) : greffe de l'integration actuelle de
+                 l'appli (taches #247-249, demande explicite de l'utilisateur de garder l'OAuth
+                 Google en plus du calendrier local et de l'IMAP/SMTP existants de cette base). -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/google_account_section_label"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Lie un compte Google pour un acces Agenda/Mail via l'API officielle (en plus du calendrier local et de l'IMAP/SMTP existants ci-dessus). Necessite un ID client OAuth « Web application » (Google Cloud Console) -- une valeur par defaut est deja renseignee."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ID client OAuth Web"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/googleWebClientIdInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="@string/google_web_client_id_hint"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="text"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/google_web_client_id_help"
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp"
+                android:lineSpacingExtra="2dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/addGoogleAccountButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="@string/google_add_account_button"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="12dp" />
+
+            <LinearLayout
+                android:id="@+id/googleAccountsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
         </LinearLayout>
 
 

@@ -13,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -112,6 +113,33 @@ class SettingsActivity : AppCompatActivity() {
             statusText.text = "❌ Permission refusée. Sans elle, JARVIS ne peut pas envoyer de commande à Termux — réessaie, ou accorde-la manuellement dans Réglages Android → Apps → JARVIS → Autorisations."
         }
     }
+
+    // Ecran de consentement systeme pour l'autorisation Gmail/Agenda (voir
+    // GoogleAccountController.requestAuthorization) -- distinct du selecteur de compte
+    // Credential Manager. On persiste ici le jeton d'acces obtenu (voir Prefs.setGoogleAccessToken)
+    // pour un usage immediat par JarvisCommandParser sans redemander l'autorisation.
+    private val googleAuthorizationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val accessToken = GoogleAccountController.handleAuthorizationResult(this, result.data)
+        if (accessToken != null) {
+            Prefs.setGoogleAccessToken(this, accessToken)
+            Toast.makeText(this, "\u2705 Acces Gmail/Agenda autorise.", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(
+                this,
+                getString(R.string.google_authorization_error, "consentement refuse ou annule"),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    // Ecran de selection de compte via l'ancienne API GoogleSignInClient (voir
+    // GoogleAccountController.getLegacySignInIntent) -- plus fiable que Credential Manager sur
+    // certains telephones (voir historique de l'appli reecrite, taches #217-222).
+    private val googleLegacySignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result -> onLegacySignInResult(result.data) }
 
     private fun startWakeWordServiceNow() {
         val serviceIntent = Intent(this, WakeWordService::class.java)
@@ -497,6 +525,7 @@ class SettingsActivity : AppCompatActivity() {
 
         setupTermuxSdSection()
         setupDebugLogsButton()
+        setupGoogleAccountSection()
     }
 
     private fun setupDebugLogsButton() {
@@ -848,4 +877,240 @@ class SettingsActivity : AppCompatActivity() {
             .setNegativeButton("Annuler", null)
             .show()
     }
+
+    // ─── OAuth Google (Agenda/Mail) ───────────────────────────────────────────────────
+    // Connexion Google directement depuis l'appli, multi-comptes (voir GoogleAccountController
+    // pour le pourquoi des deux etapes authentification/autorisation, et pour l'ID client Web
+    // indispensable -- saisi ici, jamais code en dur). Vient EN PLUS du calendrier local
+    // (CalendarController) et de l'IMAP/SMTP existants de cette base (greffe taches #247-249,
+    // demande explicite de l'utilisateur de garder l'integration OAuth actuelle).
+
+    private fun setupGoogleAccountSection() {
+        val webClientIdInput = findViewById<EditText>(R.id.googleWebClientIdInput)
+        webClientIdInput.setText(Prefs.getGoogleWebClientId(this).orEmpty())
+        webClientIdInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                Prefs.setGoogleWebClientId(this, webClientIdInput.text?.toString().orEmpty().trim())
+            }
+        }
+        findViewById<TextView>(R.id.addGoogleAccountButton).setOnClickListener { addGoogleAccount() }
+        refreshGoogleAccountsList()
+    }
+
+    private fun addGoogleAccount() {
+        val webClientId = findViewById<EditText>(R.id.googleWebClientIdInput).text?.toString()?.trim().orEmpty()
+        if (webClientId.isBlank()) {
+            Toast.makeText(this, getString(R.string.google_web_client_id_missing), Toast.LENGTH_SHORT).show()
+            return
+        }
+        Prefs.setGoogleWebClientId(this, webClientId)
+
+        try {
+            // signOutThenGetLegacySignInIntent (pas getLegacySignInIntent directement) : sans
+            // ca, le selecteur de compte peut etre saute et reconnecter silencieusement le
+            // dernier compte utilise, empechant d'en ajouter un 2e/3e.
+            GoogleAccountController.signOutThenGetLegacySignInIntent(this, webClientId) { intent ->
+                googleLegacySignInLauncher.launch(intent)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisGoogleAuth", "Impossible de lancer l'ecran de connexion Google", e)
+            showCopyableErrorDialog(
+                getString(R.string.google_signin_error, ""),
+                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+            )
+        }
+    }
+
+    /**
+     * Callback de googleLegacySignInLauncher une fois l'ecran de selection de compte systeme
+     * refermee -- succes ou echec/annulation.
+     */
+    private fun onLegacySignInResult(data: Intent?) {
+        try {
+            val account = GoogleAccountController.handleLegacySignInResult(data)
+            val email = account.email ?: account.id ?: "?"
+            val displayName = account.displayName ?: email
+
+            val accounts = Prefs.loadGoogleAccounts(this)
+            if (accounts.none { it.email == email }) {
+                accounts.add(GoogleAccountController.LinkedAccount(email, displayName))
+                Prefs.saveGoogleAccounts(this, accounts)
+                refreshGoogleAccountsList()
+            }
+
+            // Demande immediatement l'autorisation Gmail/Agenda pour ce compte. Le jeton
+            // obtenu est mis en cache (Prefs.setGoogleAccessToken) pour un usage immediat.
+            GoogleAccountController.requestAuthorization(
+                activity = this,
+                pendingIntentLauncher = googleAuthorizationLauncher,
+                onGranted = { accessToken ->
+                    if (accessToken != null) {
+                        Prefs.setGoogleAccessToken(this, accessToken)
+                        Prefs.setGoogleAccessTokenForAccount(this, email, accessToken)
+                    }
+                    Prefs.setActiveGoogleAccountEmail(this, email)
+                    refreshGoogleAccountsList()
+                    Toast.makeText(this, getString(R.string.google_account_linked, email), Toast.LENGTH_LONG).show()
+                },
+                onFailure = { e ->
+                    android.util.Log.e("JarvisGoogleAuth", "requestAuthorization a echoue", e)
+                    showCopyableErrorDialog(
+                        getString(R.string.google_authorization_error, ""),
+                        "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+                    )
+                }
+            )
+        } catch (e: com.google.android.gms.common.api.ApiException) {
+            // Codes frequents : 12501 = annule par l'utilisateur ; 10 = DEVELOPER_ERROR
+            // (SHA-1/package non enregistre comme client OAuth "Android" cote Cloud Console) ;
+            // 7 = erreur reseau.
+            if (e.statusCode == com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes.SIGN_IN_CANCELLED) {
+                android.util.Log.d("JarvisGoogleAuth", "Connexion Google annulee par l'utilisateur")
+                return
+            }
+            android.util.Log.e("JarvisGoogleAuth", "Legacy signIn a echoue (code ${e.statusCode})", e)
+            showCopyableErrorDialog(
+                getString(R.string.google_signin_error, ""),
+                "ApiException (code ${e.statusCode}): " +
+                    "${com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes.getStatusCodeString(e.statusCode)}\n\n" +
+                    "Si le code est 10 (DEVELOPER_ERROR), le SHA-1/package de l'appli n'est " +
+                    "probablement pas enregistre comme identifiant OAuth de type \"Android\" " +
+                    "dans Google Cloud Console."
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisGoogleAuth", "Legacy signIn a echoue", e)
+            showCopyableErrorDialog(
+                getString(R.string.google_signin_error, ""),
+                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+            )
+        }
+    }
+
+    /**
+     * Les Toast disparaissent en ~3s -- trop court pour lire/recopier une erreur technique.
+     * Une AlertDialog reste affichee et le texte peut etre copie dans le presse-papier.
+     */
+    private fun showCopyableErrorDialog(title: String, detail: String) {
+        if (isFinishing || isDestroyed) {
+            android.util.Log.w("JarvisGoogleAuth", "Dialogue d'erreur ignore (Activity finissante/detruite): $detail")
+            return
+        }
+        try {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(title.trim().ifBlank { "Erreur" })
+                .setMessage(detail)
+                .setPositiveButton("Copier") { dialog, _ ->
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Erreur JARVIS", detail))
+                    Toast.makeText(this, "Copie.", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Fermer", null)
+                .show()
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisGoogleAuth", "Impossible d'afficher le dialogue d'erreur", e)
+        }
+    }
+
+    private fun refreshGoogleAccountsList() {
+        val container = findViewById<LinearLayout>(R.id.googleAccountsContainer)
+        container.removeAllViews()
+        val accounts = Prefs.loadGoogleAccounts(this)
+        if (accounts.isEmpty()) {
+            val empty = TextView(this).apply {
+                text = getString(R.string.google_no_accounts)
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 13f
+                setPadding(dpToPx(20), 0, dpToPx(20), 0)
+            }
+            container.addView(empty)
+            return
+        }
+
+        val activeEmail = Prefs.getActiveGoogleAccountEmail(this)
+        val readableAccounts = Prefs.getAllValidGoogleAccountTokens(this).keys
+        accounts.forEach { account ->
+            val isActive = account.email == activeEmail
+            val isReadable = account.email in readableAccounts
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                background = getDrawable(R.drawable.bg_bubble_ai)
+                setPadding(dpToPx(14), dpToPx(14), dpToPx(14), dpToPx(14))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dpToPx(8) }
+            }
+            val label = TextView(this).apply {
+                val identity = if (account.displayName.isNotBlank() && account.displayName != account.email) {
+                    "${account.displayName}\n${account.email}"
+                } else {
+                    account.email
+                }
+                text = when {
+                    isActive -> "\u2705 $identity\n(actif -- creation/suppression/envoi)"
+                    isReadable -> "\ud83d\udd13 $identity\n(lecture Agenda/Mail active)"
+                    else -> identity
+                }
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 14f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            if (!isActive) {
+                val activate = TextView(this).apply {
+                    text = "Activer"
+                    setTextColor(getColor(R.color.cyan_accent))
+                    textSize = 12f
+                    setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                    setOnClickListener { activateGoogleAccount(account) }
+                }
+                buttons.addView(activate)
+            }
+            val unlink = TextView(this).apply {
+                text = getString(R.string.google_unlink_button)
+                setTextColor(getColor(R.color.error_glow))
+                textSize = 12f
+                setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                setOnClickListener { unlinkGoogleAccount(account) }
+            }
+            buttons.addView(unlink)
+            row.addView(label)
+            row.addView(buttons)
+            container.addView(row)
+        }
+    }
+
+    /**
+     * Relance le selecteur de compte systeme pour que l'utilisateur choisisse [account] --
+     * l'API Google (AuthorizationClient) ne permet pas de "basculer" silencieusement vers un
+     * compte deja lie sans repasser par ce selecteur.
+     */
+    private fun activateGoogleAccount(account: GoogleAccountController.LinkedAccount) {
+        val webClientId = Prefs.getGoogleWebClientId(this).orEmpty()
+        if (webClientId.isBlank()) {
+            Toast.makeText(this, getString(R.string.google_web_client_id_missing), Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "Choisis \u00ab ${account.email} \u00bb dans le s\u00e9lecteur pour l'activer.", Toast.LENGTH_LONG).show()
+        try {
+            GoogleAccountController.signOutThenGetLegacySignInIntent(this, webClientId) { intent ->
+                googleLegacySignInLauncher.launch(intent)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisGoogleAuth", "Impossible de lancer l'ecran de connexion Google", e)
+            showCopyableErrorDialog(
+                getString(R.string.google_signin_error, ""),
+                "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+            )
+        }
+    }
+
+    private fun unlinkGoogleAccount(account: GoogleAccountController.LinkedAccount) {
+        val remaining = Prefs.loadGoogleAccounts(this).filterNot { it.email == account.email }
+        Prefs.saveGoogleAccounts(this, remaining)
+        refreshGoogleAccountsList()
+    }
+
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 }

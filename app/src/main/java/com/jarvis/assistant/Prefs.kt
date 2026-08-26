@@ -32,6 +32,15 @@ object Prefs {
     private const val KEY_GITHUB_ACCOUNTS   = "github_accounts"    // JSON array
     private const val KEY_ROTATION_STRATEGY = "rotation_strategy"  // "ROUNDROBIN"|"FALLBACK"|"RANDOM"
     private const val KEY_OBSIDIAN_VAULT_PATH = "obsidian_vault_path"
+    // OAuth Google (Agenda/Mail) -- porte depuis l'appli reecrite (avant la restauration de l'ancienne base, voir taches #247-249), a la
+    // demande explicite de l'utilisateur de garder l'integration OAuth Google actuelle en
+    // plus (pas a la place) du systeme IMAP/SMTP existant de cette base.
+    private const val KEY_GOOGLE_WEB_CLIENT_ID = "google_web_client_id"
+    private const val KEY_GOOGLE_ACCOUNTS = "google_linked_accounts_json"
+    private const val KEY_GOOGLE_ACCESS_TOKEN = "google_oauth_access_token"
+    private const val KEY_GOOGLE_ACCESS_TOKEN_EXPIRY = "google_oauth_access_token_expiry_millis"
+    private const val KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL = "google_active_account_email"
+    private const val KEY_GOOGLE_ACCOUNT_TOKENS = "google_account_tokens_json"
 
     const val DEFAULT_ACCENT_COLOR = -1525685 // #FFE8B84B (or — thème Apex Studio)
 
@@ -1387,6 +1396,131 @@ object Prefs {
         val clamped = value.coerceIn(MIN_MEMORY_CHARS, MAX_MEMORY_CHARS_CAP)
         prefs(context).edit().putInt("max_memory_chars", clamped).apply()
         return clamped
+    }
+
+    // ─── OAuth Google (Agenda/Mail) ──────────────────────────────────────────
+    // Porte depuis l'appli reecrite (voir GoogleAccountController/GoogleCalendarApiController/
+    // GmailApiController) -- coexiste avec le systeme IMAP/SMTP existant de cette base : cette
+    // base essaie d'abord le calendrier LOCAL (CalendarController, deja synchronise par Android)
+    // et l'IMAP existant, puis se rabat sur l'API Google OAuth si l'utilisateur a lie un compte.
+
+    /** ID client OAuth "Web application" (Google Cloud Console -- voir GoogleAccountController),
+     *  requis comme serverClientId par Credential Manager. Ce n'est PAS un secret (contrairement
+     *  au client secret, jamais utilise ici) -- Google le documente explicitement comme un
+     *  identifiant public sans risque a embarquer dans une appli -- donc une valeur par defaut
+     *  est acceptable ici. Reste modifiable dans Reglages si l'utilisateur cree son propre
+     *  projet Cloud Console. */
+    private const val DEFAULT_GOOGLE_WEB_CLIENT_ID =
+        "253880913410-74a517f8fdmouu01hkojh01durm80236.apps.googleusercontent.com"
+
+    fun getGoogleWebClientId(context: Context): String? {
+        val saved = prefs(context).getString(KEY_GOOGLE_WEB_CLIENT_ID, null)
+        return if (saved.isNullOrBlank()) DEFAULT_GOOGLE_WEB_CLIENT_ID else saved
+    }
+
+    fun setGoogleWebClientId(context: Context, id: String) {
+        prefs(context).edit().putString(KEY_GOOGLE_WEB_CLIENT_ID, id).apply()
+    }
+
+    /** Jeton d'acces OAuth Google (Gmail/Agenda), voir GoogleAccountController.requestAuthorization
+     *  -- de courte duree de vie (~1h), on retient l'echeance pour savoir quand le redemander en
+     *  silencieux plutot que de le reutiliser expire (l'API Google renverrait alors 401). */
+    fun getGoogleAccessToken(context: Context): String? {
+        val expiry = prefs(context).getLong(KEY_GOOGLE_ACCESS_TOKEN_EXPIRY, 0L)
+        if (System.currentTimeMillis() >= expiry) return null
+        return prefs(context).getString(KEY_GOOGLE_ACCESS_TOKEN, null)
+    }
+
+    fun setGoogleAccessToken(context: Context, token: String, expiresInSeconds: Long = 3300) {
+        prefs(context).edit()
+            .putString(KEY_GOOGLE_ACCESS_TOKEN, token)
+            .putLong(KEY_GOOGLE_ACCESS_TOKEN_EXPIRY, System.currentTimeMillis() + expiresInSeconds * 1000)
+            .apply()
+    }
+
+    /** Comptes Google lies (email + nom affiche) -- voir GoogleAccountController.LinkedAccount. */
+    fun loadGoogleAccounts(context: Context): MutableList<GoogleAccountController.LinkedAccount> {
+        val raw = prefs(context).getString(KEY_GOOGLE_ACCOUNTS, null) ?: return mutableListOf()
+        return try {
+            val array = JSONArray(raw)
+            val result = mutableListOf<GoogleAccountController.LinkedAccount>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                result.add(
+                    GoogleAccountController.LinkedAccount(
+                        obj.getString("email"),
+                        obj.optString("displayName", "")
+                    )
+                )
+            }
+            result
+        } catch (_: Exception) {
+            mutableListOf()
+        }
+    }
+
+    fun saveGoogleAccounts(context: Context, accounts: List<GoogleAccountController.LinkedAccount>) {
+        val array = JSONArray()
+        accounts.forEach { acc ->
+            val obj = JSONObject()
+            obj.put("email", acc.email)
+            obj.put("displayName", acc.displayName)
+            array.put(obj)
+        }
+        prefs(context).edit().putString(KEY_GOOGLE_ACCOUNTS, array.toString()).apply()
+    }
+
+    /**
+     * Email du compte Google dont le jeton est actuellement en cache (voir
+     * getGoogleAccessToken/setGoogleAccessToken -- UN SEUL jeton a la fois, pas un par compte
+     * lie). Sert uniquement a AFFICHER clairement a l'utilisateur quel compte parmi ceux lies
+     * est actif pour Agenda/Mail.
+     */
+    fun getActiveGoogleAccountEmail(context: Context): String? =
+        prefs(context).getString(KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL, null)
+
+    fun setActiveGoogleAccountEmail(context: Context, email: String) {
+        prefs(context).edit().putString(KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL, email).apply()
+    }
+
+    // --- Jetons OAuth PAR compte (email -> {token, expiry}) --------------------------------
+    // Permet de LIRE (agenda, mails) simultanement sur tous les comptes dont le jeton est
+    // encore valide, sans repasser par le selecteur systeme a chaque fois -- contourne la
+    // limite "un seul compte par defaut a la fois" de l'API Google puisqu'on ne redemande
+    // jamais un jeton pour un AUTRE compte que celui qui vient d'etre autorise.
+    fun setGoogleAccessTokenForAccount(context: Context, email: String, token: String, expiresInSeconds: Long = 3300) {
+        if (email.isBlank()) return
+        val map = loadGoogleAccountTokensRaw(context)
+        val entry = JSONObject()
+        entry.put("token", token)
+        entry.put("expiry", System.currentTimeMillis() + expiresInSeconds * 1000)
+        map.put(email, entry)
+        prefs(context).edit().putString(KEY_GOOGLE_ACCOUNT_TOKENS, map.toString()).apply()
+    }
+
+    /** Tous les jetons de compte encore valides (non expires), email -> jeton. */
+    fun getAllValidGoogleAccountTokens(context: Context): Map<String, String> {
+        val map = loadGoogleAccountTokensRaw(context)
+        val now = System.currentTimeMillis()
+        val result = mutableMapOf<String, String>()
+        val keys = map.keys()
+        while (keys.hasNext()) {
+            val email = keys.next()
+            val entry = map.optJSONObject(email) ?: continue
+            val expiry = entry.optLong("expiry", 0L)
+            val token = entry.optString("token", "")
+            if (token.isNotBlank() && now < expiry) result[email] = token
+        }
+        return result
+    }
+
+    private fun loadGoogleAccountTokensRaw(context: Context): JSONObject {
+        val raw = prefs(context).getString(KEY_GOOGLE_ACCOUNT_TOKENS, null) ?: return JSONObject()
+        return try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            JSONObject()
+        }
     }
 
     // ─── Interne ──────────────────────────────────────────────────────────────

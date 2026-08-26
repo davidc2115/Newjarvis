@@ -3,4 +3,16 @@
     <string name="app_name">Veridian</string>
     <string name="hint_message">Parlez ou écrivez à JARVIS…</string>
     <string name="settings_title">Paramètres de connexion IA</string>
+
+    <!-- Compte(s) Google OAuth (Agenda/Mail) : voir GoogleAccountController/SettingsActivity. -->
+    <string name="google_account_section_label">Compte(s) Google (Agenda/Mail)</string>
+    <string name="google_web_client_id_hint">ID client OAuth « Web application »…</string>
+    <string name="google_web_client_id_help">Requis une seule fois : crée un projet sur console.cloud.google.com, configure l\'écran de consentement OAuth, puis crée un ID client Android (nom de paquet + empreinte SHA-1) ET un ID client Web application : colle ici l\'ID du client Web (se termine par .apps.googleusercontent.com).</string>
+    <string name="google_add_account_button">+ Ajouter un compte Google</string>
+    <string name="google_no_accounts">Aucun compte Google lié pour l\'instant.</string>
+    <string name="google_unlink_button">Déconnecter</string>
+    <string name="google_web_client_id_missing">Renseigne d\'abord l\'ID client Web ci-dessus.</string>
+    <string name="google_signin_error">❌ Échec de la connexion Google : %1$s</string>
+    <string name="google_authorization_error">❌ Échec de l\'autorisation Gmail/Agenda : %1$s</string>
+    <string name="google_account_linked">✅ Compte Google lié : %1$s (accès Gmail/Agenda autorisé).</string>
 </resources>

@@ -343,12 +343,34 @@ object JarvisCommandParser {
                 else CalendarController.syncCalendar(context, calendarRef, json.optBoolean("enable", true))
             }
 
-            "read_emails" -> EmailController.readInbox(context, json.optInt("count", 5))
-            "read_unread_emails" -> EmailController.readUnread(context)
+            // Mail : IMAP/SMTP (mot de passe d'application) reste le chemin PAR DEFAUT ---
+            // repli sur l'API Gmail OAuth (voir GmailApiController/GoogleAccountController)
+            // UNIQUEMENT si aucun compte IMAP n'est configure ET qu'un compte Google est deja
+            // lie/autorise (voir Reglages > Systeme > Compte(s) Google) -- greffe de
+            // l'integration OAuth actuelle (taches #247-249, demande explicite de
+            // l'utilisateur de la garder en plus du systeme IMAP/SMTP existant).
+            "read_emails" -> {
+                if (Prefs.getDefaultEmailAccount(context) == null) {
+                    val token = Prefs.getGoogleAccessToken(context)
+                    if (token != null) GmailApiController.readInbox(token, json.optInt("count", 5))
+                    else EmailController.readInbox(context, json.optInt("count", 5))
+                } else EmailController.readInbox(context, json.optInt("count", 5))
+            }
+            "read_unread_emails" -> {
+                if (Prefs.getDefaultEmailAccount(context) == null) {
+                    val token = Prefs.getGoogleAccessToken(context)
+                    if (token != null) GmailApiController.readUnread(token)
+                    else EmailController.readUnread(context)
+                } else EmailController.readUnread(context)
+            }
             "search_email" -> {
                 val query = json.optString("query", "")
                 if (query.isBlank()) "❌ Aucun mot-clé de recherche fourni."
-                else EmailController.searchEmails(context, query)
+                else if (Prefs.getDefaultEmailAccount(context) == null) {
+                    val token = Prefs.getGoogleAccessToken(context)
+                    if (token != null) GmailApiController.searchEmails(token, query)
+                    else EmailController.searchEmails(context, query)
+                } else EmailController.searchEmails(context, query)
             }
             "read_email_content" -> EmailController.readEmailContent(context, json.optInt("index", 1))
             "send_email" -> {
@@ -356,7 +378,11 @@ object JarvisCommandParser {
                 val subject = json.optString("subject", "")
                 val body = json.optString("body", "")
                 if (to.isBlank()) "❌ Adresse email destinataire manquante."
-                else EmailController.sendEmail(context, to, subject, body)
+                else if (Prefs.getDefaultEmailAccount(context) == null) {
+                    val token = Prefs.getGoogleAccessToken(context)
+                    if (token != null) GmailApiController.sendEmail(token, to, subject, body)
+                    else EmailController.sendEmail(context, to, subject, body)
+                } else EmailController.sendEmail(context, to, subject, body)
             }
 
             "list_files" -> {

@@ -46,6 +46,18 @@ android {
     }
 }
 
+// FIX CI : une dependance transitive (play-services-auth 21.6.0 ou googleid 1.2.0) tire
+// androidx.credentials en 1.6.0-beta01 malgre la version 1.5.0 declaree explicitement
+// ci-dessous (resolution Gradle = plus haute version demandee, directe OU transitive gagne).
+// 1.6.x exige AGP 8.6.0 (ce projet est en 8.5.2, voir plus haut) -- on force donc la
+// resolution sur 1.5.0 pour toute la config, peu importe qui la redemande en interne.
+configurations.all {
+    resolutionStrategy {
+        force 'androidx.credentials:credentials:1.5.0'
+        force 'androidx.credentials:credentials-play-services-auth:1.5.0'
+    }
+}
+
 dependencies {
     // ── Core Android ──────────────────────────────────────────────────────────
     implementation 'androidx.core:core-ktx:1.13.1'
@@ -91,6 +103,19 @@ dependencies {
 
     // ── Localisation ──────────────────────────────────────────────────────────
     implementation 'com.google.android.gms:play-services-location:21.3.0'
+
+    // ── OAuth Google (Agenda/Mail) -- greffe de l'integration actuelle (taches #247-249,
+    // demande explicite de l'utilisateur de garder l'OAuth Google actuel en plus du systeme
+    // IMAP/SMTP existant). Deux briques distinctes, toutes deux officiellement recommandees
+    // par Google : Credential Manager = AUTHENTIFICATION (selecteur de compte natif) ;
+    // play-services-auth (AuthorizationClient) = AUTORISATION (acces Gmail/Agenda, consentement
+    // separe par scope). Un ID client OAuth (Google Cloud Console) reste indispensable dans les
+    // deux cas -- exigence de l'infrastructure OAuth de Google elle-meme. 1.6.0+ de credentials
+    // exige AGP 8.6.0 (ce projet est en 8.5.2) ; 1.5.0 est la derniere version stable compatible.
+    implementation 'androidx.credentials:credentials:1.5.0'
+    implementation 'androidx.credentials:credentials-play-services-auth:1.5.0'
+    implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.0'
+    implementation 'com.google.android.gms:play-services-auth:21.6.0'
 
     // ── Médias / ExoPlayer (optionnel : meilleure gestion audio) ─────────────
     implementation 'androidx.media3:media3-exoplayer:1.4.1'
