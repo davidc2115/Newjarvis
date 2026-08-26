@@ -666,10 +666,67 @@ class MainActivity : AppCompatActivity() {
         // messages clairs renvoyes par ObsidianController lui-meme (Result.failure).
         if (command is CommandInterpreter.Command.CreateNote) {
             lifecycleScope.launch {
-                val result = ObsidianController.createNote(this@MainActivity, command.title, command.content)
+                val result = ObsidianController.createNote(this@MainActivity, command.title, command.content, command.folder)
+                val folderSuffix = command.folder?.let { " dans le dossier \u00ab $it \u00bb" } ?: ""
                 appendAssistantMessage(
                     result.fold(
-                        onSuccess = { "\uD83D\uDCDD Note \u00ab ${command.title} \u00bb cr\u00e9\u00e9e dans le vault Obsidian." },
+                        onSuccess = { "\uD83D\uDCDD Note \u00ab ${command.title} \u00bb cr\u00e9\u00e9e dans le vault Obsidian$folderSuffix." },
+                        onFailure = { e -> "\u274c ${e.message}" }
+                    )
+                )
+            }
+            return
+        }
+        // Dossiers du vault (tache #239) -- meme raisonnement que les notes ci-dessus : SAF
+        // pur, pas d'OAuth, erreurs deja claires via Result.failure.
+        if (command is CommandInterpreter.Command.CreateFolder) {
+            lifecycleScope.launch {
+                val result = ObsidianController.createFolder(this@MainActivity, command.name)
+                appendAssistantMessage(
+                    result.fold(
+                        onSuccess = { "\uD83D\uDCC1 Dossier \u00ab ${command.name} \u00bb cr\u00e9\u00e9 dans le vault Obsidian." },
+                        onFailure = { e -> "\u274c ${e.message}" }
+                    )
+                )
+            }
+            return
+        }
+        if (command is CommandInterpreter.Command.ListFolders) {
+            lifecycleScope.launch {
+                val result = ObsidianController.listFolders(this@MainActivity)
+                appendAssistantMessage(
+                    result.fold(
+                        onSuccess = { folders ->
+                            if (folders.isEmpty()) "\uD83D\uDCC1 Le vault Obsidian ne contient aucun dossier pour l'instant."
+                            else "\uD83D\uDCC1 ${folders.size} dossier(s) :\n\n" + folders.joinToString("\n") { "\u2022 $it" }
+                        },
+                        onFailure = { e -> "\u274c ${e.message}" }
+                    )
+                )
+            }
+            return
+        }
+        if (command is CommandInterpreter.Command.DeleteFolder) {
+            lifecycleScope.launch {
+                val result = ObsidianController.deleteFolder(this@MainActivity, command.name)
+                appendAssistantMessage(
+                    result.fold(
+                        onSuccess = { count ->
+                            val detail = if (count > 0) " ($count fichier(s) supprim\u00e9(s) avec lui)" else ""
+                            "\uD83D\uDDD1\uFE0F Dossier \u00ab ${command.name} \u00bb supprim\u00e9$detail."
+                        },
+                        onFailure = { e -> "\u274c ${e.message}" }
+                    )
+                )
+            }
+            return
+        }
+        if (command is CommandInterpreter.Command.RenameFolder) {
+            lifecycleScope.launch {
+                val result = ObsidianController.renameFolder(this@MainActivity, command.oldName, command.newName)
+                appendAssistantMessage(
+                    result.fold(
+                        onSuccess = { "\uD83D\uDCC1 Dossier \u00ab ${command.oldName} \u00bb renomm\u00e9 en \u00ab ${command.newName} \u00bb." },
                         onFailure = { e -> "\u274c ${e.message}" }
                     )
                 )
@@ -869,6 +926,10 @@ class MainActivity : AppCompatActivity() {
             is CommandInterpreter.Command.ReadNote -> return // géré au-dessus (async, SAF)
             CommandInterpreter.Command.ListNotes -> return // géré au-dessus (async, SAF)
             is CommandInterpreter.Command.AppendNote -> return // géré au-dessus (async, SAF)
+            is CommandInterpreter.Command.CreateFolder -> return // géré au-dessus (async, SAF)
+            CommandInterpreter.Command.ListFolders -> return // géré au-dessus (async, SAF)
+            is CommandInterpreter.Command.DeleteFolder -> return // géré au-dessus (async, SAF)
+            is CommandInterpreter.Command.RenameFolder -> return // géré au-dessus (async, SAF)
         }
         appendAssistantMessage(reply)
     }

@@ -47,6 +47,9 @@
     <string name="vault_empty_message">Ce vault ne contient encore aucune note. Dis à JARVIS \"note que ...\" ou \"crée une note appelée ...\" pour commencer.</string>
     <string name="vault_note_not_found">🔍 Note introuvable : « %1$s ».</string>
     <string name="vault_graph_title">Toile Obsidian</string>
+    <string name="vault_new_folder_title">Nouveau dossier</string>
+    <string name="vault_new_folder_hint">Nom du dossier</string>
+    <string name="vault_new_folder_confirm">Créer</string>
 
     <string name="email_title">Email</string>
     <string name="email_intro">Lecture (IMAP) et envoi (SMTP) directement depuis l\'app, sans passer par Google Cloud Console. Pour Gmail/Yahoo/Outlook, utilise un « mot de passe d\'application », pas ton mot de passe principal.</string>

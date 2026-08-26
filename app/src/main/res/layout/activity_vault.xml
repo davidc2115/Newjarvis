@@ -45,6 +45,17 @@
             android:contentDescription="@string/vault_graph_title"
             android:padding="8dp" />
 
+        <ImageButton
+            android:id="@+id/vaultNewFolderButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerVertical="true"
+            android:layout_toStartOf="@id/vaultGraphButton"
+            android:background="@drawable/bg_icon_button"
+            android:src="@drawable/ic_add"
+            android:contentDescription="@string/vault_new_folder_title"
+            android:padding="8dp" />
+
     </RelativeLayout>
 
     <TextView

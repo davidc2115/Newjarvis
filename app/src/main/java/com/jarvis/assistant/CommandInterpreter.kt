@@ -60,11 +60,23 @@ object CommandInterpreter {
         data class SearchEmail(val query: String) : Command()
         data class SendEmail(val to: String, val body: String) : Command()
         // Notes Obsidian (voir ObsidianController -- vault SAF reel choisi par l'utilisateur
-        // dans Reglages, phase 1 du systeme second-brain, tache #211).
-        data class CreateNote(val title: String, val content: String) : Command()
+        // dans Reglages, phase 1 du systeme second-brain, tache #211). [folder] optionnel sur
+        // CreateNote : range la note dans un sous-dossier existant ou cree a la volee (ex.
+        // "cree une note appelee Julie dans le dossier Contacts") -- voir tache #239, demande
+        // explicite d'une vraie organisation par dossiers ("les dossier[s]") comme dans
+        // l'ancienne appli, jusqu'ici absente de la reecriture (tout etait cree a plat a la
+        // racine du vault).
+        data class CreateNote(val title: String, val content: String, val folder: String? = null) : Command()
         data class ReadNote(val title: String) : Command()
         object ListNotes : Command()
         data class AppendNote(val title: String, val content: String) : Command()
+        // Dossiers du vault (tache #239) -- organisation, pas juste des notes en vrac. Distinct
+        // des notes : un dossier peut etre vide, renomme ou supprime independamment de tout
+        // fichier .md qu'il contient.
+        data class CreateFolder(val name: String) : Command()
+        object ListFolders : Command()
+        data class DeleteFolder(val name: String) : Command()
+        data class RenameFolder(val oldName: String, val newName: String) : Command()
     }
 
     private val flashlightOnRegex = Regex("(allume|active)[^.]*(lampe|torche|flash)")
@@ -293,12 +305,36 @@ object CommandInterpreter {
     // "sauvegarde"/"enregistre" ajoutés comme synonymes de créer -- tournure naturelle
     // ("sauvegarde une note appelée..."). Voir aussi quickNoteRegex plus bas pour la capture
     // SANS titre explicite (bien plus fréquente en usage réel).
+    // Groupe 3 optionnel ("dans le dossier X") : capture non-gourmande, backtracke sur le
+    // groupe 2 (contenu) si absent -- meme principe que le contenu seul avant (voir tache
+    // #239). "avec"/"contenant"/":" restent les separateurs titre/contenu habituels.
     private val createNoteRegex = Regex(
-        "(?:cr[ée]e?|nouvelle|sauvegarde|enregistre)[^.]*note[^.]*appel[ée]e?\\s+(.+?)\\s*(?:avec|contenant|:)\\s*(.+)",
+        "(?:cr[ée]e?|nouvelle|sauvegarde|enregistre)[^.]*note[^.]*appel[ée]e?\\s+(.+?)\\s*(?:avec|contenant|:)\\s*(.+?)" +
+            "(?:\\s+dans\\s+(?:le\\s+)?dossier\\s+(.+?))?\\s*$",
         RegexOption.IGNORE_CASE
     )
     private val appendNoteRegex = Regex(
         "(?:ajoute|compl[èe]te|mets? [àa] jour|modifie)[^.]*note\\s+(.+?)\\s*(?:avec|contenant|disant|:)\\s*(.+)",
+        RegexOption.IGNORE_CASE
+    )
+    // Dossiers du vault (tache #239) -- "cree/nouveau dossier appele X", "supprime le dossier
+    // X", "renomme le dossier X en Y", "liste/quels dossiers". Meme style que les regex notes
+    // ci-dessus, verbe different pour ne pas se confondre avec createNoteRegex (mot-cle
+    // "dossier" au lieu de "note").
+    private val createFolderRegex = Regex(
+        "(?:cr[ée]e?|nouveau|ajoute)[^.]*dossier(?:\\s+appel[ée]e?|\\s+nomm[ée]e?)?\\s+(.+?)\\s*$",
+        RegexOption.IGNORE_CASE
+    )
+    private val deleteFolderRegex = Regex(
+        "supprime[^.]*dossier\\s+(.+?)\\s*$",
+        RegexOption.IGNORE_CASE
+    )
+    private val renameFolderRegex = Regex(
+        "renomme[^.]*dossier\\s+(.+?)\\s+en\\s+(.+?)\\s*$",
+        RegexOption.IGNORE_CASE
+    )
+    private val listFoldersRegex = Regex(
+        "liste[^.]*dossiers|quels? dossiers|mes dossiers(?: obsidian)?",
         RegexOption.IGNORE_CASE
     )
     private val readNoteRegex = Regex(
@@ -563,7 +599,8 @@ object CommandInterpreter {
         createNoteRegex.find(trimmed)?.let { match ->
             val title = match.groupValues[1].trim()
             val text = match.groupValues[2].trim()
-            if (title.isNotBlank() && text.isNotBlank()) return Command.CreateNote(title, text)
+            val folder = match.groupValues[3].trim().ifBlank { null }
+            if (title.isNotBlank() && text.isNotBlank()) return Command.CreateNote(title, text, folder)
         }
 
         appendNoteRegex.find(trimmed)?.let { match ->
@@ -578,6 +615,29 @@ object CommandInterpreter {
         }
 
         if (listNotesRegex.containsMatchIn(lower)) return Command.ListNotes
+
+        // Dossiers du vault (tache #239) -- verifie APRES les regex notes ci-dessus (mot-cle
+        // "dossier" disjoint de "note", l'ordre n'a pas d'impact pratique, groupe juste par
+        // lisibilite). renameFolderRegex avant deleteFolderRegex/createFolderRegex : "renomme"
+        // est un verbe plus specifique, pas de risque de collision de toute facon (verbes tous
+        // differents).
+        renameFolderRegex.find(trimmed)?.let { match ->
+            val oldName = cleanName(match.groupValues[1].trim())
+            val newName = cleanName(match.groupValues[2].trim())
+            if (oldName.isNotBlank() && newName.isNotBlank()) return Command.RenameFolder(oldName, newName)
+        }
+
+        deleteFolderRegex.find(trimmed)?.let { match ->
+            val name = cleanName(match.groupValues[1].trim())
+            if (name.isNotBlank()) return Command.DeleteFolder(name)
+        }
+
+        createFolderRegex.find(trimmed)?.let { match ->
+            val name = cleanName(match.groupValues[1].trim())
+            if (name.isNotBlank()) return Command.CreateFolder(name)
+        }
+
+        if (listFoldersRegex.containsMatchIn(lower)) return Command.ListFolders
 
         memoryRegex.find(trimmed)?.let { match ->
             val text = match.groupValues[1].trim().trimEnd('.', '!', '?')
@@ -647,10 +707,14 @@ Actions possibles (respecte exactement les noms des champs, JSON valide, une seu
 {"action":"read_unread_emails"}
 {"action":"search_email","query":"facture"}
 {"action":"send_email","to":"quelqu-un@exemple.com","body":"texte du mail"}
-{"action":"create_note","title":"Idee projet","content":"texte de la note"}
+{"action":"create_note","title":"Idee projet","content":"texte de la note","folder":"Projets"}
 {"action":"read_note","title":"Idee projet"}
 {"action":"list_notes"}
 {"action":"append_note","title":"Idee projet","content":"texte a ajouter"}
+{"action":"create_folder","name":"Projets"}
+{"action":"list_folders"}
+{"action":"delete_folder","name":"Projets"}
+{"action":"rename_folder","old_name":"Projets","new_name":"Projets 2026"}
 {"action":"none"}
 
 Message de l'utilisateur : "$safeText"
@@ -759,9 +823,17 @@ JSON :"""
             // capture au vol que quickNoteRegex) -- create_note garde un titre obligatoire
             // (une note explicitement NOMMEE n'a de sens que si un nom est fourni), mais le
             // contenu devient facultatif (note vierge avec juste un titre, cas valide).
-            "create_note" -> str("title").ifBlank { null }?.let { Command.CreateNote(it, str("content")) }
+            "create_note" -> str("title").ifBlank { null }?.let { Command.CreateNote(it, str("content"), strOrNull("folder")) }
             "read_note" -> str("title").ifBlank { null }?.let { Command.ReadNote(it) }
             "list_notes" -> Command.ListNotes
+            "create_folder" -> str("name").ifBlank { null }?.let { Command.CreateFolder(cleanName(it)) }
+            "list_folders" -> Command.ListFolders
+            "delete_folder" -> str("name").ifBlank { null }?.let { Command.DeleteFolder(cleanName(it)) }
+            "rename_folder" -> {
+                val oldName = str("old_name").ifBlank { null }
+                val newName = str("new_name").ifBlank { null }
+                if (oldName != null && newName != null) Command.RenameFolder(cleanName(oldName), cleanName(newName)) else null
+            }
             "append_note" -> {
                 val text = str("content")
                 if (text.isBlank()) null else Command.AppendNote(str("title").ifBlank { "Notes rapides" }, text)

@@ -72,6 +72,37 @@ object ObsidianController {
         return null
     }
 
+    /** Sous-dossier existant a un chemin potentiellement imbrique ("Projets/Alpha") depuis la
+     *  racine du vault, ou null si un segment du chemin n'existe pas. Insensible a la casse
+     *  (coherent avec findNote). */
+    private fun findFolder(root: DocumentFile, path: String): DocumentFile? {
+        var current = root
+        for (segment in path.split('/').map { it.trim() }.filter { it.isNotBlank() }) {
+            current = current.listFiles().firstOrNull { it.isDirectory && it.name?.equals(segment, ignoreCase = true) == true }
+                ?: return null
+        }
+        return current
+    }
+
+    /** Comme [findFolder] mais CREE chaque segment manquant du chemin -- DocumentFile n'a pas
+     *  d'equivalent "mkdir -p" natif, un appel a createDirectory() par segment est necessaire. */
+    private fun resolveOrCreateFolder(root: DocumentFile, path: String): DocumentFile? {
+        var current = root
+        for (segment in path.split('/').map { it.trim() }.filter { it.isNotBlank() }) {
+            val existing = current.listFiles().firstOrNull { it.isDirectory && it.name?.equals(segment, ignoreCase = true) == true }
+            current = existing ?: current.createDirectory(segment) ?: return null
+        }
+        return current
+    }
+
+    private fun countFilesRecursive(dir: DocumentFile): Int {
+        var count = 0
+        for (child in dir.listFiles()) {
+            count += if (child.isDirectory) countFilesRecursive(child) else 1
+        }
+        return count
+    }
+
     /** Titres bruts (sans .md, sans chemin de sous-dossier) de toutes les notes du vault --
      *  base pour autoLinkContent ci-dessous. Fonction synchrone volontairement privée : les
      *  appelants publics (suspend) l'utilisent déjà depuis Dispatchers.IO. */
@@ -144,7 +175,11 @@ object ObsidianController {
         }
     }
 
-    suspend fun createNote(context: Context, title: String, content: String): Result<Unit> = withContext(Dispatchers.IO) {
+    /** [folder] optionnel (tache #239, organisation par dossiers) : chemin relatif depuis la
+     *  racine du vault ("Contacts" ou "Projets/Alpha"), cree a la volee s'il n'existe pas
+     *  encore -- l'utilisateur n'a pas a creer le dossier separement avant de pouvoir y ranger
+     *  une note directement. */
+    suspend fun createNote(context: Context, title: String, content: String, folder: String? = null): Result<Unit> = withContext(Dispatchers.IO) {
         val root = getVaultRoot(context)
             ?: return@withContext Result.failure(IllegalStateException("Aucun vault Obsidian choisi -- va dans Réglages pour en sélectionner un."))
         try {
@@ -152,11 +187,101 @@ object ObsidianController {
             if (findNote(root, title) != null) {
                 return@withContext Result.failure(IllegalStateException("Une note « $title » existe déjà -- utilise plutôt l'ajout/complément si tu veux la modifier."))
             }
-            val file = root.createFile("text/markdown", fileName)
+            val parent = if (folder.isNullOrBlank()) {
+                root
+            } else {
+                resolveOrCreateFolder(root, folder)
+                    ?: return@withContext Result.failure(IllegalStateException("Impossible de créer/accéder au dossier « $folder »."))
+            }
+            val file = parent.createFile("text/markdown", fileName)
                 ?: return@withContext Result.failure(IllegalStateException("Impossible de créer le fichier dans le vault (permission perdue ?)."))
             val linked = autoLinkContent(context, content, excludeTitle = title)
             context.contentResolver.openOutputStream(file.uri)?.use { it.write(linked.toByteArray(Charsets.UTF_8)) }
                 ?: return@withContext Result.failure(IllegalStateException("Impossible d'écrire dans le fichier créé."))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Liste tous les sous-dossiers du vault (chemin relatif complet, ex. "Projets/Alpha") --
+     *  pendant "dossiers" de [listNotes] ci-dessus. */
+    suspend fun listFolders(context: Context): Result<List<String>> = withContext(Dispatchers.IO) {
+        val root = getVaultRoot(context)
+            ?: return@withContext Result.failure(IllegalStateException("Aucun vault Obsidian choisi -- va dans Réglages pour en sélectionner un."))
+        try {
+            val result = mutableListOf<String>()
+            fun walk(dir: DocumentFile, prefix: String) {
+                for (child in dir.listFiles()) {
+                    if (child.isDirectory) {
+                        val name = child.name ?: continue
+                        val path = if (prefix.isEmpty()) name else "$prefix/$name"
+                        result.add(path)
+                        walk(child, path)
+                    }
+                }
+            }
+            walk(root, "")
+            Result.success(result.sorted())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Cree un dossier (potentiellement imbrique, ex. "Projets/Alpha") a la racine du vault --
+     *  echoue explicitement s'il existe deja plutot que de silencieusement ne rien faire, pour
+     *  que l'utilisateur sache que son dossier "Contacts" existant n'a pas ete duplique/ecrase. */
+    suspend fun createFolder(context: Context, name: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val root = getVaultRoot(context)
+            ?: return@withContext Result.failure(IllegalStateException("Aucun vault Obsidian choisi -- va dans Réglages pour en sélectionner un."))
+        try {
+            if (findFolder(root, name) != null) {
+                return@withContext Result.failure(IllegalStateException("Un dossier « $name » existe déjà."))
+            }
+            resolveOrCreateFolder(root, name)
+                ?: return@withContext Result.failure(IllegalStateException("Impossible de créer le dossier (permission perdue ?)."))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Supprime un dossier et TOUT son contenu (recursif -- comportement standard de
+     *  DocumentFile.delete() sur un repertoire SAF non vide). Renvoie le nombre de fichiers
+     *  supprimes avec lui pour que l'utilisateur sache exactement ce qui a disparu (pas de
+     *  suppression silencieuse d'un dossier qui contenait des notes). */
+    suspend fun deleteFolder(context: Context, name: String): Result<Int> = withContext(Dispatchers.IO) {
+        val root = getVaultRoot(context)
+            ?: return@withContext Result.failure(IllegalStateException("Aucun vault Obsidian choisi -- va dans Réglages pour en sélectionner un."))
+        try {
+            val folder = findFolder(root, name)
+                ?: return@withContext Result.failure(NoSuchElementException("Aucun dossier « $name » trouvé."))
+            val count = countFilesRecursive(folder)
+            if (!folder.delete()) {
+                return@withContext Result.failure(IllegalStateException("Échec de la suppression du dossier « $name »."))
+            }
+            Result.success(count)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Renomme un dossier EN PLACE (meme parent, nouveau nom) -- [newName] est traite comme un
+     *  simple nom (pas un chemin), coherent avec la formulation naturelle attendue ("renomme le
+     *  dossier Projets en Archives"), pas un deplacement vers un autre parent. */
+    suspend fun renameFolder(context: Context, oldName: String, newName: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val root = getVaultRoot(context)
+            ?: return@withContext Result.failure(IllegalStateException("Aucun vault Obsidian choisi -- va dans Réglages pour en sélectionner un."))
+        try {
+            val folder = findFolder(root, oldName)
+                ?: return@withContext Result.failure(NoSuchElementException("Aucun dossier « $oldName » trouvé."))
+            val leafName = newName.substringAfterLast('/').trim()
+            if (leafName.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Nouveau nom de dossier vide."))
+            }
+            if (!folder.renameTo(leafName)) {
+                return@withContext Result.failure(IllegalStateException("Échec du renommage (un dossier « $leafName » existe peut-être déjà)."))
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

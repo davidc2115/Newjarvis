@@ -1,11 +1,12 @@
 package com.jarvis.assistant
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.text.SpannableStringBuilder
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
-import android.view.Gravity
 import android.view.View
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -29,6 +30,12 @@ import kotlinx.coroutines.launch
  * la toile") est dans VaultGraphActivity (tâche #226), accessible via [vaultGraphButton] dans
  * la barre du haut ; taper un nœud du graphe revient ici en mode détail directement (voir
  * [EXTRA_OPEN_NOTE_TITLE]).
+ *
+ * Organisation par dossiers (tâche #239, demande explicite : "les dossier[s]" comme l'ancienne
+ * appli) : la liste n'est plus un flux plat de "titre\nchemin", mais un vrai navigateur --
+ * dossiers et notes du niveau courant seulement (voir [currentFolderPath]), on descend en
+ * tapant un dossier, on remonte avec la ligne ".." ou le bouton retour. [vaultNewFolderButton]
+ * crée un dossier DANS le dossier actuellement affiché (pas toujours à la racine).
  */
 class VaultActivity : AppCompatActivity() {
 
@@ -47,6 +54,14 @@ class VaultActivity : AppCompatActivity() {
     private var currentNoteTitle: String? = null
     private var allNoteTitles: List<String> = emptyList()
 
+    // Snapshot complet chargé une fois (voir loadVault) -- la navigation entre dossiers filtre
+    // ensuite ces listes en mémoire, sans refaire d'I/O SAF à chaque tap (rapide, cohérent
+    // pendant toute la session de navigation).
+    private var allNotePaths: List<String> = emptyList()
+    private var allFolderPaths: List<String> = emptyList()
+    // "" = racine du vault ; sinon chemin relatif ("Contacts" ou "Projets/Alpha").
+    private var currentFolderPath: String = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -59,6 +74,7 @@ class VaultActivity : AppCompatActivity() {
         binding.vaultGraphButton.setOnClickListener {
             startActivity(android.content.Intent(this, VaultGraphActivity::class.java))
         }
+        binding.vaultNewFolderButton.setOnClickListener { promptCreateFolder() }
 
         loadVault()
     }
@@ -75,6 +91,9 @@ class VaultActivity : AppCompatActivity() {
             } else {
                 showList()
             }
+        } else if (currentFolderPath.isNotEmpty()) {
+            currentFolderPath = parentPath(currentFolderPath)
+            renderFolderView()
         } else {
             finish()
         }
@@ -100,21 +119,24 @@ class VaultActivity : AppCompatActivity() {
             return
         }
         lifecycleScope.launch {
-            val result = ObsidianController.listNotes(this@VaultActivity)
-            val notes = result.getOrNull().orEmpty()
+            val notes = ObsidianController.listNotes(this@VaultActivity).getOrNull().orEmpty()
+            val folders = ObsidianController.listFolders(this@VaultActivity).getOrNull().orEmpty()
+            allNotePaths = notes
+            allFolderPaths = folders
             // Titres SANS extension .md ni chemin de sous-dossier pour l'affichage/la recherche
             // de wikilinks (voir ObsidianController.collectAllNoteTitles, même convention).
             allNoteTitles = notes.map { path -> path.substringAfterLast('/').removeSuffix(".md") }
-            if (notes.isEmpty()) {
+            if (notes.isEmpty() && folders.isEmpty()) {
                 binding.vaultEmptyText.text = getString(R.string.vault_empty_message)
                 binding.vaultEmptyText.visibility = View.VISIBLE
                 binding.vaultListScroll.visibility = View.GONE
             } else {
                 binding.vaultEmptyText.visibility = View.GONE
-                renderList(notes)
+                currentFolderPath = ""
+                renderFolderView()
                 // Ouverture directe demandee par VaultGraphActivity (tap sur un noeud du
-                // graphe) -- verifiee APRES renderList/showList pour repasser en mode detail
-                // par-dessus l'etat "liste" par defaut.
+                // graphe) -- verifiee APRES renderFolderView/showList pour repasser en mode
+                // detail par-dessus l'etat "liste" par defaut.
                 val openTitle = intent.getStringExtra(EXTRA_OPEN_NOTE_TITLE)
                 if (openTitle != null && allNoteTitles.any { it.equals(openTitle, ignoreCase = true) }) {
                     noteBackStack.clear()
@@ -124,34 +146,121 @@ class VaultActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderList(notePaths: List<String>) {
+    /** Chemin du dossier parent de [path] ("Projets/Alpha" -> "Projets", "Projets" -> ""). */
+    private fun parentPath(path: String): String = path.substringBeforeLast('/', "")
+
+    /** Reconstruit la liste affichée pour [currentFolderPath] : uniquement les dossiers et
+     *  notes DIRECTEMENT dedans (pas les descendants plus profonds -- ceux-là apparaissent
+     *  quand on descend dans leur propre dossier), plus une ligne ".." si on n'est pas déjà à
+     *  la racine. Filtre en mémoire sur les snapshots chargés par [loadVault], aucun I/O SAF
+     *  supplémentaire ici. */
+    private fun renderFolderView() {
         binding.vaultListContainer.removeAllViews()
-        notePaths.forEach { path ->
-            val title = path.substringAfterLast('/').removeSuffix(".md")
-            val row = TextView(this).apply {
-                text = if (path.contains('/')) "$title\n$path" else title
-                setTextColor(ContextCompat.getColor(this@VaultActivity, R.color.text_primary))
-                textSize = 15f
-                setBackgroundResource(R.drawable.bg_model_row)
-                setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14))
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { setMargins(dpToPx(16), dpToPx(4), dpToPx(16), dpToPx(4)) }
-                setOnClickListener {
-                    noteBackStack.clear()
-                    showNote(title)
-                }
+
+        if (currentFolderPath.isNotEmpty()) {
+            addRow("⬆️ ..") {
+                currentFolderPath = parentPath(currentFolderPath)
+                renderFolderView()
             }
-            binding.vaultListContainer.addView(row)
         }
+
+        val childFolders = allFolderPaths
+            .filter { parentPath(it) == currentFolderPath }
+            .sortedBy { it.substringAfterLast('/') }
+        for (folderPath in childFolders) {
+            val name = folderPath.substringAfterLast('/')
+            addRow("📁 $name") {
+                currentFolderPath = folderPath
+                renderFolderView()
+            }
+        }
+
+        val childNotes = allNotePaths
+            .filter { parentPath(it) == currentFolderPath }
+            .sortedBy { it.substringAfterLast('/') }
+        for (notePath in childNotes) {
+            val title = notePath.substringAfterLast('/').removeSuffix(".md")
+            addRow(title) {
+                noteBackStack.clear()
+                showNote(title)
+            }
+        }
+
+        if (currentFolderPath.isEmpty() && childFolders.isEmpty() && childNotes.isEmpty()) {
+            // Vault non-vide globalement (sinon on ne serait pas arrivé ici, voir loadVault)
+            // mais rien à la racine -- arrive si tout est range dans des sous-dossiers des le
+            // depart, cas rare mais possible : evite un ecran blanc silencieux.
+        }
+
         showList()
+    }
+
+    private fun addRow(label: String, onClick: () -> Unit) {
+        val row = TextView(this).apply {
+            text = label
+            setTextColor(ContextCompat.getColor(this@VaultActivity, R.color.text_primary))
+            textSize = 15f
+            setBackgroundResource(R.drawable.bg_model_row)
+            setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(dpToPx(16), dpToPx(4), dpToPx(16), dpToPx(4)) }
+            setOnClickListener { onClick() }
+        }
+        binding.vaultListContainer.addView(row)
     }
 
     private fun showList() {
         currentNoteTitle = null
-        binding.vaultTitleText.text = getString(R.string.vault_title)
+        binding.vaultTitleText.text = if (currentFolderPath.isEmpty()) {
+            getString(R.string.vault_title)
+        } else {
+            currentFolderPath.substringAfterLast('/')
+        }
         binding.vaultListScroll.visibility = View.VISIBLE
         binding.vaultDetailScroll.visibility = View.GONE
+    }
+
+    /** Demande un nom de dossier (AlertDialog + EditText, pas de nouvel écran pour un geste
+     *  aussi simple) et le crée DANS [currentFolderPath] -- reproduit le bouton "+" de l'écran
+     *  graphe de l'ancienne appli (tâche #164), ici sur l'écran liste qui est l'entrée
+     *  principale du vault. */
+    private fun promptCreateFolder() {
+        val input = EditText(this).apply {
+            hint = getString(R.string.vault_new_folder_hint)
+            setTextColor(ContextCompat.getColor(this@VaultActivity, R.color.text_primary))
+        }
+        val padding = dpToPx(20)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, 0)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.vault_new_folder_title)
+            .setView(container)
+            .setPositiveButton(R.string.vault_new_folder_confirm) { _, _ ->
+                val name = input.text?.toString()?.trim().orEmpty()
+                if (name.isNotBlank()) createFolderHere(name)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun createFolderHere(name: String) {
+        val fullPath = if (currentFolderPath.isEmpty()) name else "$currentFolderPath/$name"
+        lifecycleScope.launch {
+            val result = ObsidianController.createFolder(this@VaultActivity, fullPath)
+            result.fold(
+                onSuccess = {
+                    allFolderPaths = allFolderPaths + fullPath
+                    renderFolderView()
+                },
+                onFailure = { e ->
+                    android.widget.Toast.makeText(this@VaultActivity, e.message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
     }
 
     private fun showNote(title: String) {
