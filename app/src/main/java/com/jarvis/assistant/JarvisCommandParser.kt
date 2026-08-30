@@ -302,15 +302,27 @@ object JarvisCommandParser {
             // CALENDAR_FORMAT_MARKER, Prefs, action set_calendar_presentation_style...) mais
             // n'était en fait JAMAIS appelée ici -- un style personnalisé enregistré par
             // l'utilisateur pour son planning n'avait donc strictement aucun effet.
-            "today_events" -> withCalendarPresentationStyleNote(context, CalendarController.getTodayEvents(context, json.optString("calendar", "").ifBlank { null }))
+            //
+            // BUG RÉEL CORRIGÉ (signalement utilisateur : "je demande un planning en
+            // particulier, il me répond calendrier null introuvable") : le paramètre
+            // "calendar" n'était filtré qu'avec .ifBlank { null } -- si l'IA (surtout un
+            // modèle plus limité) écrivait littéralement la chaîne "calendar":"null" au lieu
+            // d'omettre le champ (schéma classique déjà connu, voir BLANK_PLACEHOLDER_VALUES/
+            // cleanOptionalField utilisés pour les fiches contact), cette chaîne n'était PAS
+            // vide donc passait telle quelle -- CalendarController cherchait alors un vrai
+            // calendrier nommé "null", ne le trouvait jamais, et affichait littéralement
+            // "Calendrier « null » introuvable." Les 7 usages de "calendar" dans les actions
+            // agenda passent maintenant par cleanOptionalField, qui filtre aussi "null"/
+            // "aucun"/"n/a"/etc. comme pour les autres champs optionnels.
+            "today_events" -> withCalendarPresentationStyleNote(context, CalendarController.getTodayEvents(context, cleanOptionalField(json.optString("calendar", ""))))
             // offsetDays (nouveau) : décale le DÉBUT de la plage en jours calendaires entiers
             // par rapport à aujourd'hui -- 0=aujourd'hui (défaut, comportement inchangé),
             // 1=demain, 2=après-demain... BUG RÉEL CORRIGÉ (signalement utilisateur : "demain",
             // "à partir de demain" mal compris) : sans ce paramètre, aucune action ne permettait
             // de cibler un jour précis autre qu'aujourd'hui ; l'IA n'avait alors aucun moyen
             // fiable de répondre à ces demandes.
-            "upcoming_events" -> withCalendarPresentationStyleNote(context, CalendarController.getUpcomingEvents(context, json.optInt("days", 7), json.optString("calendar", "").ifBlank { null }, json.optInt("offsetDays", 0)))
-            "week_events" -> withCalendarPresentationStyleNote(context, CalendarController.getEventsForWeek(context, json.optInt("offset", 0), json.optString("calendar", "").ifBlank { null }))
+            "upcoming_events" -> withCalendarPresentationStyleNote(context, CalendarController.getUpcomingEvents(context, json.optInt("days", 7), cleanOptionalField(json.optString("calendar", "")), json.optInt("offsetDays", 0)))
+            "week_events" -> withCalendarPresentationStyleNote(context, CalendarController.getEventsForWeek(context, json.optInt("offset", 0), cleanOptionalField(json.optString("calendar", ""))))
             "create_event" -> {
                 val title = json.optString("title", "Événement")
                 val dateStr = json.optString("date", "")
@@ -318,7 +330,7 @@ object JarvisCommandParser {
                 val durationMinutes = json.optInt("durationMinutes", 60).coerceAtLeast(1)
                 val desc = json.optString("description", "")
                 val loc = json.optString("location", "")
-                val calendarRef = json.optString("calendar", "").ifBlank { null }
+                val calendarRef = cleanOptionalField(json.optString("calendar", ""))
 
                 // BUG RÉEL CORRIGÉ : create_event exigeait auparavant que le modèle calcule
                 // lui-même des epoch millisecondes (startTime/endTime) pour "demain à 14h" —
@@ -353,18 +365,18 @@ object JarvisCommandParser {
             "name_calendar" -> {
                 // "calendar" accepte un ID, un nom affiché, ou un compte (email) — pas besoin
                 // d'appeler list_calendars avant. "calendarId" reste accepté pour compatibilité.
-                val calendarRef = json.optString("calendar", "").ifBlank {
+                val calendarRef = cleanOptionalField(json.optString("calendar", "")) ?: run {
                     val legacyId = json.optLong("calendarId", -1)
-                    if (legacyId != -1L) legacyId.toString() else ""
+                    if (legacyId != -1L) legacyId.toString() else null
                 }
                 val nickname = json.optString("nickname", "")
-                if (calendarRef.isBlank() || nickname.isBlank()) "❌ Calendrier ou surnom manquant. Précise le nom affiché du calendrier, son compte (email), ou son ID (via list_calendars)."
+                if (calendarRef.isNullOrBlank() || nickname.isBlank()) "❌ Calendrier ou surnom manquant. Précise le nom affiché du calendrier, son compte (email), ou son ID (via list_calendars)."
                 else CalendarController.nameCalendar(context, calendarRef, nickname)
             }
             "reset_calendar_nicknames" -> CalendarController.resetCalendarNicknames(context)
             "sync_calendar" -> {
-                val calendarRef = json.optString("calendar", "")
-                if (calendarRef.isBlank()) "❌ Précise quel calendrier synchroniser (nom, compte, ID — voir list_calendars)."
+                val calendarRef = cleanOptionalField(json.optString("calendar", ""))
+                if (calendarRef == null) "❌ Précise quel calendrier synchroniser (nom, compte, ID — voir list_calendars)."
                 else CalendarController.syncCalendar(context, calendarRef, json.optBoolean("enable", true))
             }
 
@@ -666,7 +678,7 @@ object JarvisCommandParser {
             }
             "search_event" -> {
                 val query = json.optString("query", "")
-                withCalendarPresentationStyleNote(context, CalendarController.searchEvents(context, query, json.optString("calendar", "").ifBlank { null }))
+                withCalendarPresentationStyleNote(context, CalendarController.searchEvents(context, query, cleanOptionalField(json.optString("calendar", ""))))
             }
 
             "create_client_from_event" -> {
