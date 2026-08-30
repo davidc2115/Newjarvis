@@ -548,6 +548,22 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 .show()
         }
+
+        // Export+partage directement depuis Reglages (demande utilisateur : voir les logs
+        // "directement sur l'application") -- complementaire au dialogue ci-dessus qui ne
+        // montre que les 200 dernieres lignes : ici on exporte le journal COMPLET (voir
+        // DiagnosticsLog.readAll) en fichier .txt puis on ouvre le selecteur de partage Android,
+        // en reutilisant exactement les memes controleurs que les actions JARVIS_CMD
+        // export_debug_logs/share_file existantes.
+        val exportButton = findViewById<TextView>(R.id.exportShareLogsButton)
+        exportButton.setOnClickListener {
+            val result = FileGenController.exportDebugLogs(this)
+            Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+            val path = result.filePath
+            if (result.success && !path.isNullOrBlank()) {
+                FileGenController.shareFile(this, path)
+            }
+        }
     }
 
     private fun updateWakeWordButtonLabel(button: TextView) {
