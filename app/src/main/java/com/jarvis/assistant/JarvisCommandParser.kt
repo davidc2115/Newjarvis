@@ -537,6 +537,24 @@ object JarvisCommandParser {
             // consultable en conversation est la façon honnête de "voir les logs".
             "read_debug_logs" -> DiagnosticsLog.readRecent(context)
             "clear_debug_logs" -> DiagnosticsLog.clear(context)
+            // Demande explicite utilisateur : "un système pour que tu puisses récupérer les
+            // logs directement" — impossible littéralement (aucun accès réseau/distant au
+            // téléphone, voir doc DiagnosticsLog), donc l'équivalent honnête le plus proche :
+            // un VRAI fichier .txt (journal complet, pas juste les 60 dernières lignes comme
+            // read_debug_logs) que l'utilisateur peut envoyer en un geste (email, Drive, ou
+            // directement ici en pièce jointe) au lieu de copier/coller du texte tronqué.
+            "export_debug_logs" -> {
+                val result = FileGenController.exportDebugLogs(context)
+                logFileRecord(context, "logs", "logs_JARVIS", result.success, result.filePath, result.message)
+                result.message
+            }
+            "share_file" -> {
+                val path = json.optString("path", "").ifBlank {
+                    findRecentGenerationPath(context, json.optString("type", ""))
+                }
+                if (path.isNullOrBlank()) "❌ Aucun fichier correspondant trouvé à partager. Précise le chemin exact ou utilise d'abord export_debug_logs/list_generations."
+                else FileGenController.shareFile(context, path)
+            }
             "token_usage" -> Prefs.getTokenUsageReport(context)
             "clear_token_usage" -> { Prefs.clearTokenUsage(context); "✅ Compteur de tokens réinitialisé." }
             // Limite d'historique envoyé à l'IA (voir Prefs.getMaxHistoryMessages/ApiClient.trimHistory,

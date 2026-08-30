@@ -45,14 +45,34 @@ object GmailApiController {
     }
 
     private fun errorMessage(code: Int, body: String): String {
-        val detail = try {
-            JSONObject(body).optJSONObject("error")?.optString("message")
+        val (detail, reason) = try {
+            val err = JSONObject(body).optJSONObject("error")
+            val firstReason = err?.optJSONArray("errors")?.optJSONObject(0)?.optString("reason")
+            err?.optString("message") to firstReason
         } catch (e: Exception) {
-            null
+            null to null
         }
+        // 403 recouvre DEUX causes bien distinctes côté Google, avec des remèdes opposés --
+        // signalement utilisateur : "il ne me demande pas d'autorisation pour l'agenda", cause
+        // probable : le jeton en cache n'a jamais eu le scope Agenda/Mail (compte lié avant
+        // l'ajout de ce scope, ou consentement implicite silencieux côté Play Services -- voir
+        // GoogleAccountController.requestAuthorization) et l'ancien message générique
+        // ("active l'API dans Cloud Console") était FAUX/trompeur dans ce cas précis, puisque
+        // l'API est bien activée -- c'est le CONSENTEMENT qui manque. reason="insufficientPermissions"
+        // (ou message contenant "insufficient" / "Insufficient Permission") = scope manquant,
+        // à corriger avec le nouveau bouton "Réautoriser" (Réglages > Compte(s) Google) plutôt
+        // qu'en touchant Cloud Console.
+        val insufficientScope = reason == "insufficientPermissions" ||
+            (detail?.contains("insufficient", ignoreCase = true) == true)
         return when (code) {
             401 -> "❌ Session Google expirée ou révoquée -- reconnecte-toi dans Réglages > Compte(s) Google. (${detail ?: "401 Unauthorized"})"
-            403 -> "❌ Accès refusé par Google -- vérifie que l'API \"Gmail API\" est bien activée dans ton projet Cloud Console. (${detail ?: "403 Forbidden"})"
+            403 -> if (insufficientScope) {
+                "❌ Autorisation Agenda/Mail manquante ou incomplète pour ce compte -- utilise le bouton " +
+                    "« 🔄 Réautoriser » à côté du compte dans Réglages > Compte(s) Google pour redonner " +
+                    "l'accès à cette donnée. (${detail ?: "403 insufficient scope"})"
+            } else {
+                "❌ Accès refusé par Google -- vérifie que l'API \"Gmail API\" est bien activée dans ton projet Cloud Console. (${detail ?: "403 Forbidden"})"
+            }
             else -> "❌ Erreur Gmail ($code) : ${detail ?: body.take(200)}"
         }
     }

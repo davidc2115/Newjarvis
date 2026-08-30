@@ -1119,6 +1119,21 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 buttons.addView(activate)
             }
+            // Signalement utilisateur : "il ne me demande jamais d'autorisation pour l'agenda"
+            // -- avant ce bouton, requestAuthorization() n'était appelée automatiquement QU'UNE
+            // FOIS, juste après la liaison initiale du compte (voir onLegacySignInResult). Un
+            // compte lié avant l'ajout du scope Agenda, ou dont le consentement a expiré/été
+            // révoqué côté Google, n'avait ensuite AUCUN moyen de redéclencher l'écran de
+            // consentement sans le détour caché "déconnecter puis relier" -- ce bouton relance
+            // directement le même flux d'autorisation, sans repasser par le sélecteur de compte.
+            val reauthorize = TextView(this).apply {
+                text = "🔄 Réautoriser"
+                setTextColor(getColor(R.color.cyan_accent))
+                textSize = 12f
+                setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+                setOnClickListener { reauthorizeGoogleAccount(account) }
+            }
+            buttons.addView(reauthorize)
             val unlink = TextView(this).apply {
                 text = getString(R.string.google_unlink_button)
                 setTextColor(getColor(R.color.error_glow))
@@ -1156,6 +1171,50 @@ class SettingsActivity : AppCompatActivity() {
                 "${e.javaClass.simpleName}: ${e.message ?: "?"}"
             )
         }
+    }
+
+    /**
+     * Redéclenche l'écran de consentement système Gmail/Agenda pour [account], SANS repasser
+     * par le sélecteur de compte -- corrige le signalement utilisateur "il ne me demande jamais
+     * d'autorisation pour l'agenda" : avant ce bouton, requestAuthorization() n'était appelée
+     * QU'UNE FOIS, automatiquement, juste après la liaison initiale d'un compte (voir
+     * onLegacySignInResult) ; un compte lié avant l'ajout du scope Agenda, ou dont le
+     * consentement a expiré/été révoqué côté Google (401/403 "insufficientPermissions" -- voir
+     * GoogleCalendarApiController/GmailApiController.errorMessage), n'avait plus aucun moyen
+     * direct de le redemander. Fiable surtout pour le compte ACTIF (Google cible implicitement
+     * le "compte par défaut" de l'appli, voir doc de GoogleAccountController) -- pour un compte
+     * inactif, on avertit et on suggère "Activer" d'abord si besoin.
+     */
+    private fun reauthorizeGoogleAccount(account: GoogleAccountController.LinkedAccount) {
+        val activeEmail = Prefs.getActiveGoogleAccountEmail(this)
+        if (account.email != activeEmail) {
+            Toast.makeText(
+                this,
+                "Active d'abord « ${account.email} » (bouton Activer), puis réautorise -- " +
+                    "Google cible toujours le compte actif.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        GoogleAccountController.requestAuthorization(
+            activity = this,
+            pendingIntentLauncher = googleAuthorizationLauncher,
+            onGranted = { accessToken ->
+                if (accessToken != null) {
+                    Prefs.setGoogleAccessToken(this, accessToken)
+                    Prefs.setGoogleAccessTokenForAccount(this, account.email, accessToken)
+                }
+                refreshGoogleAccountsList()
+                Toast.makeText(this, "✅ Accès Gmail/Agenda réautorisé pour ${account.email}.", Toast.LENGTH_SHORT).show()
+            },
+            onFailure = { e ->
+                android.util.Log.e("JarvisGoogleAuth", "reauthorizeGoogleAccount a echoue", e)
+                showCopyableErrorDialog(
+                    getString(R.string.google_authorization_error, ""),
+                    "${e.javaClass.simpleName}: ${e.message ?: "?"}"
+                )
+            }
+        )
     }
 
     private fun unlinkGoogleAccount(account: GoogleAccountController.LinkedAccount) {

@@ -476,4 +476,69 @@ object FileGenController {
             "❌ Impossible d'ouvrir le fichier : ${e.message}"
         }
     }
+
+    /**
+     * Ouvre directement le sélecteur de partage Android (ACTION_SEND, via FileProvider comme
+     * openFile ci-dessus) pour [path] -- demande explicite de l'utilisateur : "un système pour
+     * que tu puisses récupérer les logs directement" (voir export_debug_logs). JARVIS n'a AUCUN
+     * accès réseau/distant vers le téléphone (voir DiagnosticsLog) : la seule façon HONNÊTE de
+     * "récupérer" un fichier est que l'utilisateur le transmette lui-même -- ce sélecteur rend
+     * ce transfert immédiat (mail, Drive, l'app de chat où cette conversation continue...) au
+     * lieu de devoir fouiller l'appli Fichiers pour retrouver le fichier généré.
+     */
+    fun shareFile(context: Context, path: String, mimeOverride: String? = null): String {
+        val file = File(path)
+        if (!file.exists()) return "❌ Fichier introuvable : $path"
+        return try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = mimeOverride ?: mimeTypeFor(path)
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val chooser = android.content.Intent.createChooser(intent, "Partager « ${file.name} »").apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
+            "📤 Sélecteur de partage ouvert pour « ${file.name} »."
+        } catch (e: android.content.ActivityNotFoundException) {
+            "❌ Aucune application de partage disponible sur ce téléphone."
+        } catch (e: Exception) {
+            "❌ Impossible de partager le fichier : ${e.message}"
+        }
+    }
+
+    /**
+     * Exporte le journal de diagnostics COMPLET (voir DiagnosticsLog -- jusqu'ici consultable
+     * uniquement en conversation via read_debug_logs, tronqué aux 60 dernières lignes) plus le
+     * journal de plantages non gérés (crash_log.txt, voir JarvisApplication) s'il existe, en UN
+     * seul fichier texte dans Documents/JARVIS-Fichiers -- pour que l'utilisateur puisse
+     * facilement le transmettre en cas de problème (demande explicite : "un système pour que tu
+     * puisses récupérer les logs directement").
+     */
+    fun exportDebugLogs(context: Context): Result {
+        return try {
+            val diagLog = DiagnosticsLog.readAll(context)
+            val crashFile = File(context.filesDir, "crash_log.txt")
+            val crashSection = if (crashFile.exists() && crashFile.length() > 0) {
+                "
+
+──────── crash_log.txt (derniers plantages non gérés) ────────
+${crashFile.readText()}"
+            } else ""
+            val content = "JARVIS -- export de logs
+Généré le : ${Date()}
+
+" +
+                "──────── diagnostics_log.txt (événements/erreurs journalisés en conversation) ────────
+" +
+                diagLog + crashSection
+            val dest = File(outputDir(), safeFileName("logs_JARVIS", "txt"))
+            dest.writeText(content)
+            Result(true, "✅ Logs exportés : ${dest.name} (dans Documents/JARVIS-Fichiers).", dest.absolutePath)
+        } catch (e: Exception) {
+            Result(false, "❌ Impossible d'exporter les logs : ${e.message}")
+        }
+    }
 }

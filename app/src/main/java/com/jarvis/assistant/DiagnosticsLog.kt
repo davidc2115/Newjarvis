@@ -56,6 +56,20 @@ object DiagnosticsLog {
         return lines.takeLast(count).joinToString("\n")
     }
 
+    /** Contenu INTÉGRAL du journal (déjà borné à MAX_LINES par [log]), sans la troncature
+     *  supplémentaire de [readRecent] -- utilisé pour l'export fichier (voir
+     *  FileGenController.exportDebugLogs), où contrairement à l'affichage en conversation il
+     *  n'y a pas besoin d'économiser des tokens. */
+    fun readAll(context: Context): String {
+        val file = File(context.filesDir, FILE_NAME)
+        if (!file.exists()) return "ℹ️ Aucun événement journalisé pour l'instant."
+        return try {
+            file.readText()
+        } catch (e: Exception) {
+            "❌ Erreur de lecture du journal : ${e.message}"
+        }
+    }
+
     fun clear(context: Context): String {
         val file = File(context.filesDir, FILE_NAME)
         return if (file.exists() && file.delete()) "✅ Journal de diagnostics vidé." else "ℹ️ Journal déjà vide."
