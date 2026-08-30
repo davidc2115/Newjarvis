@@ -564,6 +564,40 @@ class SettingsActivity : AppCompatActivity() {
                 FileGenController.shareFile(this, path)
             }
         }
+
+        // Pipeline logs -> GitHub Gist (demande utilisateur : que les logs soient
+        // récupérables DIRECTEMENT, sans étape manuelle) -- toggle pour la confidentialité
+        // (actif par défaut, voir Prefs.isLogsAutoUploadEnabled) + bouton pour forcer un envoi
+        // immédiat, réutilisant exactement GitHubController.uploadLogs (même fonction que
+        // l'action JARVIS_CMD upload_logs_to_github).
+        val toggleAutoUploadButton = findViewById<TextView>(R.id.toggleAutoUploadLogsButton)
+        fun refreshAutoUploadLabel() {
+            toggleAutoUploadButton.text = if (Prefs.isLogsAutoUploadEnabled(this)) {
+                "✅ ENVOI AUTO VERS GITHUB ACTIVÉ (à chaque erreur)"
+            } else {
+                "ENVOI AUTO VERS GITHUB DÉSACTIVÉ (activer)"
+            }
+        }
+        refreshAutoUploadLabel()
+        toggleAutoUploadButton.setOnClickListener {
+            Prefs.setLogsAutoUploadEnabled(this, !Prefs.isLogsAutoUploadEnabled(this))
+            refreshAutoUploadLabel()
+        }
+
+        val uploadNowButton = findViewById<TextView>(R.id.uploadLogsNowButton)
+        uploadNowButton.setOnClickListener {
+            if (Prefs.getGithubAccounts(this).isEmpty()) {
+                Toast.makeText(this, "❌ Ajoute d'abord un compte GitHub dans ⚙ → Clés API → Codage GitHub.", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, "Envoi en cours…", Toast.LENGTH_SHORT).show()
+                CoroutineScope(Dispatchers.Main).launch {
+                    val result = withContext(Dispatchers.IO) {
+                        GitHubController.uploadLogs(this@SettingsActivity, DiagnosticsLog.readAll(this@SettingsActivity))
+                    }
+                    Toast.makeText(this@SettingsActivity, result, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun updateWakeWordButtonLabel(button: TextView) {

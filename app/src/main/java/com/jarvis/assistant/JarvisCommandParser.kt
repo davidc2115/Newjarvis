@@ -200,7 +200,7 @@ object JarvisCommandParser {
                 DiagnosticsLog.log(context, "JARVIS_CMD", "Bloc [JARVIS_CMD] mal formé ignoré (JSON invalide, probablement IA locale) : ${e.message}")
                 null
             } catch (e: Exception) {
-                DiagnosticsLog.log(context, "JARVIS_CMD", "Action « $action » — exception : ${e.javaClass.simpleName} ${e.message}")
+                DiagnosticsLog.logError(context, "JARVIS_CMD", "Action « $action » — exception : ${e.javaClass.simpleName} ${e.message}")
                 CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}", "", false)
             }
         }
@@ -549,10 +549,7 @@ object JarvisCommandParser {
             // consultable en conversation est la façon honnête de "voir les logs".
             "read_debug_logs" -> DiagnosticsLog.readRecent(context)
             "clear_debug_logs" -> DiagnosticsLog.clear(context)
-            // Demande explicite utilisateur : "un système pour que tu puisses récupérer les
-            // logs directement" — impossible littéralement (aucun accès réseau/distant au
-            // téléphone, voir doc DiagnosticsLog), donc l'équivalent honnête le plus proche :
-            // un VRAI fichier .txt (journal complet, pas juste les 60 dernières lignes comme
+            // Fichier .txt (journal complet, pas juste les 60 dernières lignes comme
             // read_debug_logs) que l'utilisateur peut envoyer en un geste (email, Drive, ou
             // directement ici en pièce jointe) au lieu de copier/coller du texte tronqué.
             "export_debug_logs" -> {
@@ -567,6 +564,14 @@ object JarvisCommandParser {
                 if (path.isNullOrBlank()) "❌ Aucun fichier correspondant trouvé à partager. Précise le chemin exact ou utilise d'abord export_debug_logs/list_generations."
                 else FileGenController.shareFile(context, path)
             }
+            // Demande explicite utilisateur : que les logs soient récupérables DIRECTEMENT,
+            // sans étape manuelle côté téléphone. JARVIS n'a aucun accès réseau entrant vers
+            // le téléphone (impossible d'ouvrir une connexion distante), mais peut POUSSER le
+            // journal complet vers un Gist GitHub privé (réutilise le jeton déjà configuré
+            // dans ⚙ → Clés API → Codage GitHub) — envoyé automatiquement à chaque erreur
+            // système réelle (voir DiagnosticsLog.logError), et ici sur demande explicite pour
+            // forcer un envoi immédiat sans attendre une prochaine erreur.
+            "upload_logs_to_github" -> GitHubController.uploadLogs(context, DiagnosticsLog.readAll(context))
             "token_usage" -> Prefs.getTokenUsageReport(context)
             "clear_token_usage" -> { Prefs.clearTokenUsage(context); "✅ Compteur de tokens réinitialisé." }
             // Limite d'historique envoyé à l'IA (voir Prefs.getMaxHistoryMessages/ApiClient.trimHistory,

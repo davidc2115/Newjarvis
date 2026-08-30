@@ -1,6 +1,9 @@
 package com.jarvis.assistant
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -29,6 +32,14 @@ object DiagnosticsLog {
     private const val FILE_NAME = "diagnostics_log.txt"
     private const val MAX_LINES = 400
     private val timeFormat = SimpleDateFormat("dd/MM HH:mm:ss", Locale.FRANCE)
+
+    // ─── Auto-envoi vers GitHub (demande utilisateur : recuperer les logs "directement" sans
+    //     etape manuelle) : throttle simple en memoire pour ne pas spammer l'API GitHub si
+    //     plusieurs erreurs tombent d'affilee (ex: cascade IA qui echoue sur chaque
+    //     fournisseur) -- un seul envoi reel toutes les AUTO_UPLOAD_MIN_INTERVAL_MS au
+    //     maximum, le journal complet le plus recent partant a chaque fois de toute facon.
+    private var lastAutoUploadAtMs = 0L
+    private const val AUTO_UPLOAD_MIN_INTERVAL_MS = 30_000L
 
     /**
      * Enregistre une ligne horodatée. Ne doit JAMAIS faire échouer l'appelant : toute
@@ -73,5 +84,32 @@ object DiagnosticsLog {
     fun clear(context: Context): String {
         val file = File(context.filesDir, FILE_NAME)
         return if (file.exists() && file.delete()) "✅ Journal de diagnostics vidé." else "ℹ️ Journal déjà vide."
+    }
+
+    /**
+     * Comme [log], mais pour une VRAIE erreur système (cascade IA totalement échouée,
+     * exception d'exécution de commande...) -- déclenche en plus, si configuré, un envoi
+     * automatique et silencieux du journal complet vers un Gist GitHub privé
+     * (GitHubController.uploadLogs), pour que les logs soient consultables directement sans
+     * que l'utilisateur ait besoin d'exporter/partager manuellement à chaque fois. N'utilise
+     * PAS cette fonction pour de la simple trace (dispatch, début/fin d'appel...) : seuls les
+     * vrais échecs doivent déclencher un envoi réseau.
+     */
+    fun logError(context: Context, tag: String, message: String) {
+        log(context, tag, message)
+        if (!Prefs.isLogsAutoUploadEnabled(context)) return
+        if (Prefs.getGithubAccounts(context).isEmpty()) return // pas configuré -- on n'insiste pas
+        val now = System.currentTimeMillis()
+        if (now - lastAutoUploadAtMs < AUTO_UPLOAD_MIN_INTERVAL_MS) return
+        lastAutoUploadAtMs = now
+        val appContext = context.applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                GitHubController.uploadLogs(appContext, readAll(appContext))
+            } catch (_: Exception) {
+                // Best-effort : un échec d'envoi ne doit jamais faire planter l'appelant,
+                // le journal reste de toute façon consultable localement (readAll/readRecent).
+            }
+        }
     }
 }

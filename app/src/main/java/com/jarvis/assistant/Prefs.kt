@@ -30,6 +30,8 @@ object Prefs {
     private const val KEY_ORB_STYLE         = "orb_style"
     private const val KEY_EMAIL_ACCOUNTS    = "email_accounts"     // JSON array
     private const val KEY_GITHUB_ACCOUNTS   = "github_accounts"    // JSON array
+    private const val KEY_LOGS_GIST_ID      = "logs_github_gist_id"
+    private const val KEY_LOGS_AUTO_UPLOAD  = "logs_auto_upload_github_enabled"
     private const val KEY_ROTATION_STRATEGY = "rotation_strategy"  // "ROUNDROBIN"|"FALLBACK"|"RANDOM"
     private const val KEY_OBSIDIAN_VAULT_PATH = "obsidian_vault_path"
     // OAuth Google (Agenda/Mail) -- porte depuis l'appli reecrite (avant la restauration de l'ancienne base, voir taches #247-249), a la
@@ -621,6 +623,26 @@ object Prefs {
     fun setDefaultGithubAccount(context: Context, id: String) {
         val list = getGithubAccounts(context).map { it.copy(isDefault = it.id == id) }
         saveGithubAccounts(context, list)
+    }
+
+    // ─── Pipeline logs -> GitHub Gist (demande utilisateur : que Claude puisse recuperer les
+    //     logs "directement" sans etape manuelle) : un Gist PRIVE unique est cree puis mis a
+    //     jour a chaque envoi (au lieu d'un nouveau Gist a chaque fois), son id est retenu ici.
+    //     Actif par defaut (choix explicite : envoi auto a chaque erreur + sur commande),
+    //     mais reste desactivable dans Reglages pour la confidentialite.
+
+    fun getLogsGistId(context: Context): String? =
+        prefs(context).getString(KEY_LOGS_GIST_ID, null)?.ifBlank { null }
+
+    fun setLogsGistId(context: Context, gistId: String) {
+        prefs(context).edit().putString(KEY_LOGS_GIST_ID, gistId).apply()
+    }
+
+    fun isLogsAutoUploadEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_LOGS_AUTO_UPLOAD, true)
+
+    fun setLogsAutoUploadEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_LOGS_AUTO_UPLOAD, enabled).apply()
     }
 
     // ─── Écoute permanente (mot-clé d'activation) ───────────────────────────────

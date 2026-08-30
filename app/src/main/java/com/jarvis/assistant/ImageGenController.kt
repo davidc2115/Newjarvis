@@ -184,7 +184,7 @@ object ImageGenController {
 
         // Journalisé pour consultation ultérieure (action read_debug_logs) — le détail complet
         // de chaque fournisseur essayé disparaît sinon dès que ce message quitte l'écran du chat.
-        DiagnosticsLog.log(context, "IMAGE", "Échec total (${diagnostics.size} fournisseur(s) essayé(s)) : " + diagnostics.joinToString(" | "))
+        DiagnosticsLog.logError(context, "IMAGE", "Échec total (${diagnostics.size} fournisseur(s) essayé(s)) : " + diagnostics.joinToString(" | "))
 
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +

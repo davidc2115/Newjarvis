@@ -345,7 +345,7 @@ Une fois les 3 étapes faites, appuie sur « Configurer Stable Diffusion (Termux
                     "après coup."
             )
         } catch (e: Exception) {
-            DiagnosticsLog.log(context, "TERMUX_SD", "Échec de l'envoi RUN_COMMAND : ${e.javaClass.simpleName} — ${e.message}")
+            DiagnosticsLog.logError(context, "TERMUX_SD", "Échec de l'envoi RUN_COMMAND : ${e.javaClass.simpleName} — ${e.message}")
             Result(false, "❌ Échec de l'envoi de la commande à Termux : ${e.javaClass.simpleName} — ${e.message}\n\n${setupInstructions()}")
         }
     }

@@ -584,6 +584,27 @@
                 android:textSize="12sp"
                 android:gravity="center"
                 android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/toggleAutoUploadLogsButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:textColor="@color/cyan_accent"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/uploadLogsNowButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="🔗 Envoyer maintenant sur GitHub"
+                android:textColor="@color/cyan_accent"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:background="@drawable/bg_input"
                 android:layout_marginBottom="16dp" />
 
             <View

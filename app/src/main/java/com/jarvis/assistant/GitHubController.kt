@@ -487,6 +487,75 @@ object GitHubController {
     }
 
     /**
+     * Envoie le journal de diagnostics JARVIS vers un Gist GitHub PRIVÉ, en réutilisant le
+     * même jeton que le reste de l'intégration GitHub (aucune config supplémentaire pour
+     * l'utilisateur). Demande explicite : que les logs soient récupérables DIRECTEMENT
+     * (sans étape manuelle côté téléphone) — un Gist privé, mis à jour en place à chaque
+     * envoi (pas un nouveau à chaque fois, via l'id retenu dans Prefs.getLogsGistId), permet
+     * de les consulter à tout moment via l'API GitHub sans rien demander à l'utilisateur.
+     * Si le Gist retenu n'existe plus (supprimé manuellement, id invalide...), on en recrée
+     * un nouveau plutôt que d'échouer silencieusement.
+     */
+    fun uploadLogs(context: Context, content: String, accountLabel: String = ""): String {
+        val token = resolveToken(context, accountLabel)
+            ?: return if (Prefs.getGithubAccounts(context).isEmpty()) NO_TOKEN else noAccountMessage(context, accountLabel)
+
+        val filesJson = JSONObject().put(
+            "logs_JARVIS.txt",
+            JSONObject().put("content", content.ifBlank { "(journal vide)" })
+        )
+        val bodyJson = JSONObject()
+            .put("description", "JARVIS -- journal de diagnostics (mis à jour automatiquement)")
+            .put("public", false)
+            .put("files", filesJson)
+        val body = bodyJson.toString().toRequestBody(JSON)
+
+        val existingGistId = Prefs.getLogsGistId(context)
+        if (!existingGistId.isNullOrBlank()) {
+            try {
+                val patchReq = Request.Builder()
+                    .url("https://api.github.com/gists/$existingGistId")
+                    .addHeader("Authorization", "Bearer $token")
+                    .addHeader("Accept", "application/vnd.github+json")
+                    .addHeader("X-GitHub-Api-Version", "2022-11-28")
+                    .patch(body)
+                    .build()
+                client.newCall(patchReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val json = JSONObject(resp.body?.string() ?: "{}")
+                        return "✅ Logs mis à jour sur GitHub : ${json.optString("html_url")}"
+                    }
+                    // 404 = Gist supprimé entretemps -- on retombe sur la création ci-dessous.
+                    if (resp.code != 404) {
+                        return "❌ Échec de la mise à jour des logs sur GitHub (${resp.code}) : ${resp.body?.string()}"
+                    }
+                }
+            } catch (e: Exception) {
+                return "❌ Erreur réseau lors de l'envoi des logs : ${e.message}"
+            }
+        }
+
+        return try {
+            val postReq = Request.Builder()
+                .url("https://api.github.com/gists")
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Accept", "application/vnd.github+json")
+                .addHeader("X-GitHub-Api-Version", "2022-11-28")
+                .post(body)
+                .build()
+            client.newCall(postReq).execute().use { resp ->
+                val respBody = resp.body?.string() ?: ""
+                if (!resp.isSuccessful) return "❌ Échec de l'envoi des logs sur GitHub (${resp.code}) : $respBody"
+                val json = JSONObject(respBody)
+                Prefs.setLogsGistId(context, json.optString("id"))
+                "✅ Logs envoyés sur GitHub : ${json.optString("html_url")}"
+            }
+        } catch (e: Exception) {
+            "❌ Erreur réseau lors de l'envoi des logs : ${e.message}"
+        }
+    }
+
+    /**
      * Comme createOrUpdateFile mais pour du contenu BINAIRE (images) — même logique de
      * récupération du sha existant pour une mise à jour, seule la source du contenu change
      * (ByteArray encodé en base64 au lieu d'une String UTF-8).
