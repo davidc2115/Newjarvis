@@ -522,17 +522,10 @@ object FileGenController {
             val diagLog = DiagnosticsLog.readAll(context)
             val crashFile = File(context.filesDir, "crash_log.txt")
             val crashSection = if (crashFile.exists() && crashFile.length() > 0) {
-                "
-
-──────── crash_log.txt (derniers plantages non gérés) ────────
-${crashFile.readText()}"
+                "\n\n──────── crash_log.txt (derniers plantages non gérés) ────────\n${crashFile.readText()}"
             } else ""
-            val content = "JARVIS -- export de logs
-Généré le : ${Date()}
-
-" +
-                "──────── diagnostics_log.txt (événements/erreurs journalisés en conversation) ────────
-" +
+            val content = "JARVIS -- export de logs\nGénéré le : ${Date()}\n\n" +
+                "──────── diagnostics_log.txt (événements/erreurs journalisés en conversation) ────────\n" +
                 diagLog + crashSection
             val dest = File(outputDir(), safeFileName("logs_JARVIS", "txt"))
             dest.writeText(content)
