@@ -5,7 +5,10 @@ plugins {
 
 android {
     namespace 'com.jarvis.assistant'
-    compileSdk 35
+    // compileSdk 36 requis par com.llamatik:library:1.10.1 (greffe moteur GGUF Jarvis2,
+    // voir GgufLlmController) -- targetSdk reste a 35, bascule independante (AGP autorise
+    // compileSdk > targetSdk).
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.jarvis.assistant"
@@ -41,7 +44,7 @@ android {
     packaging {
         resources {
             pickFirsts += ['META-INF/NOTICE.md', 'META-INF/LICENSE.md']
-            excludes += ['META-INF/DEPENDENCIES']
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/AL2.0', 'META-INF/LGPL2.1']
         }
     }
 }
@@ -90,6 +93,9 @@ dependencies {
     // le moteur natif llama.cpp (NDK/CMake, module cpp/ retiré) et onnxruntime-android côté
     // génération de texte -- gardé ci-dessous uniquement pour le wake-word (openWakeWord).
     implementation 'com.google.ai.edge.litertlm:litertlm-android:0.16.1'
+
+    // ── Moteur GGUF local (Llamatik/llama.cpp) -- greffe Jarvis2, voir GgufLlmController ──
+    implementation 'com.llamatik:library:1.10.1'
 
     // ── ONNX Runtime : uniquement requis par la détection de mot-clé (openWakeWord,
     // voir WakeWordService) qui exécute ses propres petits modèles ONNX de classification

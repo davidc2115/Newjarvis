@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_LOCAL_MODEL_PATH  = "local_model_path"
     private const val KEY_LOCAL_MODEL_FORMAT= "local_model_format"
     private const val KEY_LOCAL_LLM_MODEL_ID = "local_llm_model_id"
+    private const val KEY_LOCAL_GGUF_MODEL_ID = "local_gguf_model_id"
     private const val KEY_ACCENT_COLOR      = "accent_color"
     private const val KEY_HF_TOKEN          = "hf_token"
     private const val KEY_ORB_STYLE         = "orb_style"
@@ -330,6 +331,15 @@ object Prefs {
 
     fun setLocalLlmModelId(context: Context, modelId: String) {
         prefs(context).edit().putString(KEY_LOCAL_LLM_MODEL_ID, modelId).apply()
+    }
+
+    // Identifiant du modele GGUF (Llamatik/llama.cpp) actif -- voir GgufLlmController,
+    // greffe du moteur IA le plus recent de Jarvis2 (demande explicite de l'utilisateur).
+    fun getLocalGgufModelId(context: Context): String =
+        prefs(context).getString(KEY_LOCAL_GGUF_MODEL_ID, "") ?: ""
+
+    fun setLocalGgufModelId(context: Context, modelId: String) {
+        prefs(context).edit().putString(KEY_LOCAL_GGUF_MODEL_ID, modelId).apply()
     }
 
     fun saveLocalModelPath(context: Context, path: String) {

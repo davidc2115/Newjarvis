@@ -939,6 +939,14 @@ object ApiClient {
                     "❌ Gemini Nano n'est pas encore prêt sur cet appareil -- ouvre ⚙ Paramètres → Local pour le télécharger."
                 else -> "❌ Gemini Nano n'est pas disponible sur cet appareil (nécessite un Pixel 8+/Galaxy S24 compatible AICore)."
             }
+            Provider.LOCAL_GGUF -> {
+                val model = GgufLlmController.modelById(Prefs.getLocalGgufModelId(context))
+                if (!GgufLlmController.isDownloaded(context, model)) {
+                    "❌ Aucun modèle GGUF téléchargé. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
+                } else {
+                    GgufLlmController.generateReply(context, model, prompt)
+                }
+            }
             else -> {
                 val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(context))
                 if (!LocalLlmController.isDownloaded(context, model)) {
@@ -972,6 +980,10 @@ object ApiClient {
     private suspend fun readyLocalProviderForFirstTry(context: Context): Provider? {
         if (!Prefs.isLocalFirstMode(context)) return null
         if (GeminiNanoController.checkStatus() == FeatureStatus.AVAILABLE) return Provider.GEMINI_NANO
+        // GGUF (Llamatik/llama.cpp) priorise sur LiteRT-LM quand les deux sont prets : moteur
+        // le plus recent/capable (voir GgufLlmController), greffe demandee par l'utilisateur.
+        val ggufModel = GgufLlmController.modelById(Prefs.getLocalGgufModelId(context))
+        if (GgufLlmController.isDownloaded(context, ggufModel)) return Provider.LOCAL_GGUF
         val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(context))
         if (LocalLlmController.isDownloaded(context, model)) return Provider.LOCAL_LITERT
         return null

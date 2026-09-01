@@ -758,11 +758,31 @@ class SettingsActivity : AppCompatActivity() {
         Toast.makeText(this, "\u2705 Mod\u00e8le activ\u00e9 : ${model.displayName}", Toast.LENGTH_SHORT).show()
     }
 
+    /** Bascule l'IA on-device sur un modele GGUF (Llamatik/llama.cpp) deja telecharge -- voir
+     *  GgufLlmController, moteur greffe depuis Jarvis2 (plus recent/capable que LiteRT-LM). */
+    private fun selectLocalGguf(model: GgufLlmController.GgufModel) {
+        Prefs.setLocalGgufModelId(this, model.id)
+        selectedProvider = Provider.LOCAL_GGUF
+        providerSpinner.setSelection(Provider.entries.indexOf(Provider.LOCAL_GGUF))
+        Prefs.save(this, Provider.LOCAL_GGUF, "", "", "")
+        updateLocalModelLabel()
+        rebuildModelCatalogUI()
+        Toast.makeText(this, "\u2705 Mod\u00e8le activ\u00e9 : ${model.displayName}", Toast.LENGTH_SHORT).show()
+    }
+
     /** Cable les deux lignes fixes (Gemini Nano / Qwen local) + reconstruit les cartes de
      *  telechargement des modeles Qwen disponibles. A l'inverse de l'ancien catalogue
      *  multi-format, il n'y a plus qu'une seule famille de modele local (LiteRT-LM). */
     private fun setupOnDeviceAiSection() {
         findViewById<TextView>(R.id.geminiNanoRow).setOnClickListener { selectGeminiNano() }
+        findViewById<TextView>(R.id.ggufRow).setOnClickListener {
+            val model = GgufLlmController.modelById(Prefs.getLocalGgufModelId(this))
+            if (GgufLlmController.isDownloaded(this, model)) {
+                selectLocalGguf(model)
+            } else {
+                Toast.makeText(this, "T\u00e9l\u00e9charge d'abord un mod\u00e8le GGUF ci-dessous.", Toast.LENGTH_SHORT).show()
+            }
+        }
         findViewById<TextView>(R.id.localLitertRow).setOnClickListener {
             val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
             if (LocalLlmController.isDownloaded(this, model)) {
@@ -874,9 +894,156 @@ class SettingsActivity : AppCompatActivity() {
      *  activation pour que la coche "telecharge/actif" se mette a jour immediatement. */
     private fun rebuildModelCatalogUI() {
         modelCardsContainer.removeAllViews()
+        // Catalogue GGUF (Llamatik/llama.cpp, greffe Jarvis2) affiche en premier : moteur le
+        // plus recent/recommande, voir GgufLlmController.
+        GgufLlmController.AVAILABLE_MODELS.forEach { model ->
+            buildGgufModelCard(modelCardsContainer, model)
+        }
         LocalLlmController.AVAILABLE_MODELS.forEach { model ->
             buildLocalModelCard(modelCardsContainer, model)
         }
+    }
+
+    /** Equivalent de buildLocalModelCard, pour le catalogue GGUF (Llamatik/llama.cpp) --
+     *  voir GgufLlmController.AVAILABLE_MODELS. */
+    private fun buildGgufModelCard(container: LinearLayout, model: GgufLlmController.GgufModel) {
+        val dp = resources.displayMetrics.density
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((16 * dp).toInt(), (16 * dp).toInt(), (16 * dp).toInt(), (16 * dp).toInt())
+            background = getDrawable(R.drawable.bg_bubble_ai)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.bottomMargin = (12 * dp).toInt() }
+        }
+
+        val isDownloaded = GgufLlmController.isDownloaded(this, model)
+        val isActive = isDownloaded && selectedProvider == Provider.LOCAL_GGUF &&
+            Prefs.getLocalGgufModelId(this) == model.id
+
+        val titleText = TextView(this).apply {
+            text = "\ud83d\ude80 " + model.displayName
+            setTextColor(getColor(R.color.text_primary))
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        card.addView(titleText)
+
+        val descText = TextView(this).apply {
+            text = model.description
+            setTextColor(getColor(R.color.text_secondary))
+            textSize = 11f
+            setPadding(0, (4 * dp).toInt(), 0, (10 * dp).toInt())
+        }
+        card.addView(descText)
+
+        if (isDownloaded) {
+            val badge = TextView(this).apply {
+                text = if (isActive) "\u2705 T\u00e9l\u00e9charg\u00e9 \u2014 mod\u00e8le actif en ce moment" else "\u2705 T\u00e9l\u00e9charg\u00e9 (non actif)"
+                setTextColor(getColor(R.color.cyan_accent))
+                textSize = 11f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(0, 0, 0, (8 * dp).toInt())
+            }
+            card.addView(badge)
+        }
+
+        val buttonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+
+        if (isDownloaded && !isActive) {
+            val btnActivate = TextView(this).apply {
+                text = "\u2b50 UTILISER CE MOD\u00c8LE"
+                setTextColor(getColor(R.color.background_dark))
+                textSize = 12f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+                background = getDrawable(R.drawable.bg_mic_button)
+                setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { selectLocalGguf(model) }
+            }
+            buttonRow.addView(btnActivate)
+        } else if (!isDownloaded) {
+            val btnDownload = TextView(this).apply {
+                text = "\u2b07 T\u00c9L\u00c9CHARGER SUR LE T\u00c9L\u00c9PHONE"
+                setTextColor(getColor(R.color.background_dark))
+                textSize = 12f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+                background = getDrawable(R.drawable.bg_mic_button)
+                setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { startGgufModelDownload(model) }
+            }
+            buttonRow.addView(btnDownload)
+        }
+        if (isDownloaded) {
+            val btnDelete = TextView(this).apply {
+                text = "\ud83d\uddd1\ufe0f"
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 16f
+                gravity = android.view.Gravity.CENTER
+                background = getDrawable(R.drawable.bg_bubble_ai)
+                setPadding((14 * dp).toInt(), (10 * dp).toInt(), (14 * dp).toInt(), (10 * dp).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.marginStart = (8 * dp).toInt() }
+                setOnClickListener { deleteGgufModel(model) }
+            }
+            buttonRow.addView(btnDelete)
+        }
+        card.addView(buttonRow)
+
+        container.addView(card)
+    }
+
+    /** Equivalent de startLocalModelDownload, pour un modele GGUF (voir GgufLlmController). */
+    private fun startGgufModelDownload(model: GgufLlmController.GgufModel) {
+        if (isDownloading) {
+            Toast.makeText(this, "Un t\u00e9l\u00e9chargement est d\u00e9j\u00e0 en cours\u2026", Toast.LENGTH_SHORT).show()
+            return
+        }
+        isDownloading = true
+        downloadProgressText.text = "\u2b07 D\u00e9marrage du t\u00e9l\u00e9chargement \u2014 ${model.displayName}\u2026"
+
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                GgufLlmController.download(this@SettingsActivity, model) { downloaded, total ->
+                    runOnUiThread {
+                        val pct = if (total > 0) (downloaded * 100 / total).toInt() else 0
+                        downloadProgressText.text = "\u2b07 T\u00e9l\u00e9chargement\u2026 $pct%"
+                    }
+                }
+                isDownloading = false
+                downloadProgressText.text = "\u2705 Mod\u00e8le t\u00e9l\u00e9charg\u00e9 et actif sur le t\u00e9l\u00e9phone !"
+                selectLocalGguf(model)
+            } catch (e: Exception) {
+                isDownloading = false
+                downloadProgressText.text = ""
+                Toast.makeText(this@SettingsActivity, "\u274c \u00c9chec : ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun deleteGgufModel(model: GgufLlmController.GgufModel) {
+        if (!GgufLlmController.isDownloaded(this, model)) {
+            Toast.makeText(this, "Aucun mod\u00e8le GGUF \u00e0 supprimer.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Supprimer ce mod\u00e8le ?")
+            .setMessage("${model.displayName} sera effac\u00e9 du t\u00e9l\u00e9phone. Tu pourras le retélécharger plus tard si besoin.")
+            .setPositiveButton("Supprimer") { _, _ ->
+                GgufLlmController.deleteModel(this, model)
+                updateLocalModelLabel()
+                rebuildModelCatalogUI()
+                Toast.makeText(this, "\ud83d\uddd1\ufe0f Mod\u00e8le supprim\u00e9.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
     }
 
 
@@ -950,6 +1117,14 @@ class SettingsActivity : AppCompatActivity() {
     private fun updateLocalModelLabel() {
         localModelPathText.text = when (selectedProvider) {
             Provider.GEMINI_NANO -> "Mod\u00e8le actif : Gemini Nano (Google AICore)"
+            Provider.LOCAL_GGUF -> {
+                val model = GgufLlmController.modelById(Prefs.getLocalGgufModelId(this))
+                if (GgufLlmController.isDownloaded(this, model)) {
+                    "Mod\u00e8le actif sur l'appareil : ${model.displayName}"
+                } else {
+                    "Mod\u00e8le actif : Aucun (t\u00e9l\u00e9charge un mod\u00e8le GGUF ci-dessous)"
+                }
+            }
             Provider.LOCAL_LITERT -> {
                 val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(this))
                 if (LocalLlmController.isDownloaded(this, model)) {

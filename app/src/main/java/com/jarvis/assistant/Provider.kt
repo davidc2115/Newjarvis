@@ -126,6 +126,18 @@ enum class Provider(
         "",
         isLocal = true,
         needsApiKey = false
+    ),
+
+    // Greffe du moteur IA le plus recent de Jarvis2 (voir GgufLlmController) : llama.cpp natif
+    // via Llamatik, plus rapide/capable que LiteRT-LM a taille egale, et seul chemin possible
+    // vers un backend GPU (Vulkan) une fois l'AAR custom integree. Coexiste avec LOCAL_LITERT
+    // plutot que de le remplacer (voir doc GgufLlmController).
+    LOCAL_GGUF(
+        "Modèle local GGUF (llama.cpp, sur l'appareil)",
+        "",
+        "",
+        isLocal = true,
+        needsApiKey = false
     );
 
     /** Fournisseurs cloud éligibles au mode Automatique, par ordre de préférence. */
