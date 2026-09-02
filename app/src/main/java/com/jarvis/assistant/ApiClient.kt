@@ -71,8 +71,15 @@ object ApiClient {
     // plus bas) -- assez pour Gemini Nano/AICore (accéléré matériel, quasi toujours < 3s) et
     // pour un petit modèle LiteRT/Qwen sur un appareil correct, mais borné pour ne jamais
     // faire attendre l'utilisateur plus longtemps qu'un simple appel cloud direct en cas de
-    // modèle local lent/bloqué.
-    private const val LOCAL_FIRST_PROBE_TIMEOUT_MS = 10_000L
+    // modèle local lent/bloqué. Relevé de 10s à 20s (greffe GGUF/Llamatik, voir
+    // GgufLlmController) : le CHARGEMENT initial d'un modèle GGUF en CPU pur (mmap + init
+    // llama.cpp, jusqu'à ~2,4 Go pour Phi-3.5) peut à lui seul dépasser 10s sur un appareil
+    // milieu de gamme -- avec l'ancienne valeur, la quasi-totalité des premières tentatives
+    // locales expirait AVANT même la fin du chargement, rendant le mode local-d'abord
+    // silencieusement inopérant pour GGUF (symptôme utilisateur : "IA locale ne fonctionne
+    // pas"). Les appels suivants réutilisent le modèle déjà chargé (voir ensureLoaded) et
+    // restent rapides.
+    private const val LOCAL_FIRST_PROBE_TIMEOUT_MS = 20_000L
     // Longueur max conservée pour un message d'historique en dehors de la fenêtre ci-dessus.
     private const val TRUNCATED_ENTRY_MAX_CHARS = 220
 
@@ -932,28 +939,52 @@ object ApiClient {
     ): String {
         val prompt = buildPromptFromHistory(history, withAssistantIdentity(context, LOCAL_SYSTEM_PROMPT), maxTurns = 3)
         DiagnosticsLog.log(context, "Local", "sendLocal: début (${provider.displayName})")
-        val result = when (provider) {
-            Provider.GEMINI_NANO -> when (GeminiNanoController.checkStatus()) {
-                FeatureStatus.AVAILABLE -> GeminiNanoController.generateReply(prompt)
-                FeatureStatus.DOWNLOADABLE, FeatureStatus.DOWNLOADING ->
-                    "❌ Gemini Nano n'est pas encore prêt sur cet appareil -- ouvre ⚙ Paramètres → Local pour le télécharger."
-                else -> "❌ Gemini Nano n'est pas disponible sur cet appareil (nécessite un Pixel 8+/Galaxy S24 compatible AICore)."
-            }
-            Provider.LOCAL_GGUF -> {
-                val model = GgufLlmController.modelById(Prefs.getLocalGgufModelId(context))
-                if (!GgufLlmController.isDownloaded(context, model)) {
-                    "❌ Aucun modèle GGUF téléchargé. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
-                } else {
-                    GgufLlmController.generateReply(context, model, prompt)
+        val result = try {
+            when (provider) {
+                Provider.GEMINI_NANO -> when (GeminiNanoController.checkStatus()) {
+                    FeatureStatus.AVAILABLE -> GeminiNanoController.generateReply(prompt)
+                    FeatureStatus.DOWNLOADABLE, FeatureStatus.DOWNLOADING ->
+                        "❌ Gemini Nano n'est pas encore prêt sur cet appareil -- ouvre ⚙ Paramètres → Local pour le télécharger."
+                    else -> "❌ Gemini Nano n'est pas disponible sur cet appareil (nécessite un Pixel 8+/Galaxy S24 compatible AICore)."
+                }
+                Provider.LOCAL_GGUF -> {
+                    val model = GgufLlmController.modelById(Prefs.getLocalGgufModelId(context))
+                    if (!GgufLlmController.isDownloaded(context, model)) {
+                        "❌ Aucun modèle GGUF téléchargé. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
+                    } else {
+                        GgufLlmController.generateReply(context, model, prompt)
+                    }
+                }
+                else -> {
+                    val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(context))
+                    if (!LocalLlmController.isDownloaded(context, model)) {
+                        "❌ Aucun modèle local téléchargé. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
+                    } else {
+                        LocalLlmController.generateReply(context, model, prompt)
+                    }
                 }
             }
-            else -> {
-                val model = LocalLlmController.modelById(Prefs.getLocalLlmModelId(context))
-                if (!LocalLlmController.isDownloaded(context, model)) {
-                    "❌ Aucun modèle local téléchargé. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
-                } else {
-                    LocalLlmController.generateReply(context, model, prompt)
-                }
+        } catch (e: Exception) {
+            // Un moteur local (LiteRT/GGUF) peut échouer au chargement ou à la génération pour
+            // des raisons purement locales (RAM insuffisante, fichier modèle corrompu/incomplet,
+            // device non supporté...), SANS aucun lien avec le réseau/une clé API. AVANT ce
+            // correctif, une telle exception remontait telle quelle jusqu'à sendChat() où elle
+            // était interceptée par le catch générique "Connexion impossible. Vérifiez les
+            // paramètres" (message trompeur pour un échec 100% local) ET, surtout, court-
+            // circuitait le repli silencieux vers le cloud du mode "IA locale d'abord"
+            // (rawEscalateMarker=true, withTimeoutOrNull ne rattrape QUE les timeouts, pas les
+            // exceptions) : une tentative locale ratée bloquait alors TOUTE réponse au lieu de
+            // basculer sur le cloud comme prévu -- symptôme signalé par l'utilisateur : "les IA
+            // locales ne fonctionnent pas". On capture ici pour toujours renvoyer une String
+            // normale, jamais une exception qui s'échappe de sendLocal.
+            DiagnosticsLog.log(context, "Local", "sendLocal: ÉCHEC (${provider.displayName}) : ${e.javaClass.simpleName} -- ${e.message}")
+            if (rawEscalateMarker) {
+                LOCAL_ESCALATE_MARKER
+            } else {
+                "❌ Le moteur IA local (${provider.displayName}) a échoué : ${e.message ?: e.javaClass.simpleName}. " +
+                    "Cause probable : mémoire insuffisante pour ce modèle sur cet appareil, ou fichier " +
+                    "téléchargé incomplet/corrompu -- essaie un modèle plus léger dans ⚙ Paramètres → Local, " +
+                    "ou supprime celui-ci et re-télécharge-le."
             }
         }
         DiagnosticsLog.log(context, "Local", "sendLocal: retour : ${result.take(100)}")
