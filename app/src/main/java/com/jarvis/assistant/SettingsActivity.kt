@@ -198,17 +198,34 @@ class SettingsActivity : AppCompatActivity() {
         setupButtons()
     }
 
+    /** Reorganisation demandee par l'utilisateur : "un seul menu Reglages, plusieurs sous-
+     *  categories (IA, etc), et pour le choix juste un selecteur automatique, cloud ou local"
+     *  -- au lieu des 4 onglets Config/Cles/Local/Systeme (mapping peu clair), 3 des 4 onglets
+     *  deviennent directement les 3 modes IA demandes : Automatique / Cloud / Local, le 4e
+     *  restant les reglages annexes (Box, ecoute, diagnostics, compte Google...). Les IDs de
+     *  vue (tabCloud/tabApiKeys/...) et le contenu de chaque panel restent inchanges pour ne
+     *  rien casser -- seul le libelle affiche et le regroupement changent. */
     private fun setupTabs() {
         showTab("cloud")
-        tabCloud.setOnClickListener  { showTab("cloud") }
+        tabCloud.setOnClickListener {
+            // "Automatique" : bascule directement le fournisseur actif sur AUTO_BEST (au lieu
+            // d'obliger l'utilisateur a le retrouver lui-meme dans le grand spinner ci-dessus)
+            // et affiche quand meme la gestion des cles cloud, puisque le mode Automatique en
+            // a besoin d'au moins une pour fonctionner.
+            providerSpinner.setSelection(Provider.entries.indexOf(Provider.AUTO_BEST))
+            showTab("cloud")
+        }
         tabApiKeys.setOnClickListener { showTab("apikeys") }
         tabLocal.setOnClickListener  { showTab("local") }
         tabSystem.setOnClickListener { showTab("system") }
     }
 
     private fun showTab(tab: String) {
-        panelCloud.visibility   = if (tab == "cloud")   View.VISIBLE else View.GONE
-        panelApiKeys.visibility = if (tab == "apikeys") View.VISIBLE else View.GONE
+        // "cloud" (onglet renomme "☁ Cloud") et "apikeys" ex-4e onglet fusionnes visuellement :
+        // choisir un fournisseur precis ET gerer ses cles est une seule et meme tache pour
+        // l'utilisateur, inutile de les separer en deux clics.
+        panelCloud.visibility   = if (tab == "cloud" || tab == "apikeys") View.VISIBLE else View.GONE
+        panelApiKeys.visibility = if (tab == "cloud" || tab == "apikeys") View.VISIBLE else View.GONE
         panelLocal.visibility   = if (tab == "local")   View.VISIBLE else View.GONE
         panelSystem.visibility  = if (tab == "system")  View.VISIBLE else View.GONE
 

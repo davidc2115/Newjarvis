@@ -155,7 +155,7 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginEnd="4dp"
-                android:text="☁ Config"
+                android:text="🤖 Automatique"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"
@@ -169,7 +169,7 @@
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
                 android:layout_marginEnd="4dp"
-                android:text="🔑 Clés"
+                android:text="☁ Cloud"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"
@@ -198,7 +198,7 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
-                android:text="📡 Box/Écoute"
+                android:text="⚙ Système"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"
@@ -207,6 +207,18 @@
                 android:alpha="0.45" />
 
         </LinearLayout>
+
+        <!-- 3 modes simples (demande utilisateur : "juste mettre un selecteur automatique,
+             les IA cloud, ou local" au lieu du grand spinner detaille ci-dessus, qui reste
+             disponible pour le reglage fin mais n'est plus le point d'entree principal). -->
+        <TextView
+            android:id="@+id/modeSelectorHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Mode IA : Automatique essaie tes IA cloud configurées ; Cloud te laisse choisir/gérer un fournisseur précis ; Local utilise un modèle embarqué sur le téléphone (hors ligne)."
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:layout_marginBottom="8dp" />
 
         <!-- Onglet CLOUD -->
         <LinearLayout
