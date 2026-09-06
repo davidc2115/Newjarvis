@@ -12,14 +12,8 @@ import android.content.Context
  * des fichiers déjà présents sur le disque (vault Obsidian). Reconnaissance par mots-clés/regex
  * volontairement simple et sans ambiguïté : ne remplace jamais l'IA pour une vraie conversation,
  * seulement pour éviter qu'une panne réseau totale bloque même l'allumage d'une lampe torche.
- * Deux points d'appel dans ApiClient : (1) ApiClient.sendChat() quand la réponse de la cascade
- * IA cloud indique un échec total (voir aiTotallyFailed) ; (2) ApiClient.sendLocal(), EN AMONT de
- * tout appel au modèle génératif embarqué (Gemini Nano/LiteRT-LM) -- signalement utilisateur ("IA
- * locale extrêmement longue pour lampe/réveil/minuteur alors qu'avant c'était instantané") :
- * inutile de payer le coût d'une inférence générative complète juste pour ces commandes déjà
- * 100% déterministes. Dans ce deuxième cas [prefix] est vide (pas d'"IA injoignable" à afficher,
- * l'IA locale n'a simplement pas été sollicitée du tout) ; on ne retombe sur le modèle génératif
- * que si la phrase ne correspond à aucune commande simple ici.
+ * Appelé uniquement par ApiClient.sendChat() quand la réponse de la cascade IA indique un échec
+ * total (voir aiTotallyFailed) -- jamais en amont d'un appel IA qui a une chance de réussir.
  */
 object LocalCommandController {
 
@@ -27,16 +21,15 @@ object LocalCommandController {
      *  du dernier message utilisateur. Retourne null si rien de sûr n'a été reconnu -- dans ce
      *  cas l'appelant doit afficher le message d'échec IA normal plutôt que de risquer une
      *  mauvaise interprétation sans confirmation possible (pas d'IA disponible pour clarifier). */
-    fun tryHandle(context: Context, rawText: String, prefix: String = PREFIX): String? {
+    fun tryHandle(context: Context, rawText: String): String? {
         val text = rawText.trim().lowercase()
         if (text.isBlank()) return null
 
-        val raw = flashlightCommand(context, text)
-            ?: timerCommand(context, text)
-            ?: alarmCommand(context, text)
-            ?: vaultSearchCommand(context, text)
-            ?: return null
-        return prefix + raw
+        flashlightCommand(context, text)?.let { return it }
+        timerCommand(context, text)?.let { return it }
+        alarmCommand(context, text)?.let { return it }
+        vaultSearchCommand(context, text)?.let { return it }
+        return null
     }
 
     private const val PREFIX = "🔌 IA injoignable — commande locale hors-ligne reconnue :\n"
@@ -48,8 +41,8 @@ object LocalCommandController {
         val turnsOff = text.contains("éteins") || text.contains("eteins") ||
             text.contains("désactive") || text.contains("desactive") || text.contains("coupe")
         return when {
-            turnsOn && !turnsOff -> DeviceControlController.setFlashlight(context, true)
-            turnsOff && !turnsOn -> DeviceControlController.setFlashlight(context, false)
+            turnsOn && !turnsOff -> PREFIX + DeviceControlController.setFlashlight(context, true)
+            turnsOff && !turnsOn -> PREFIX + DeviceControlController.setFlashlight(context, false)
             else -> null
         }
     }
@@ -68,7 +61,7 @@ object LocalCommandController {
             else -> amount
         }
         if (totalSeconds <= 0) return null
-        return DeviceControlController.setTimer(context, totalSeconds, "")
+        return PREFIX + DeviceControlController.setTimer(context, totalSeconds, "")
     }
 
     private val alarmRegex = Regex("(r[ée]veil|alarme).{0,20}?(\\d{1,2})\\s*h\\s*(\\d{0,2})")
@@ -80,7 +73,7 @@ object LocalCommandController {
         val minuteRaw = m.groupValues[3]
         val minute = if (minuteRaw.isBlank()) 0 else minuteRaw.toIntOrNull() ?: return null
         if (minute !in 0..59) return null
-        return DeviceControlController.setAlarm(context, hour, minute, "", emptyList())
+        return PREFIX + DeviceControlController.setAlarm(context, hour, minute, "", emptyList())
     }
 
     private val vaultSearchTriggers = listOf(
@@ -93,6 +86,6 @@ object LocalCommandController {
         val trigger = vaultSearchTriggers.firstOrNull { text.contains(it) } ?: return null
         val query = text.substringAfter(trigger).trim().removePrefix(":").trim()
         if (query.isBlank()) return null
-        return ObsidianController.searchNotes(context, query)
+        return PREFIX + ObsidianController.searchNotes(context, query)
     }
 }
