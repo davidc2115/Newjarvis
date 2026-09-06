@@ -274,12 +274,9 @@ object ApiClient {
 
     private fun sendAuto(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         // Un fournisseur est candidat s'il a au moins une clé configurée, OU s'il ne nécessite
-        // aucune clé (ex: POLLINATIONS, filet de secours gratuit/anonyme placé en dernier dans
-        // AUTO_FALLBACK_ORDER) — avant ce correctif, needsApiKey=false n'était vérifié nulle part
-        // ici, donc un fournisseur sans clé n'apparaissait JAMAIS dans les candidats malgré sa
-        // présence dans l'ordre de repli, et le mode Automatique échouait immédiatement si
-        // l'utilisateur n'avait configuré aucune clé — alors qu'un vrai filet de secours gratuit
-        // existe désormais et devrait toujours être tenté en dernier recours.
+        // aucune clé (aucun fournisseur de AUTO_FALLBACK_ORDER n'est dans ce cas actuellement,
+        // Pollinations ayant été retiré — cette vérification reste utile si un futur fournisseur
+        // sans clé est ajouté à l'ordre de repli).
         val candidates = Provider.AUTO_FALLBACK_ORDER.filter {
             !it.needsApiKey || Prefs.getApiKeysFor(context, it).isNotEmpty()
         }
@@ -431,7 +428,10 @@ object ApiClient {
                 return result
             }
 
-            if (apiKey.isNotBlank()) Prefs.markKeyFailed(context, provider, apiKey)
+            if (apiKey.isNotBlank()) {
+                val duration = if (result.startsWith("Erreur API (429)")) Prefs.KEY_BLACKLIST_RATE_LIMIT_MS else Prefs.KEY_BLACKLIST_DEFAULT_MS
+                Prefs.markKeyFailed(context, provider, apiKey, duration)
+            }
             lastErr = result
         }
 
@@ -527,7 +527,8 @@ object ApiClient {
         for (apiKey in keys) {
             val res = sendClaude(Provider.CLAUDE.defaultBaseUrl, Provider.CLAUDE.defaultModel, apiKey, history, systemPrompt)
             if (!res.startsWith("Erreur API Claude (429)") && !res.startsWith("Erreur API Claude (401)")) return res
-            Prefs.markKeyFailed(context, Provider.CLAUDE, apiKey)
+            val duration = if (res.startsWith("Erreur API Claude (429)")) Prefs.KEY_BLACKLIST_RATE_LIMIT_MS else Prefs.KEY_BLACKLIST_DEFAULT_MS
+            Prefs.markKeyFailed(context, Provider.CLAUDE, apiKey, duration)
         }
         return "Toutes les clés API Claude ont échoué."
     }
@@ -606,7 +607,8 @@ object ApiClient {
             val res = sendGemini(Provider.GEMINI.defaultBaseUrl, apiKey, history, systemPrompt)
             if (!res.startsWith("Erreur API Gemini (429)") && !res.startsWith("Erreur API Gemini (401)")) return res
             lastDetail = res
-            Prefs.markKeyFailed(context, Provider.GEMINI, apiKey)
+            val duration = if (res.startsWith("Erreur API Gemini (429)")) Prefs.KEY_BLACKLIST_RATE_LIMIT_MS else Prefs.KEY_BLACKLIST_DEFAULT_MS
+            Prefs.markKeyFailed(context, Provider.GEMINI, apiKey, duration)
         }
         return "Toutes les clés API Gemini ont échoué (${keys.size} clé(s) testée(s)) — dernière erreur : $lastDetail"
     }

@@ -127,11 +127,24 @@ object Prefs {
         }
     }
 
-    /** Signale une clé comme défaillante (blacklist temporaire 1h). */
-    fun markKeyFailed(context: Context, provider: Provider, key: String) {
+    // BUG RÉEL CORRIGÉ : markKeyFailed blacklistait TOUTE clé en échec pour 1h flat, qu'il
+    // s'agisse d'une vraie clé invalide (401) ou d'un simple quota temporaire dépassé (429,
+    // qui se résorbe typiquement en quelques dizaines de secondes). Avec un seul fournisseur
+    // à une seule clé, UN SEUL 429 rendait donc ce fournisseur totalement injoignable pendant
+    // une heure entière côté appli — alors que la clé était de nouveau valide bien avant.
+    // Combiné à plusieurs fournisseurs touchés par des 429 temporaires au même moment (rafale
+    // de messages, quota partagé...), c'est une cause réelle et directe de "Toutes les IA
+    // configurées ont échoué" qui aurait pu être évitée avec une simple nouvelle tentative
+    // quelques secondes plus tard.
+    const val KEY_BLACKLIST_RATE_LIMIT_MS = 30 * 1000L // 429 : quota temporaire, se résorbe vite
+    const val KEY_BLACKLIST_DEFAULT_MS = 60 * 60 * 1000L // 401/403 : clé probablement invalide
+
+    /** Signale une clé comme défaillante. blacklistDurationMs : 30s pour un 429 (quota
+     *  temporaire), 1h par défaut pour une vraie erreur d'authentification (401/403). */
+    fun markKeyFailed(context: Context, provider: Provider, key: String, blacklistDurationMs: Long = KEY_BLACKLIST_DEFAULT_MS) {
         val mapJson = prefs(context).getString("api_keys_failed_${provider.name}", "{}") ?: "{}"
         val map = try { JSONObject(mapJson) } catch (_: Exception) { JSONObject() }
-        map.put(key, System.currentTimeMillis())
+        map.put(key, System.currentTimeMillis() + blacklistDurationMs)
         prefs(context).edit().putString("api_keys_failed_${provider.name}", map.toString()).apply()
     }
 
@@ -140,8 +153,8 @@ object Prefs {
         return try {
             val map = JSONObject(mapJson)
             if (!map.has(key)) return false
-            val ts = map.getLong(key)
-            System.currentTimeMillis() - ts < 60 * 60 * 1000L // 1 heure
+            val expiry = map.getLong(key)
+            System.currentTimeMillis() < expiry
         } catch (_: Exception) { false }
     }
 

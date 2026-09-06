@@ -82,18 +82,12 @@ enum class Provider(
         "",
         needsApiKey = true
     ),
-    // Pollinations.ai (text.pollinations.ai/openai, endpoint compatible OpenAI) : IA de secours
-    // GRATUITE et SANS AUCUNE CLÉ (accès anonyme officiel, cf. https://github.com/pollinations/pollinations/blob/master/APIDOCS.md),
-    // placée en tout dernier recours dans AUTO_FALLBACK_ORDER ci-dessous — même logique que AI Horde
-    // pour les images (voir ImageGenController) : ça garantit que le mode Automatique répond TOUJOURS,
-    // même si l'utilisateur n'a configuré aucune clé API. Contrepartie honnête : service communautaire
-    // tiers, limité à 1 requête/15s en anonyme et moins fiable qu'un fournisseur avec clé dédiée.
-    POLLINATIONS(
-        "Pollinations (gratuit, sans clé, dernier recours)",
-        "https://text.pollinations.ai/openai",
-        "openai",
-        needsApiKey = false
-    ),
+    // Pollinations.ai retiré (demande explicite utilisateur) : service communautaire tiers
+    // limité à 1 requête/15s en anonyme, incompatible avec l'architecture de l'appli qui fait
+    // 2 appels IA par question informationnelle (dispatch principal + reformulation naturelle,
+    // voir summarizeNaturally) — le 2e appel se prenait quasi systématiquement un 429 dès que
+    // Pollinations était effectivement atteint en dernier recours, causant une bonne partie des
+    // "Toutes les IA configurées ont échoué" observés en usage réel.
 
     // ── IA sur réseau local (PC) ──────────────────────────────────────────────
     OLLAMA(
@@ -135,7 +129,7 @@ enum class Provider(
     /** Fournisseurs cloud éligibles au mode Automatique, par ordre de préférence. */
     companion object {
         val AUTO_FALLBACK_ORDER = listOf(
-            GROQ, GEMINI, CLAUDE, OPENAI, MISTRAL, DEEPSEEK, PERPLEXITY, TOGETHER, OPENROUTER, POLLINATIONS
+            GROQ, GEMINI, CLAUDE, OPENAI, MISTRAL, DEEPSEEK, PERPLEXITY, TOGETHER, OPENROUTER
         )
 
         /** Tous les providers cloud qui acceptent une clé API individuelle. */
