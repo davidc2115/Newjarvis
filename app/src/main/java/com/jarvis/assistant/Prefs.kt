@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_LOCAL_MODEL_PATH  = "local_model_path"
     private const val KEY_LOCAL_MODEL_FORMAT= "local_model_format"
     private const val KEY_LOCAL_LLM_MODEL_ID = "local_llm_model_id"
+    private const val KEY_DEFAULT_CALENDAR_ID = "default_calendar_id"
     private const val KEY_ACCENT_COLOR      = "accent_color"
     private const val KEY_HF_TOKEN          = "hf_token"
     private const val KEY_ORB_STYLE         = "orb_style"
@@ -139,11 +140,28 @@ object Prefs {
         }
     }
 
-    /** Signale une clé comme défaillante (blacklist temporaire 1h). */
-    fun markKeyFailed(context: Context, provider: Provider, key: String) {
+    // Durée de blacklist par défaut pour un vrai échec (401 invalide, erreur inattendue) --
+    // inchangée par rapport au comportement historique (1h).
+    const val KEY_BLACKLIST_DEFAULT_MS = 60 * 60 * 1000L
+
+    // BUG RÉEL CORRIGÉ (signalement utilisateur : "j'ai 4 clés API Groq, et en seulement 2
+    // demandes le quota des 4 clés serait atteint") : un simple 429 (quota TEMPORAIRE, PAS une
+    // clé invalide/morte) blacklistait la clé pour 1h ENTIÈRE via markKeyFailed, avec la même
+    // durée qu'un vrai 401. Or UN SEUL tour de conversation peut déclencher plusieurs appels IA
+    // internes (réponse principale, rebond vault, reformulation de présentation...), et
+    // sendOpenAiWithRotation/sendClaudeWithRotation/sendGeminiWithRotation essaient TOUTES les
+    // clés configurées en rotation en cas d'échec -- si le quota Groq est partagé au niveau du
+    // COMPTE plutôt que par clé individuelle (plausible sur le tier gratuit), une seule rafale
+    // de 429 épuise les 4 clés d'un coup, qui restaient ensuite indisponibles pour le reste de
+    // l'heure même si le quota réel se libère bien plus vite (souvent en secondes).
+    const val KEY_BLACKLIST_RATE_LIMIT_MS = 30 * 1000L
+
+    /** Signale une clé comme défaillante -- [blacklistDurationMs] : voir KEY_BLACKLIST_RATE_LIMIT_MS
+     *  (429, quota temporaire) vs KEY_BLACKLIST_DEFAULT_MS (401/autre, échec réel) ci-dessus. */
+    fun markKeyFailed(context: Context, provider: Provider, key: String, blacklistDurationMs: Long = KEY_BLACKLIST_DEFAULT_MS) {
         val mapJson = prefs(context).getString("api_keys_failed_${provider.name}", "{}") ?: "{}"
         val map = try { JSONObject(mapJson) } catch (_: Exception) { JSONObject() }
-        map.put(key, System.currentTimeMillis())
+        map.put(key, System.currentTimeMillis() + blacklistDurationMs)
         prefs(context).edit().putString("api_keys_failed_${provider.name}", map.toString()).apply()
     }
 
@@ -152,8 +170,8 @@ object Prefs {
         return try {
             val map = JSONObject(mapJson)
             if (!map.has(key)) return false
-            val ts = map.getLong(key)
-            System.currentTimeMillis() - ts < 60 * 60 * 1000L // 1 heure
+            val expiry = map.getLong(key)
+            System.currentTimeMillis() < expiry
         } catch (_: Exception) { false }
     }
 
@@ -181,6 +199,121 @@ object Prefs {
 
     fun saveRotationStrategy(context: Context, strategy: RotationStrategy) {
         prefs(context).edit().putString(KEY_ROTATION_STRATEGY, strategy.name).apply()
+    }
+
+    // ─── Suivi proactif des tokens/minute (évite le 429 AVANT qu'il arrive) ───────────────
+    // BUG RÉEL CONFIRMÉ (signalement utilisateur : "j'ai 4 clés API Groq, et en seulement 2
+    // demandes le quota des 4 clés serait atteint") : sur le tier gratuit Groq, la limite de
+    // débit (30 requêtes/min, 6000 tokens/min, tous modèles confondus) s'applique au niveau du
+    // COMPTE/ORGANISATION, PAS par clé individuelle -- mais confirmé par l'utilisateur que ses
+    // clés viennent de comptes DIFFÉRENTS, donc chacune a son propre plafond indépendant (voir
+    // wouldExceedTpmBudget, vérifié PAR CLÉ). Le prompt système complet (~2500 tokens) part
+    // potentiellement DEUX FOIS par question (réponse principale + reformulation naturelle,
+    // voir ApiClient.summarizeNaturally) : 6000 TPM peut être épuisé en une à deux questions.
+    // Ce compteur glissant (fenêtre de 60s) permet de vérifier AVANT d'envoyer si la requête va
+    // probablement dépasser le budget connu du fournisseur, pour basculer tout de suite sur la
+    // clé/le fournisseur suivant SANS tenter un appel voué à l'échec -- plus rapide qu'attendre
+    // un vrai 429, et n'use pas la clé pour rien (elle n'a en réalité rien de cassé).
+    private const val TOKEN_WINDOW_MS = 60_000L
+
+    /** Plafond TPM (tokens/minute) connu et documenté pour les fournisseurs au tier gratuit
+     *  particulièrement restrictif (source : documentation officielle Groq, tier gratuit,
+     *  applicable à TOUS les modèles). Vérifié PAR CLÉ (voir wouldExceedTpmBudget). Un
+     *  fournisseur absent de cette liste n'a AUCUNE vérification proactive -- comportement
+     *  inchangé, uniquement la détection réactive d'un vrai 429 (voir markKeyFailed/
+     *  KEY_BLACKLIST_RATE_LIMIT_MS). */
+    private val KNOWN_TPM_LIMITS: Map<Provider, Int> = mapOf(
+        Provider.GROQ to 6000,
+    )
+
+    // Clé de fenêtre PAR CLÉ API (pas seulement par provider) : hashCode() suffit ici (simple
+    // regroupement interne, jamais affiché ni utilisé pour une quelconque sécurité) et évite de
+    // stocker la clé API en clair dans le nom de la préférence.
+    private fun tokenWindowKey(provider: Provider, apiKey: String) = "token_window_${provider.name}_${apiKey.hashCode()}"
+
+    /** Enregistre qu'une requête d'environ [tokens] jetons vient d'être envoyée à [provider]
+     *  avec [apiKey] (compte réel "usage.total_tokens" de la réponse si connu, sinon
+     *  estimation) -- purge au passage les entrées sorties de la fenêtre de 60s. */
+    fun recordProviderTokens(context: Context, provider: Provider, apiKey: String, tokens: Int) {
+        if (tokens <= 0) return
+        val now = System.currentTimeMillis()
+        val key = tokenWindowKey(provider, apiKey)
+        val existing = try {
+            JSONArray(prefs(context).getString(key, "[]") ?: "[]")
+        } catch (_: Exception) { JSONArray() }
+        val pruned = JSONArray()
+        for (i in 0 until existing.length()) {
+            val entry = existing.optJSONObject(i) ?: continue
+            if (now - entry.optLong("t") < TOKEN_WINDOW_MS) pruned.put(entry)
+        }
+        pruned.put(JSONObject().put("t", now).put("n", tokens))
+        prefs(context).edit().putString(key, pruned.toString()).apply()
+    }
+
+    /** Somme des tokens déjà envoyés à [provider] avec [apiKey] dans la dernière minute glissante. */
+    fun tokensUsedLastMinute(context: Context, provider: Provider, apiKey: String): Int {
+        val now = System.currentTimeMillis()
+        val arr = try {
+            JSONArray(prefs(context).getString(tokenWindowKey(provider, apiKey), "[]") ?: "[]")
+        } catch (_: Exception) { JSONArray() }
+        var total = 0
+        for (i in 0 until arr.length()) {
+            val entry = arr.optJSONObject(i) ?: continue
+            if (now - entry.optLong("t") < TOKEN_WINDOW_MS) total += entry.optInt("n")
+        }
+        return total
+    }
+
+    /** Vrai si envoyer environ [estimatedTokens] jetons à [provider] avec [apiKey] MAINTENANT
+     *  risquerait de dépasser le plafond TPM connu DE CETTE CLÉ (marge de sécurité de 10%) --
+     *  toujours faux pour un fournisseur sans plafond connu dans [KNOWN_TPM_LIMITS]
+     *  (comportement inchangé). */
+    fun wouldExceedTpmBudget(context: Context, provider: Provider, apiKey: String, estimatedTokens: Int): Boolean {
+        val limit = KNOWN_TPM_LIMITS[provider] ?: return false
+        if (apiKey.isBlank()) return false
+        return tokensUsedLastMinute(context, provider, apiKey) + estimatedTokens > (limit * 0.9)
+    }
+
+    // ─── Espacement minimal entre requêtes pour un fournisseur anonyme à débit très limité ────
+    // Mécanisme générique conservé vide (aucun fournisseur actuel n'en a besoin, Pollinations
+    // ayant été retiré) -- prêt pour un futur fournisseur anonyme à débit limité, sans
+    // vérification proactive tant que cette liste reste vide (comportement inchangé).
+    private val MIN_REQUEST_INTERVAL_MS: Map<Provider, Long> = emptyMap()
+
+    private fun lastCallKey(provider: Provider) = "last_call_${provider.name}"
+
+    /** Bloque le thread appelant (déjà sur un contexte d'IO, voir sendChat/Dispatchers.IO)
+     *  jusqu'à ce que l'intervalle minimal connu pour [provider] (voir MIN_REQUEST_INTERVAL_MS)
+     *  se soit écoulé depuis le dernier appel enregistré -- ne fait RIEN pour un fournisseur
+     *  absent de cette liste (comportement inchangé). */
+    fun waitForProviderSlot(context: Context, provider: Provider) {
+        val minIntervalMs = MIN_REQUEST_INTERVAL_MS[provider] ?: return
+        val key = lastCallKey(provider)
+        val last = prefs(context).getLong(key, 0L)
+        val elapsed = System.currentTimeMillis() - last
+        if (elapsed in 0 until minIntervalMs) {
+            try { Thread.sleep(minIntervalMs - elapsed) } catch (_: InterruptedException) { }
+        }
+        prefs(context).edit().putLong(key, System.currentTimeMillis()).apply()
+    }
+
+    // ─── Calendrier par défaut ("mon planning") ─────────────────────────────────
+    // Demande utilisateur : "quand je lui demande mon planning il m'affiche un planning
+    // spécifique, comme un surnom" -- mémorise UN calendrier précis (par ID, résolu au moment
+    // de set_default_calendar depuis un nom/surnom/compte) à utiliser automatiquement pour
+    // today_events/upcoming_events/week_events/search_event quand aucun calendrier n'est
+    // explicitement précisé dans la demande, au lieu du repli générique "tous les calendriers
+    // Google" (voir CalendarController.getEventsTimeRange/searchEvents).
+
+    fun getDefaultCalendarId(context: Context): Long? {
+        val v = prefs(context).getLong(KEY_DEFAULT_CALENDAR_ID, -1L)
+        return if (v == -1L) null else v
+    }
+
+    fun setDefaultCalendarId(context: Context, calendarId: Long?) {
+        val editor = prefs(context).edit()
+        if (calendarId == null) editor.remove(KEY_DEFAULT_CALENDAR_ID) else editor.putLong(KEY_DEFAULT_CALENDAR_ID, calendarId)
+        editor.apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════

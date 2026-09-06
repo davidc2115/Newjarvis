@@ -199,8 +199,12 @@ object CalendarController {
     }
 
     private fun calendarLabelSuffix(context: Context, calendarRef: String?): String {
-        if (calendarRef.isNullOrBlank()) return ""
-        val id = findCalendarId(context, calendarRef) ?: return ""
+        // Reflete aussi le calendrier par defaut ("mon planning", voir setDefaultCalendar)
+        // quand aucun calendarRef explicite n'est fourni -- pour que l'utilisateur voie
+        // TOUJOURS clairement quel planning precis est affiche, meme quand ce choix vient
+        // d'une preference memorisee plutot que de sa demande du moment.
+        val id = if (!calendarRef.isNullOrBlank()) findCalendarId(context, calendarRef) else Prefs.getDefaultCalendarId(context)
+        if (id == null) return ""
         val name = buildCalendarNameMap(context)[id] ?: return ""
         return " — $name"
     }
@@ -257,6 +261,12 @@ object CalendarController {
             if (filterCalendarId == null) {
                 return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les calendriers disponibles, puis donne-lui un surnom avec name_calendar si besoin."
             }
+        } else {
+            // Calendrier par defaut memorise via set_default_calendar ("mon planning") --
+            // essaye AVANT le repli generique "tous les calendriers Google" juste en dessous,
+            // pour que "mon planning"/"aujourd'hui" sans autre precision affiche directement
+            // CE calendrier precis des qu'il a ete defini une fois.
+            filterCalendarId = Prefs.getDefaultCalendarId(context)
         }
 
         val projection = arrayOf(
@@ -519,6 +529,9 @@ object CalendarController {
             if (filterCalendarId == null) {
                 return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les calendriers disponibles."
             }
+        } else {
+            // Meme repli que getEventsTimeRange : calendrier par defaut memorise si defini.
+            filterCalendarId = Prefs.getDefaultCalendarId(context)
         }
 
         val projection = arrayOf(
@@ -796,6 +809,33 @@ object CalendarController {
         Prefs.saveCalendarNickname(context, id, nickname)
         val currentName = buildCalendarNameMap(context)[id] ?: calendarRef
         return "✅ Le calendrier « $currentName » s'appellera désormais « $nickname »."
+    }
+
+    /**
+     * Mémorise [calendarRef] (ID, surnom, nom affiché ou compte -- même résolution que
+     * name_calendar/sync_calendar) comme "MON planning" par défaut : today_events/
+     * upcoming_events/week_events/search_event l'utiliseront automatiquement dès que
+     * l'utilisateur ne précise aucun calendrier explicite dans sa demande (voir
+     * Prefs.getDefaultCalendarId, consommé dans getEventsTimeRange/searchEvents ci-dessus).
+     * Demande utilisateur : "quand je lui demande mon planning il m'affiche un planning
+     * spécifique, comme un surnom" -- persiste ce choix une bonne fois pour toutes, sans
+     * avoir à repréciser le calendrier à chaque demande.
+     */
+    fun setDefaultCalendar(context: Context, calendarRef: String): String {
+        val id = findCalendarId(context, calendarRef)
+            ?: return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les noms/comptes disponibles, puis donne-lui un surnom avec name_calendar si besoin."
+        Prefs.setDefaultCalendarId(context, id)
+        val name = buildCalendarNameMap(context)[id] ?: calendarRef
+        return "✅ « $name » est maintenant TON planning par défaut — dis simplement « mon planning » ou « aujourd'hui » et JARVIS l'utilisera automatiquement, sans avoir à le repréciser à chaque fois."
+    }
+
+    /** Retire le calendrier par défaut mémorisé (voir setDefaultCalendar) -- retombe alors
+     *  sur le repli habituel (tous les calendriers Google configurés). */
+    fun resetDefaultCalendar(context: Context): String {
+        val had = Prefs.getDefaultCalendarId(context) != null
+        Prefs.setDefaultCalendarId(context, null)
+        return if (had) "✅ Planning par défaut retiré — JARVIS reviendra à tous tes calendriers Google par défaut."
+        else "ℹ️ Aucun planning par défaut n'était défini."
     }
 
     /**
