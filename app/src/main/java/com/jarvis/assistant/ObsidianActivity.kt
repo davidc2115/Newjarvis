@@ -176,6 +176,25 @@ class ObsidianActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.btnChangeVaultPath).setOnClickListener {
             folderPickerLauncher.launch(null)
         }
+
+        // ── Réinitialiser le chemin (garde le contenu de l'ancien dossier) ──
+        findViewById<TextView>(R.id.btnResetVaultPath).setOnClickListener {
+            runAsync { ObsidianController.resetVaultPath(this) }
+            vaultPathText.text = "📂 Vault : ${ObsidianController.getVaultRoot(this).absolutePath}"
+        }
+
+        // ── Vider le vault actuel (destructif) ──────────────────────────────
+        findViewById<TextView>(R.id.btnWipeVault).setOnClickListener {
+            val root = ObsidianController.getVaultRoot(this).absolutePath
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Vider le vault ?")
+                .setMessage("Toutes les notes dans « $root » seront supprimées définitivement. Cette action est irréversible.")
+                .setPositiveButton("Vider") { _, _ ->
+                    runAsync { ObsidianController.wipeVault(this) }
+                }
+                .setNegativeButton("Annuler", null)
+                .show()
+        }
     }
 
     /** Lance une coroutine IO et affiche le résultat dans resultText. */

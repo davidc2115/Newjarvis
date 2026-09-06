@@ -41,6 +41,27 @@ object PeopleController {
     private fun safeFileName(name: String): String =
         name.replace(Regex("[/\\\\:*?\"<>|]"), "-").trim()
 
+    /** Casse/accents/espaces normalisés pour détecter qu'un nom désigne le même contact. */
+    private fun normalizeName(name: String): String =
+        java.text.Normalizer.normalize(name.lowercase().trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("\\s+"), " ")
+
+    /**
+     * Cherche une fiche existante dont le nom correspond EXACTEMENT (une fois casse et
+     * accents ignorés) au nom donné — pour réutiliser cette même fiche au lieu d'en créer
+     * une nouvelle sous une orthographe légèrement différente ("Jean Dupont" vs "jean
+     * DUPONT" vs "Jéan Dupont"). Volontairement strict (égalité exacte normalisée, pas de
+     * correspondance partielle) pour ne jamais fusionner deux personnes différentes par
+     * erreur — ça fragmentait les fiches d'un même contact en plusieurs fichiers séparés,
+     * chacun avec seulement une partie des infos enregistrées au fil du temps.
+     */
+    private fun findExactNameMatch(context: Context, name: String): File? {
+        val target = normalizeName(name)
+        val files = contactsFolder(context).listFiles { f -> f.extension == "md" } ?: emptyArray()
+        return files.firstOrNull { normalizeName(it.nameWithoutExtension) == target }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Lecture / écriture d'une fiche
     // ─────────────────────────────────────────────────────────────────────────
@@ -51,10 +72,13 @@ object PeopleController {
         val name: String,
         val category: String,
         val phone: String?,
+        val phonePro: String?,
         val email: String?,
         val address: String?,
+        val addressPro: String?,
         val latitude: Double?,
         val longitude: Double?,
+        val installDate: String?,
         val notes: String,
         val visits: List<String>,
         val file: File
@@ -106,10 +130,13 @@ object PeopleController {
             name = file.nameWithoutExtension,
             category = field("category") ?: "autre",
             phone = field("phone"),
+            phonePro = field("phone_pro"),
             email = field("email"),
             address = field("address"),
+            addressPro = field("address_pro"),
             latitude = field("latitude")?.toDoubleOrNull(),
             longitude = field("longitude")?.toDoubleOrNull(),
+            installDate = field("install_date"),
             notes = notesOnly,
             visits = visits,
             file = file
@@ -121,10 +148,13 @@ object PeopleController {
         name: String,
         category: String = "autre",
         phone: String? = null,
+        phonePro: String? = null,
         email: String? = null,
         address: String? = null,
+        addressPro: String? = null,
         latitude: Double? = null,
         longitude: Double? = null,
+        installDate: String? = null,
         notes: String? = null
     ): String {
         if (name.isBlank()) return "❌ Nom du contact manquant."
@@ -132,24 +162,38 @@ object PeopleController {
 
         return try {
             val folder = contactsFolder(context)
-            val file = File(folder, "${safeFileName(name)}.md")
+            // Réutilise une fiche existante dont le nom correspond exactement (casse/accents
+            // ignorés) plutôt que d'en créer une nouvelle sous une orthographe légèrement
+            // différente — évite de fragmenter les infos d'un même contact dans plusieurs
+            // fichiers séparés au fil des enregistrements successifs.
+            val file = findExactNameMatch(context, name) ?: File(folder, "${safeFileName(name)}.md")
             val existing = parseContactFile(file)
             val isUpdate = existing != null
+            // Garde l'orthographe/casse d'origine si la fiche existait déjà, pour que le
+            // titre de la note ne change pas d'un enregistrement à l'autre selon la façon
+            // dont le nom a été prononcé/écrit cette fois-ci.
+            val canonicalName = existing?.name ?: name
 
             val finalPhone = phone ?: existing?.phone
+            val finalPhonePro = phonePro ?: existing?.phonePro
             val finalEmail = email ?: existing?.email
             val finalAddress = address ?: existing?.address
+            val finalAddressPro = addressPro ?: existing?.addressPro
             val finalLat = latitude ?: existing?.latitude
             val finalLng = longitude ?: existing?.longitude
+            val finalInstallDate = installDate ?: existing?.installDate
             val finalNotes = notes ?: existing?.notes ?: ""
             val finalVisits = existing?.visits ?: emptyList()
 
             val frontmatterLines = mutableListOf("category: $cat")
             finalPhone?.let { frontmatterLines.add("phone: \"$it\"") }
+            finalPhonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
             finalEmail?.let { frontmatterLines.add("email: \"$it\"") }
             finalAddress?.let { frontmatterLines.add("address: \"$it\"") }
+            finalAddressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
             finalLat?.let { frontmatterLines.add("latitude: $it") }
             finalLng?.let { frontmatterLines.add("longitude: $it") }
+            finalInstallDate?.let { frontmatterLines.add("install_date: \"$it\"") }
             frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
             frontmatterLines.add("tags: [jarvis, contact]")
 
@@ -157,7 +201,7 @@ object PeopleController {
                 append("---\n")
                 append(frontmatterLines.joinToString("\n"))
                 append("\n---\n\n")
-                append("# $name\n\n")
+                append("# $canonicalName\n\n")
                 if (finalNotes.isNotBlank()) append(finalNotes) else append("_Aucune note._")
                 if (finalVisits.isNotEmpty()) {
                     append("\n\n$VISITS_MARKER\n")
@@ -167,8 +211,8 @@ object PeopleController {
 
             file.writeText(content)
 
-            if (isUpdate) "✅ Fiche de **$name** mise à jour (catégorie : $cat) dans le vault Obsidian."
-            else "✅ **$name** ajouté(e) aux contacts $cat, dans Obsidian → Contacts/${safeFileName(name)}.md"
+            if (isUpdate) "✅ Fiche de **$canonicalName** mise à jour (catégorie : $cat) dans le vault Obsidian."
+            else "✅ **$canonicalName** ajouté(e) aux contacts $cat, dans Obsidian → Contacts/${file.name}"
         } catch (e: Exception) {
             "❌ Erreur lors de l'enregistrement dans Obsidian : ${e.message}"
         }
@@ -187,10 +231,13 @@ object PeopleController {
 
             val frontmatterLines = mutableListOf("category: $category")
             contact?.phone?.let { frontmatterLines.add("phone: \"$it\"") }
+            contact?.phonePro?.let { frontmatterLines.add("phone_pro: \"$it\"") }
             contact?.email?.let { frontmatterLines.add("email: \"$it\"") }
             contact?.address?.let { frontmatterLines.add("address: \"$it\"") }
+            contact?.addressPro?.let { frontmatterLines.add("address_pro: \"$it\"") }
             contact?.latitude?.let { frontmatterLines.add("latitude: $it") }
             contact?.longitude?.let { frontmatterLines.add("longitude: $it") }
+            contact?.installDate?.let { frontmatterLines.add("install_date: \"$it\"") }
             frontmatterLines.add("updated: ${updatedFormat.format(Date())}")
             frontmatterLines.add("tags: [jarvis, contact]")
 
@@ -260,15 +307,32 @@ object PeopleController {
         val matches = files.mapNotNull { parseContactFile(it) }.filter { c ->
             c.name.lowercase().contains(q) ||
                 (c.phone?.lowercase()?.contains(q) == true) ||
+                (c.phonePro?.lowercase()?.contains(q) == true) ||
                 (c.email?.lowercase()?.contains(q) == true) ||
                 (c.address?.lowercase()?.contains(q) == true) ||
+                (c.addressPro?.lowercase()?.contains(q) == true) ||
                 c.notes.lowercase().contains(q)
         }
 
         if (matches.isEmpty()) return "🔍 Aucun contact trouvé pour « $query »."
         if (matches.size == 1) return formatFullDetails(matches[0])
 
-        val sb = StringBuilder("🔍 **${matches.size} résultats pour « $query »** :\n\n")
+        // Auparavant, dès que 2+ fiches correspondaient (homonymes, ou fiches dupliquées
+        // par incohérence de casse/accent), seul un résumé compact s'affichait — sans les
+        // notes ni l'historique de rendez-vous — donnant l'impression que JARVIS "n'avait
+        // pas d'autres infos" tant que l'utilisateur n'affinait pas la recherche jusqu'à
+        // ne matcher qu'UNE seule fiche. Tant que le nombre de résultats reste raisonnable,
+        // on affiche maintenant TOUT directement, sans qu'il faille insister.
+        if (matches.size <= 4) {
+            val sb = StringBuilder("🔍 **${matches.size} contacts correspondent à « $query »** :\n\n")
+            matches.forEachIndexed { i, c ->
+                sb.append(formatFullDetails(c))
+                if (i < matches.size - 1) sb.append("\n\n───\n\n")
+            }
+            return sb.toString().trim()
+        }
+
+        val sb = StringBuilder("🔍 **${matches.size} résultats pour « $query »** (trop nombreux pour tout détailler — affine la recherche pour voir les infos complètes d'un contact précis) :\n\n")
         matches.forEach { appendSummary(sb, it) }
         return sb.toString().trim()
     }
@@ -284,6 +348,17 @@ object PeopleController {
             .sortedBy { it.name }
 
         if (contacts.isEmpty()) return "Aucun contact${if (!all) " dans la catégorie « $cat »" else ""}."
+
+        // Peu de contacts dans la catégorie -> autant tout montrer en détail directement
+        // plutôt que d'obliger l'utilisateur à redemander chaque fiche une par une.
+        if (contacts.size <= 3) {
+            val sb = StringBuilder("📇 **Contacts${if (!all) " — $cat" else ""}** (${contacts.size}) :\n\n")
+            contacts.forEachIndexed { i, c ->
+                sb.append(formatFullDetails(c))
+                if (i < contacts.size - 1) sb.append("\n\n───\n\n")
+            }
+            return sb.toString().trim()
+        }
 
         val sb = StringBuilder("📇 **Contacts${if (!all) " — $cat" else ""}** :\n\n")
         contacts.forEach { appendSummary(sb, it) }
@@ -332,27 +407,50 @@ object PeopleController {
             .firstOrNull { it.name.lowercase().contains(q) }
     }
 
+    /**
+     * Affiche TOUT ce qui est enregistré sur ce contact, en liste propre avec emojis —
+     * uniquement les champs réellement renseignés (pas de ligne vide/« non renseigné »
+     * pour ne pas alourdir l'affichage), afin que l'utilisateur voie d'un coup d'œil
+     * l'intégralité des informations réellement stockées dans le vault.
+     */
     private fun formatFullDetails(c: ContactNote): String {
         return buildString {
-            append("📇 **${c.name}** (${c.category})\n\n")
-            if (!c.phone.isNullOrBlank()) append("📞 Téléphone : ${c.phone}\n")
+            append("📇 ${c.name} (${categoryLabel(c.category)})\n\n")
+            if (!c.phone.isNullOrBlank()) append("📞 Téléphone perso : ${c.phone}\n")
+            if (!c.phonePro.isNullOrBlank()) append("📱 Téléphone pro : ${c.phonePro}\n")
             if (!c.email.isNullOrBlank()) append("✉️ Email : ${c.email}\n")
-            if (!c.address.isNullOrBlank()) append("📍 Adresse : ${c.address}\n")
+            if (!c.address.isNullOrBlank()) append("🏠 Adresse perso : ${c.address}\n")
+            if (!c.addressPro.isNullOrBlank()) append("🏗️ Adresse pro / chantier : ${c.addressPro}\n")
             if (c.latitude != null && c.longitude != null) append("🌐 GPS : ${c.latitude}, ${c.longitude}\n")
-            if (c.notes.isNotBlank()) append("\n📝 ${c.notes}\n")
+            if (!c.installDate.isNullOrBlank()) append("📆 Date d'installation : ${c.installDate}\n")
+            if (c.notes.isNotBlank()) append("\n📝 Notes : ${c.notes}\n")
             if (c.visits.isNotEmpty()) {
                 append("\n🗓️ Historique des rendez-vous (${c.visits.size}) :\n")
                 c.visits.takeLast(10).forEach { append("   • $it\n") }
             }
+            val hasAnyDetail = !c.phone.isNullOrBlank() || !c.phonePro.isNullOrBlank() || !c.email.isNullOrBlank() ||
+                !c.address.isNullOrBlank() || !c.addressPro.isNullOrBlank() || !c.installDate.isNullOrBlank()
+            if (!hasAnyDetail) append("\nℹ️ Aucune coordonnée enregistrée pour l'instant (juste le nom et la catégorie).\n")
         }.trim()
     }
 
+    private fun categoryLabel(cat: String): String = when (cat) {
+        "travail" -> "travail"
+        "personnel" -> "personnel"
+        "famille" -> "famille"
+        "client" -> "client"
+        else -> "autre"
+    }
+
     private fun appendSummary(sb: StringBuilder, c: ContactNote) {
-        sb.append("• **${c.name}** (${c.category})")
+        sb.append("• ${c.name} (${categoryLabel(c.category)})")
         if (!c.phone.isNullOrBlank()) sb.append(" — 📞 ${c.phone}")
+        if (!c.phonePro.isNullOrBlank()) sb.append(" — 📱 ${c.phonePro}")
         if (!c.email.isNullOrBlank()) sb.append(" — ✉️ ${c.email}")
         sb.append("\n")
-        if (!c.address.isNullOrBlank()) sb.append("   📍 ${c.address}\n")
+        if (!c.address.isNullOrBlank()) sb.append("   🏠 ${c.address}\n")
+        if (!c.addressPro.isNullOrBlank()) sb.append("   🏗️ ${c.addressPro}\n")
+        if (!c.installDate.isNullOrBlank()) sb.append("   📆 Installé le ${c.installDate}\n")
         sb.append("\n")
     }
 }

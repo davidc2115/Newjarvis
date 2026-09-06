@@ -75,6 +75,38 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
+        <!-- Réinitialisation : deux actions distinctes et clairement séparées,
+             l'une anodine (chemin), l'autre destructive (contenu). -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/btnResetVaultPath"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="↩️ Chemin par défaut"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnWipeVault"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="🗑️ Vider le vault"
+                android:textColor="#FF6B6B"
+                android:textSize="11sp" />
+        </LinearLayout>
+
         <!-- ══════════════════════════════════════════════════════════════════ -->
         <!-- SECTION : Créer une note                                          -->
         <!-- ══════════════════════════════════════════════════════════════════ -->

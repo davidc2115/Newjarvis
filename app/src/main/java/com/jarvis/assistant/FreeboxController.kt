@@ -49,6 +49,16 @@ object FreeboxController {
     private var sessionToken: String? = null
 
     /**
+     * Raison précise du dernier échec d'ouverture de session (challenge injoignable,
+     * réponse vide, jeton invalide/révoqué, appairage jamais validé...). Auparavant
+     * openSession() avalait silencieusement toute erreur en renvoyant juste false,
+     * ce qui faisait afficher un message générique "Impossible d'ouvrir une session"
+     * ou "Freebox non appairée" sans dire POURQUOI — impossible à diagnostiquer pour
+     * l'utilisateur quand l'appairage et les permissions semblaient pourtant en ordre.
+     */
+    private var lastSessionError: String? = null
+
+    /**
      * Permissions accordées à l'appli, renvoyées par login/session/ (champ
      * "permissions" — confirmé sur la doc officielle dev.freebox.fr/sdk/os/login).
      * Un champ absent équivaut à false. Mise à jour à chaque ouverture de session.
@@ -138,7 +148,7 @@ object FreeboxController {
                         // l'utilisateur s'il manque quelque chose, plutôt que de le laisser
                         // découvrir un échec silencieux plus tard en listant un dossier.
                         sessionToken = null
-                        val permMsg = if (openSession(context)) permissionsSummary() else null
+                        val permMsg = if (openSession(context)) permissionsSummary() else "⚠️ Session non ouverte juste après l'appairage : ${lastSessionError ?: "raison inconnue"} (réessaie freebox_permissions dans quelques secondes)."
                         val suffix = if (permMsg != null) "\n\n$permMsg" else ""
                         return ActionResult(true, "✅ Freebox appairée avec succès !$suffix")
                     }
@@ -156,14 +166,26 @@ object FreeboxController {
 
     private fun openSession(context: Context): Boolean {
         val appToken = Prefs.getFreeboxAppToken(context)
-        if (appToken.isBlank()) return false
+        if (appToken.isBlank()) {
+            lastSessionError = "Aucun jeton d'application enregistré sur ce téléphone — l'appairage n'a jamais abouti ou les données de l'app ont été effacées. Réappaire depuis 🏠 → Freebox."
+            return false
+        }
         val base = discoverApiBase(context)
+        val hostUrl = host(context)
 
         return try {
-            val challengeRequest = Request.Builder().url("${host(context)}${base}login/").build()
-            val challenge = client.newCall(challengeRequest).execute().use { response ->
-                val body = response.body?.string() ?: return false
-                JSONObject(body).optJSONObject("result")?.optString("challenge") ?: return false
+            val challengeRequest = Request.Builder().url("${hostUrl}${base}login/").build()
+            val challengeResponse = client.newCall(challengeRequest).execute()
+            val challengeBody = challengeResponse.use { it.body?.string() }
+            if (challengeBody == null) {
+                lastSessionError = "Réponse vide de la Freebox à $hostUrl — vérifie que le téléphone est bien sur le même réseau Wi-Fi que la Freebox et que l'adresse est correcte."
+                return false
+            }
+            val challengeJson = JSONObject(challengeBody)
+            val challenge = challengeJson.optJSONObject("result")?.optString("challenge")
+            if (challenge.isNullOrBlank()) {
+                lastSessionError = "Challenge d'authentification introuvable dans la réponse de la Freebox (${challengeJson.optString("msg", "réponse inattendue")})."
+                return false
             }
 
             val mac = Mac.getInstance("HmacSHA1")
@@ -171,17 +193,32 @@ object FreeboxController {
             val password = mac.doFinal(challenge.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
             val sessionPayload = JSONObject().put("app_id", APP_ID).put("password", password).toString().toRequestBody(JSON)
-            val sessionRequest = Request.Builder().url("${host(context)}${base}login/session/").post(sessionPayload).build()
-            client.newCall(sessionRequest).execute().use { response ->
-                val body = response.body?.string() ?: return false
-                val json = JSONObject(body)
-                if (!json.optBoolean("success", false)) return false
-                val result = json.getJSONObject("result")
-                sessionToken = result.getString("session_token")
-                lastPermissions = result.optJSONObject("permissions")
-                true
+            val sessionRequest = Request.Builder().url("${hostUrl}${base}login/session/").post(sessionPayload).build()
+            val sessionResponse = client.newCall(sessionRequest).execute()
+            val sessionBody = sessionResponse.use { it.body?.string() }
+            if (sessionBody == null) {
+                lastSessionError = "Réponse vide de la Freebox lors de l'ouverture de session."
+                return false
             }
+            val json = JSONObject(sessionBody)
+            if (!json.optBoolean("success", false)) {
+                val errorCode = json.optString("error_code", "")
+                val rawMsg = json.optString("msg", "")
+                lastSessionError = when (errorCode) {
+                    "invalid_token" -> "Jeton d'application invalide ou révoqué sur la Freebox — réappaire depuis 🏠 → Freebox (l'ancien appairage a été annulé côté Freebox, par exemple après un reset du mot de passe admin)."
+                    "pending_token" -> "L'appairage n'a pas encore été validé sur l'écran de la Freebox — retourne sur 🏠 → Freebox et valide la demande (flèche droite)."
+                    "denied_from_external_ip" -> "La Freebox refuse cette connexion car elle ne vient pas du réseau local — vérifie que le téléphone est bien sur le Wi-Fi de la Freebox, pas en 4G/5G."
+                    else -> rawMsg.ifBlank { "erreur $errorCode".takeIf { errorCode.isNotBlank() } ?: "erreur inconnue" }
+                }
+                return false
+            }
+            val result = json.getJSONObject("result")
+            sessionToken = result.getString("session_token")
+            lastPermissions = result.optJSONObject("permissions")
+            lastSessionError = null
+            true
         } catch (e: Exception) {
+            lastSessionError = "Erreur réseau (${e.message}) — vérifie l'adresse de la Freebox (${hostUrl}) et que le téléphone est sur le même Wi-Fi."
             false
         }
     }
@@ -192,7 +229,7 @@ object FreeboxController {
             return JSONObject().put("success", false).put("msg", "Freebox non appairée. Va dans 🏠 → Freebox pour l'appairer.")
         }
         if (sessionToken == null && !openSession(context)) {
-            return JSONObject().put("success", false).put("msg", "Impossible d'ouvrir une session avec la Freebox.")
+            return JSONObject().put("success", false).put("msg", "Session Freebox impossible à ouvrir : ${lastSessionError ?: "raison inconnue"}")
         }
 
         fun doRequest(): JSONObject {
@@ -222,6 +259,12 @@ object FreeboxController {
                 result = try { doRequest() } catch (e: Exception) {
                     return JSONObject().put("success", false).put("msg", "Erreur réseau : ${e.message}")
                 }
+            } else {
+                // La session a expiré ET son renouvellement a échoué : on complète le
+                // message d'origine ("auth_required") avec la vraie raison du refus de
+                // renouvellement, sinon l'utilisateur ne voit qu'un message d'auth vague.
+                return JSONObject().put("success", false)
+                    .put("msg", "Session Freebox expirée, renouvellement impossible : ${lastSessionError ?: "raison inconnue"}")
             }
         }
         return result
@@ -445,7 +488,7 @@ object FreeboxController {
         }
         sessionToken = null
         if (!openSession(context)) {
-            return ActionResult(false, "❌ Impossible d'ouvrir une session avec la Freebox pour vérifier les permissions (jeton peut-être révoqué — réappaire si besoin).")
+            return ActionResult(false, "❌ Impossible d'ouvrir une session Freebox : ${lastSessionError ?: "raison inconnue"}")
         }
         return ActionResult(true, permissionsSummary() ?: "❌ La Freebox n'a pas renvoyé la liste des permissions.")
     }

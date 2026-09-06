@@ -68,6 +68,53 @@ Ce vault est géré par **JARVIS Assistant**.
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Réinitialisation
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Réinitialise le CHEMIN du vault vers la valeur par défaut (Documents/JARVIS-Vault),
+     * sans toucher au contenu d'aucun dossier — utile si un chemin personnalisé cassé
+     * ou erroné avait été enregistré (ex: mauvaise carte SD résolue en chemin invalide
+     * avant le correctif du sélecteur de dossier).
+     */
+    fun resetVaultPath(context: Context): String {
+        Prefs.saveObsidianVaultPath(context, "")
+        val newRoot = getVaultRoot(context)
+        newRoot.mkdirs()
+        return "✅ Chemin du vault réinitialisé par défaut :\n${newRoot.absolutePath}\n\n" +
+            "Le contenu de l'ancien dossier n'a pas été touché. Utilise « Initialiser/Réparer le vault » " +
+            "pour recréer la structure ici si besoin."
+    }
+
+    /**
+     * Vide entièrement le vault ACTUEL (toutes les notes .md et sous-dossiers créés par
+     * JARVIS) puis recrée la structure de base — irréversible, à confirmer côté appelant
+     * avant d'exécuter. Ne supprime PAS le dossier racine lui-même ni des fichiers qui
+     * n'ont pas l'extension .md (au cas où le dossier est partagé avec d'autres usages).
+     */
+    fun wipeVault(context: Context): String {
+        return try {
+            val root = getVaultRoot(context)
+            if (!root.exists()) {
+                return initVault(context)
+            }
+            var deletedFiles = 0
+            root.walkBottomUp().forEach { f ->
+                if (f == root) return@forEach
+                if (f.isFile) {
+                    if (f.delete()) deletedFiles++
+                } else if (f.isDirectory) {
+                    f.delete() // no-op silencieux si le dossier n'est pas vide (fichiers non-.md restants)
+                }
+            }
+            val initResult = initVault(context)
+            "🗑️ Vault vidé : $deletedFiles fichier(s) supprimé(s) dans ${root.absolutePath}.\n\n$initResult"
+        } catch (e: Exception) {
+            "❌ Erreur lors de la réinitialisation du vault : ${e.message}"
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Create note
     // ─────────────────────────────────────────────────────────────────────────
 
