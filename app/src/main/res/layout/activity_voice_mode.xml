@@ -11,10 +11,28 @@
         android:gravity="center"
         android:padding="24dp">
 
-        <com.jarvis.assistant.OrbView
-            android:id="@+id/orbView"
+        <FrameLayout
             android:layout_width="240dp"
-            android:layout_height="240dp" />
+            android:layout_height="240dp">
+
+            <com.jarvis.assistant.OrbView
+                android:id="@+id/orbView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <!-- Affiche un graphique/image généré directement par-dessus l'orbe pendant
+                 le mode vocal, plutôt que de forcer l'utilisateur à retourner au chat.
+                 Masqué par défaut, peuplé/affiché depuis VoiceModeActivity quand une
+                 réponse contient une image (create_chart, generate_image...). -->
+            <ImageView
+                android:id="@+id/voiceImageOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:background="@drawable/bg_input"
+                android:visibility="gone"
+                android:contentDescription="Résultat visuel généré par JARVIS" />
+        </FrameLayout>
 
         <TextView
             android:id="@+id/voiceStatusText"

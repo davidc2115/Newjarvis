@@ -16,17 +16,64 @@ object ObsidianController {
     private val timeFormat   = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val displayFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
+    /**
+     * Message honnête à renvoyer quand la permission "Accès complet au stockage"
+     * (MANAGE_EXTERNAL_STORAGE, Android 11+) manque — plutôt que de laisser les
+     * fonctions de lecture ci-dessous échouer SILENCIEUSEMENT (un dossier
+     * inaccessible sans cette permission spéciale apparaît comme "vide"/"introuvable"
+     * pour une simple lecture de fichiers, sans lever d'exception détectable).
+     *
+     * C'est la cause la plus probable et vérifiable du symptôme "après un
+     * redémarrage ou une mise à jour, JARVIS ne trouve plus mes notes" : Android
+     * NE GARANTIT PAS que cette permission spéciale survive à une réinstallation/
+     * mise à jour de l'app (surtout hors Play Store) — elle peut être révoquée
+     * automatiquement (réinitialisation des permissions des apps inutilisées,
+     * changement de clé de signature lors d'une réinstallation, gestionnaires de
+     * batterie/permissions agressifs de certains fabricants...). Les notes ne sont
+     * PAS perdues : elles sont toujours au même endroit sur le stockage, juste
+     * temporairement inaccessibles à JARVIS tant que la permission n'est pas
+     * réaccordée.
+     */
+    fun missingStorageAccessMessagePublic(): String = missingStorageAccessMessage()
+
+    private fun missingStorageAccessMessage(): String =
+        "❌ JARVIS n'a plus l'accès complet au stockage (permission révoquée par Android — " +
+            "cela arrive après une mise à jour/réinstallation de l'app, ce n'est PAS une perte de " +
+            "données : tes notes sont toujours là). Va dans ⚙ → Permissions → réactive " +
+            "« Accès complet au stockage », puis réessaie."
+
+    private fun hasStorageAccess(): Boolean = PermissionsManager.hasManageStoragePermission()
+
     // ─────────────────────────────────────────────────────────────────────────
     // Vault root
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Corrige un bug signalé : après avoir choisi un dossier de vault via le sélecteur
+     * (⚙ → Obsidian), si le dossier confirmé était la racine ENTIÈRE du stockage interne
+     * (au lieu d'un sous-dossier précis du genre "JARVIS-Vault"), toutes les notes/dossiers
+     * créés (Notes Rapides, Modèles, Daily Notes...) atterrissaient directement à la racine
+     * visible du téléphone, mélangés avec le reste des fichiers de l'utilisateur — au lieu
+     * d'être proprement isolés dans un vault dédié. Garde-fou : si le chemin enregistré
+     * correspond exactement à la racine du stockage interne, on l'ignore et on revient
+     * automatiquement au vault par défaut (Documents/JARVIS-Vault), en corrigeant aussi la
+     * préférence enregistrée pour que ce ne soit pas juste un correctif silencieux ponctuel.
+     */
     fun getVaultRoot(context: Context): File {
-        val saved = Prefs.getObsidianVaultPath(context)
-        return if (saved.isNotBlank()) File(saved)
-        else File(
+        val defaultVault = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
             "JARVIS-Vault"
         )
+        val saved = Prefs.getObsidianVaultPath(context)
+        if (saved.isBlank()) return defaultVault
+        val storageRoot = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+        val normalizedSaved = saved.trimEnd('/')
+        if (normalizedSaved.equals(storageRoot, ignoreCase = true) || normalizedSaved.isEmpty() || normalizedSaved == "/") {
+            Log.w(TAG, "Vault path pointait vers la racine du stockage ($saved) — correction automatique vers le vault par défaut.")
+            Prefs.saveObsidianVaultPath(context, "")
+            return defaultVault
+        }
+        return File(saved)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -34,9 +81,10 @@ object ObsidianController {
     // ─────────────────────────────────────────────────────────────────────────
 
     fun initVault(context: Context): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root = getVaultRoot(context)
-            val folders = listOf("Daily Notes", "Notes Rapides", "Contacts", "Tâches", "Emails", "Réflexions", ".obsidian")
+            val folders = listOf("Daily Notes", "Notes Rapides", "Contacts", "Tâches", "Emails", "Réflexions", "Générations", ".obsidian")
             folders.forEach { File(root, it).mkdirs() }
 
             // README
@@ -54,6 +102,7 @@ Ce vault est géré par **JARVIS Assistant**.
 - ✅ **Tâches** — Listes de tâches
 - 📧 **Emails** — Résumés d'emails importants
 - 💭 **Réflexions** — Pensées et idées
+- ✨ **Générations** — Historique des images, vidéos, sites, PDF/Word/Excel/ZIP créés
 
 ---
 *Vault créé par JARVIS le ${displayFormat.format(Date())}*
@@ -78,6 +127,7 @@ Ce vault est géré par **JARVIS Assistant**.
      * avant le correctif du sélecteur de dossier).
      */
     fun resetVaultPath(context: Context): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         Prefs.saveObsidianVaultPath(context, "")
         val newRoot = getVaultRoot(context)
         newRoot.mkdirs()
@@ -93,6 +143,7 @@ Ce vault est géré par **JARVIS Assistant**.
      * n'ont pas l'extension .md (au cas où le dossier est partagé avec d'autres usages).
      */
     fun wipeVault(context: Context): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root = getVaultRoot(context)
             if (!root.exists()) {
@@ -115,6 +166,30 @@ Ce vault est géré par **JARVIS Assistant**.
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Create folder
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Crée un dossier (sous-dossier) dans le vault — auparavant totalement absent des actions
+     * exposées à l'IA (seul createNote existait), ce qui obligeait l'IA à répondre qu'elle ne
+     * pouvait pas créer de dossier même quand l'utilisateur le demandait explicitement.
+     */
+    fun createFolder(context: Context, path: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        if (path.isBlank()) return "❌ Précise le nom du dossier à créer."
+        return try {
+            val root = getVaultRoot(context)
+            val safePath = path.split("/", "\\").joinToString("/") { it.replace(Regex("[:*?\"<>|]"), "-").trim() }
+            val dir = File(root, safePath)
+            if (dir.exists()) return "📁 Le dossier « $safePath » existe déjà."
+            if (dir.mkdirs()) "✅ Dossier créé : $safePath\n📄 Chemin : ${dir.absolutePath}"
+            else "❌ Impossible de créer « $safePath » (chemin invalide ou droits insuffisants)."
+        } catch (e: Exception) {
+            "❌ Erreur création dossier : ${e.message}"
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Create note
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -125,6 +200,7 @@ Ce vault est géré par **JARVIS Assistant**.
         folder: String = "Notes Rapides",
         tags: List<String> = listOf("jarvis")
     ): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root     = getVaultRoot(context)
             val dir      = File(root, folder).also { it.mkdirs() }
@@ -161,6 +237,7 @@ $content
     // ─────────────────────────────────────────────────────────────────────────
 
     fun createDailyNote(context: Context, content: String = ""): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val today     = dateFormat.format(Date())
         val todayDisp = displayFormat.format(Date())
         val root      = getVaultRoot(context)
@@ -204,6 +281,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun readNote(context: Context, query: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val file = findNote(context, query)
             ?: return "❌ Aucune note trouvée pour \"$query\"."
         return try {
@@ -219,7 +297,18 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun searchNotes(context: Context, query: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val root    = getVaultRoot(context)
+        // Distingue "vault inaccessible/mal configuré" de "vault vide" — sans ce contrôle,
+        // un chemin de vault erroné (ex: pointant vers un ancien dossier vide, ou une carte SD
+        // démontée) donnait silencieusement "aucun résultat" à chaque recherche, indiscernable
+        // d'une note qui n'existe vraiment pas. C'est la cause la plus probable derrière "JARVIS
+        // ne retrouve jamais mes notes" : utilise obsidian_status pour vérifier le chemin exact.
+        if (!root.exists() || !root.isDirectory) {
+            return "❌ Le dossier du vault n'existe pas ou n'est pas accessible : ${root.absolutePath}. " +
+                "Vérifie le chemin configuré (obsidian_status) — utilise « Réparer le vault » ou obsidian_reset_path " +
+                "si ce chemin ne correspond pas à ton vrai vault Obsidian."
+        }
         val results = mutableListOf<Pair<File, String>>()
         val lower   = query.lowercase()
 
@@ -257,10 +346,105 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Recherche automatique de contexte (voir ApiClient.sendChat) : contrairement à
+    // searchNotes (déclenchée par une action obsidian_search explicite décidée par le
+    // LLM), cette fonction tourne SYSTÉMATIQUEMENT sur chaque message utilisateur, AVANT
+    // même d'appeler l'IA, pour injecter les notes potentiellement pertinentes dans le
+    // contexte — la récupération du vault ne dépend alors plus du bon vouloir du modèle
+    // (certains fournisseurs/modèles moins "agentiques" n'appellent jamais obsidian_search
+    // d'eux-mêmes, même quand l'instruction PRIORITÉ AUX NOTES OBSIDIAN du system prompt
+    // leur dit de le faire — c'est la cause la plus probable derrière "JARVIS ne se
+    // souvient jamais de ce que j'ai noté", en particulier au début d'une nouvelle
+    // conversation où il n'y a aucun autre indice contextuel).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // BUG RÉEL CORRIGÉ : "salut"/"bonjour"/"jarvis" étaient dans cette liste de mots ignorés —
+    // or c'est EXACTEMENT le contenu du tout premier message d'une nouvelle conversation la
+    // plupart du temps ("Salut Jarvis", "Bonjour"...). Résultat : words finissait vide, la
+    // fonction retournait null, et aucun contexte vault n'était jamais injecté précisément au
+    // moment où c'était le plus utile (début de conversation, aucun autre indice contextuel
+    // disponible) — cause directe de "après un redémarrage/nouvelle conversation, JARVIS ne
+    // retrouve plus mes notes". Ces 3 mots ne présentaient de toute façon aucun risque réel de
+    // faux positifs (peu probable qu'un titre de note s'appelle "salut").
+    private val CONTEXT_STOPWORDS_FR = setOf(
+        "les", "des", "une", "le", "la", "de", "du", "un", "et", "est", "tu", "je", "il", "elle", "on", "nous",
+        "vous", "ils", "elles", "que", "qui", "quoi", "pour", "avec", "dans", "sur", "mon", "ma", "mes", "ton",
+        "ta", "tes", "son", "sa", "ses", "ce", "cette", "ces", "été", "être", "avoir", "fais", "fait", "faire",
+        "peux", "peut", "veux", "veut", "dit", "dis", "comme", "plus", "très", "pas", "ne", "se", "ça", "cela",
+        "alors", "donc", "mais", "ou", "où", "quand", "comment", "pourquoi", "aussi", "bien", "déjà", "encore",
+        "toujours", "jamais", "rappelle", "rappel", "souviens", "souvenir", "dernier", "dernière", "quel", "quelle",
+        "merci"
+    )
+
+    /**
+     * Renvoie un extrait des notes potentiellement pertinentes pour [userMessage], ou null
+     * si le vault est inaccessible/vide ou si aucun mot-clé significatif n'a de correspondance
+     * (évite d'injecter du bruit pour "salut ça va" par exemple). Coût borné : s'arrête dès
+     * que [maxNotes] correspondances suffisantes sont trouvées, pas besoin de lire tout le vault.
+     */
+    fun quickContextSearch(context: Context, userMessage: String, maxNotes: Int = 3): String? {
+        if (!hasStorageAccess()) return null
+        val root = getVaultRoot(context)
+        if (!root.exists() || !root.isDirectory) return null
+
+        val words = userMessage.lowercase()
+            .replace(Regex("[^a-zà-ÿ0-9 ]"), " ")
+            .split(" ")
+            .filter { it.length >= 4 && it !in CONTEXT_STOPWORDS_FR }
+            .distinct()
+        // Message trop générique pour en tirer un mot-clé (ex: "yo", "ça va ?") : plutôt que de
+        // ne rien injecter du tout, on signale quand même l'existence et les titres des notes
+        // les plus récentes — un aperçu léger, sans le contenu complet — pour que JARVIS ait
+        // conscience du vault dès le début d'une conversation même sans mot-clé à chercher.
+        if (words.isEmpty()) {
+            val recent = root.walkTopDown()
+                .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
+                .sortedByDescending { it.lastModified() }
+                .take(maxNotes)
+                .toList()
+            if (recent.isEmpty()) return null
+            return recent.joinToString("\n") { "### ${it.nameWithoutExtension} (récent)" }
+        }
+
+        val matches = mutableListOf<Pair<File, String>>()
+        for (file in root.walkTopDown()) {
+            if (matches.size >= maxNotes) break
+            if (!file.isFile || file.extension != "md" || file.path.contains(".obsidian")) continue
+            val nameLower = file.nameWithoutExtension.lowercase()
+            val titleHit = words.any { nameLower.contains(it) }
+            try {
+                if (titleHit) {
+                    matches.add(file to file.readText().take(400))
+                } else {
+                    val text = file.readText()
+                    val textLower = text.lowercase()
+                    val hitWord = words.firstOrNull { textLower.contains(it) }
+                    if (hitWord != null) {
+                        val idx = textLower.indexOf(hitWord)
+                        val start = maxOf(0, idx - 60)
+                        val end = minOf(text.length, idx + hitWord.length + 150)
+                        matches.add(file to text.substring(start, end).replace("\n", " "))
+                    }
+                }
+            } catch (_: Exception) {
+                // note illisible — on l'ignore simplement, pas bloquant pour les autres
+            }
+        }
+
+        if (matches.isEmpty()) return null
+        val sb = StringBuilder()
+        matches.forEach { (file, excerpt) ->
+            sb.append("### ${file.nameWithoutExtension}\n…${excerpt.trim()}…\n\n")
+        }
+        return sb.toString().trim()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Append to note
     // ─────────────────────────────────────────────────────────────────────────
 
     fun appendToNote(context: Context, query: String, text: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val file = findNote(context, query)
             ?: return "❌ Note \"$query\" introuvable. Créez-la d'abord."
         return try {
@@ -276,7 +460,13 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun listNotes(context: Context, folder: String = ""): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val root    = getVaultRoot(context)
+        if (!root.exists() || !root.isDirectory) {
+            return "❌ Le dossier du vault n'existe pas ou n'est pas accessible : ${root.absolutePath}. " +
+                "Vérifie le chemin configuré (obsidian_status) — utilise « Réparer le vault » ou obsidian_reset_path " +
+                "si ce chemin ne correspond pas à ton vrai vault Obsidian."
+        }
         val baseDir = if (folder.isBlank()) root else File(root, folder)
 
         if (!baseDir.exists()) return "📁 Le dossier \"$folder\" n'existe pas dans le vault."
@@ -305,6 +495,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun deleteNote(context: Context, query: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         val file = findNote(context, query)
             ?: return "❌ Note \"$query\" introuvable."
         return try {
@@ -313,6 +504,54 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
             "🗑 Note **$name** supprimée."
         } catch (e: Exception) {
             "❌ Erreur suppression : ${e.message}"
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Move / rename note (deplacer un fichier vers un autre dossier du vault)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Déplace une note existante ([query], recherche floue par titre) vers [destinationFolder]
+     * (chemin relatif à la racine du vault, créé automatiquement s'il n'existe pas encore —
+     * même logique de nettoyage de chemin que createFolder). Gère les collisions de nom en
+     * ajoutant un suffixe numérique plutôt que d'écraser silencieusement une note existante.
+     */
+    fun moveNote(context: Context, query: String, destinationFolder: String): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
+        if (destinationFolder.isBlank()) return "❌ Précise le dossier de destination."
+        val file = findNote(context, query)
+            ?: return "❌ Note \"$query\" introuvable."
+        return try {
+            val root = getVaultRoot(context)
+            val safeFolder = destinationFolder.split("/", "\\").joinToString("/") { it.replace(Regex("[:*?\"<>|]"), "-").trim() }
+            val destDir = File(root, safeFolder)
+            if (!destDir.exists() && !destDir.mkdirs()) {
+                return "❌ Impossible de créer le dossier de destination « $safeFolder »."
+            }
+            if (destDir.parentFile?.exists() != true && destDir.absolutePath != root.absolutePath) {
+                // cas limite très improbable après mkdirs() ci-dessus, gardé par sécurité
+            }
+            var destFile = File(destDir, file.name)
+            var suffix = 1
+            while (destFile.exists() && destFile.absolutePath != file.absolutePath) {
+                destFile = File(destDir, "${file.nameWithoutExtension} (${++suffix}).md")
+            }
+            if (destFile.absolutePath == file.absolutePath) {
+                return "📁 **${file.nameWithoutExtension}** est déjà dans « $safeFolder »."
+            }
+            val moved = file.renameTo(destFile)
+            if (moved) {
+                "✅ Note **${file.nameWithoutExtension}** déplacée vers « $safeFolder »."
+            } else {
+                // renameTo peut échouer entre systèmes de fichiers différents (ex: stockage interne
+                // vers carte SD) — repli sur copie + suppression de l'original.
+                file.copyTo(destFile, overwrite = false)
+                file.delete()
+                "✅ Note **${file.nameWithoutExtension}** déplacée vers « $safeFolder »."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur lors du déplacement : ${e.message}"
         }
     }
 
@@ -346,6 +585,7 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // ─────────────────────────────────────────────────────────────────────────
 
     fun getVaultStats(context: Context): String {
+        if (!hasStorageAccess()) return missingStorageAccessMessage()
         return try {
             val root    = getVaultRoot(context)
             if (!root.exists()) return "📊 Le vault n'existe pas encore. Initialisez-le d'abord."
@@ -378,12 +618,48 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // Internal helper — find note by partial name
     // ─────────────────────────────────────────────────────────────────────────
 
+    // BUG RÉEL CORRIGÉ : findNote() ne comparait "query" QU'au titre du fichier, en exigeant
+    // que la requête entière soit un sous-texte CONTIGU du nom de fichier. Deux conséquences
+    // très fréquentes en usage réel : (1) les notes rapides sont créées avec un titre généré
+    // automatiquement ("Note rapide 14:32") qui ne contient jamais le sujet réel de la note —
+    // toute relecture/suppression/déplacement ultérieure par sujet ("ma note sur les
+    // fournisseurs") échouait donc systématiquement alors que la note existait bien ; (2) la
+    // formulation de la requête ne correspond presque jamais mot pour mot au titre exact
+    // choisi lors de la création (ordre des mots différent, accents, un mot en plus/en moins).
+    // Résultat : JARVIS annonçait "introuvable" pour des notes bel et bien présentes dans le
+    // vault. Correction en 3 passes, de la plus précise à la plus tolérante, qui reproduit
+    // exactement la logique déjà utilisée par searchNotes (titre PUIS contenu), avec un
+    // dernier repli par mots-clés pour survivre aux reformulations :
+    //   1. sous-texte contigu dans le TITRE (comportement d'origine, le plus précis)
+    //   2. sous-texte contigu dans le CONTENU (couvre les notes au titre générique/daté)
+    //   3. TOUS les mots significatifs de la requête retrouvés (titre + contenu confondus),
+    //      pour tolérer un ordre des mots ou une formulation différente de celle d'origine
+    // À égalité de correspondance, la note modifiée le plus récemment est privilégiée.
     private fun findNote(context: Context, query: String): File? {
         val root  = getVaultRoot(context)
-        val lower = query.lowercase()
-        return root.walkTopDown()
+        val lower = query.lowercase().trim()
+        if (lower.isBlank()) return null
+        val candidates = root.walkTopDown()
             .filter { it.isFile && it.extension == "md" && !it.path.contains(".obsidian") }
-            .firstOrNull { it.nameWithoutExtension.lowercase().contains(lower) }
+            .toList()
+
+        candidates.firstOrNull { it.nameWithoutExtension.lowercase().contains(lower) }
+            ?.let { return it }
+
+        candidates
+            .filter { runCatching { it.readText() }.getOrDefault("").lowercase().contains(lower) }
+            .maxByOrNull { it.lastModified() }
+            ?.let { return it }
+
+        val words = lower.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 3 }
+        if (words.isEmpty()) return null
+        return candidates
+            .filter { file ->
+                val haystack = (file.nameWithoutExtension + " " + runCatching { file.readText() }.getOrDefault(""))
+                    .lowercase()
+                words.all { haystack.contains(it) }
+            }
+            .maxByOrNull { it.lastModified() }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

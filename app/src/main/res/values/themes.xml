@@ -3,11 +3,25 @@
     <style name="Theme.Jarvis" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/cyan_accent</item>
         <item name="colorPrimaryDark">@color/background_dark</item>
-        <item name="colorAccent">@color/cyan_accent</item>
+        <item name="colorAccent">@color/violet_accent</item>
+        <item name="colorSecondary">@color/violet_accent</item>
         <item name="android:windowBackground">@color/background_dark</item>
         <item name="android:statusBarColor">@color/background_dark</item>
         <item name="android:navigationBarColor">@color/background_dark</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:windowAnimationStyle">@style/Jarvis.WindowAnimation</item>
+        <item name="android:colorControlActivated">@color/cyan_accent</item>
+        <item name="android:colorControlHighlight">@color/ripple_cyan</item>
+    </style>
+
+    <!-- Transition d'écran high-tech : glissement + fondu, appliquée automatiquement
+         à l'ouverture/fermeture de TOUTES les activités de l'app (aucun code à ajouter
+         écran par écran) — donne une sensation fluide et moderne partout. -->
+    <style name="Jarvis.WindowAnimation" parent="android:Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/slide_in_right</item>
+        <item name="android:activityOpenExitAnimation">@anim/slide_out_left</item>
+        <item name="android:activityCloseEnterAnimation">@anim/slide_in_left</item>
+        <item name="android:activityCloseExitAnimation">@anim/slide_out_right</item>
     </style>
 
     <style name="ColorSwatch">

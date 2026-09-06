@@ -48,7 +48,7 @@
         android:layout_marginEnd="6dp"
         android:orientation="vertical"
         android:gravity="center"
-        android:background="@android:color/transparent">
+        android:background="@drawable/bg_nav_ripple">
 
         <TextView
             android:id="@+id/navGithubIcon"
@@ -77,7 +77,7 @@
         android:layout_weight="1"
         android:orientation="vertical"
         android:gravity="center"
-        android:background="@android:color/transparent">
+        android:background="@drawable/bg_nav_ripple">
 
         <TextView
             android:id="@+id/navSettingsIcon"

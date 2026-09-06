@@ -55,6 +55,17 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
+      # Met en cache les modèles ONNX openWakeWord (détection de mot-clé basse
+      # consommation, alternative gratuite à Picovoice) : ils sont téléchargés au
+      # premier build depuis les releases GitHub officielles du projet openWakeWord
+      # (voir la tâche downloadWakeWordModels dans app/build.gradle) et ne changent
+      # jamais pour une version de release donnée — la clé est donc statique.
+      - name: Cache openWakeWord models
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/*.onnx
+          key: openwakeword-models-v0.5.1
+
       - name: Build debug APK
         run: |
           set +e
@@ -62,8 +73,9 @@ jobs:
           max_attempts=3
           until [ $attempt -gt $max_attempts ]; do
             echo "=== Tentative de build $attempt/$max_attempts ==="
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
             code=$?
+            cat build.log
             if [ $code -eq 0 ]; then
               exit 0
             fi
@@ -71,8 +83,25 @@ jobs:
             attempt=$((attempt + 1))
             sleep 20
           done
+          {
+            echo "=== kotlinc errors (e:) ==="
+            grep -n "^e: " build.log | head -80
+            echo "=== what went wrong ==="
+            awk '/FAILURE: Build failed/,0' build.log | head -120
+          } > summary.log
+          echo "----- summary.log -----"
+          cat summary.log
+          ERR=$(cat summary.log | head -c 3800 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+          echo "::error::$ERR"
           echo "❌ Échec après $max_attempts tentatives."
           exit $code
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gradle-build-log
+          path: build.log
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

@@ -24,6 +24,7 @@
             android:textColor="@color/cyan_accent"
             android:textSize="20sp"
             android:textStyle="bold"
+            android:fontFamily="monospace"
             android:layout_marginBottom="4dp" />
 
         <TextView
@@ -91,21 +92,18 @@
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
-        <LinearLayout
+        <!-- Sélecteur défilant (carrousel) : glisser horizontalement pour parcourir
+             les couleurs, la sélection s'agrandit et prend un contour blanc. -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/colorCarousel"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="76dp"
             android:orientation="horizontal"
+            android:clipToPadding="false"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="12dp">
-
-            <TextView android:id="@+id/colorCyan"   style="@style/ColorSwatch" android:background="#00E5FF" />
-            <TextView android:id="@+id/colorRed"    style="@style/ColorSwatch" android:background="#FF3B30" />
-            <TextView android:id="@+id/colorBlue"   style="@style/ColorSwatch" android:background="#2979FF" />
-            <TextView android:id="@+id/colorPurple" style="@style/ColorSwatch" android:background="#B388FF" />
-            <TextView android:id="@+id/colorGold"   style="@style/ColorSwatch" android:background="#FFC400" />
-            <TextView android:id="@+id/colorGreen"  style="@style/ColorSwatch" android:background="#00E676" />
-
-        </LinearLayout>
+            android:layout_marginBottom="12dp" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -114,37 +112,18 @@
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
-        <LinearLayout
+        <!-- Sélecteur défilant : chaque carte montre un VRAI aperçu animé du style
+             (mini orbe live), pas juste un nom — glisse pour comparer avant de choisir. -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/orbStyleCarousel"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="130dp"
             android:orientation="horizontal"
+            android:clipToPadding="false"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="20dp">
-
-            <TextView
-                android:id="@+id/styleOrbPulse"
-                android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_weight="1"
-                android:layout_marginEnd="8dp"
-                android:text="Orbe pulsante"
-                android:textSize="12sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:textColor="@color/text_primary" />
-
-            <TextView
-                android:id="@+id/styleOrbNetwork"
-                android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_weight="1"
-                android:text="Sphère réseau"
-                android:textSize="12sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:textColor="@color/text_primary" />
-
-        </LinearLayout>
+            android:layout_marginBottom="20dp" />
 
         <!-- Provider actif -->
         <TextView
@@ -219,7 +198,7 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
-                android:text="🎙️ Écoute"
+                android:text="📡 Box/Écoute"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:gravity="center"
@@ -416,7 +395,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Clé d'accès Picovoice (optionnelle, mais fortement recommandée)"
+                android:text="Clé d'accès Picovoice (optionnelle — voir openWakeWord ci-dessous)"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -437,7 +416,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="💡 Sans cette clé, l'écoute utilise la reconnaissance vocale standard (fonctionne, mais plus gourmande en batterie). Avec elle, JARVIS utilise un moteur dédié 100% hors-ligne et économe (Porcupine). Gratuit : crée un compte sur console.picovoice.ai → AccessKey, et colle-la ici. Ne fonctionne en mode économe que si le mot-clé est « jarvis » (ou l'un des autres mots intégrés : computer, alexa, picovoice...)."
+                android:text="💡 Laisse ce champ vide si tu veux : sans clé Picovoice, JARVIS utilise automatiquement openWakeWord — un moteur 100% GRATUIT, SANS CLÉ, hors-ligne et à très faible consommation batterie (aucune reconnaissance vocale continue, juste un petit modèle qui reconnaît un mot précis). Avec une clé Picovoice (gratuite sur console.picovoice.ai → AccessKey), JARVIS utilise ce moteur à la place, encore un peu plus économe. \n\n⚠️ Important : ces DEUX moteurs ne reconnaissent que des mots-clés prédéfinis, pas un mot totalement inventé — openWakeWord : « jarvis », « alexa », « mycroft » ; Picovoice : « jarvis », « computer », « alexa », « picovoice », « porcupine », « terminator », « blueberry », « bumblebee », « grapefruit », « grasshopper ». Si tu tapes un autre mot, JARVIS écoutera « Jarvis » à la place et te le signalera dans la notification — c'est le compromis nécessaire pour une écoute permanente qui ne vide pas la batterie."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp"
@@ -453,6 +432,311 @@
                 android:gravity="center"
                 android:background="@drawable/bg_mic_button"
                 android:layout_marginBottom="8dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Accès SMB/CIFS générique (voir SmbController) — demandé explicitement, absent
+                 des Paramètres jusqu'ici (seule commande chat smb_configure existait). -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🗄️ Partage réseau (SMB)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Accède au disque dur de ta Freebox (une fois son partage SMB activé dans Freebox OS → Paramètres → Mode disque dur) ou à tout autre NAS/PC partagé. Identifiants = le compte SMB créé côté serveur, PAS ton identifiant Freebox Connect."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Adresse du serveur"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/smbHostInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="Freebox_Server ou son IP locale"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Utilisateur SMB (laisser vide = accès anonyme)"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/smbUsernameInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="nom d'utilisateur"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mot de passe SMB"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/smbPasswordInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="mot de passe"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/saveSmbButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="ENREGISTRER L'ACCÈS SMB"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Une fois enregistré, demande directement à JARVIS dans le chat : « liste mon partage Freebox » (smb_list_files) ou « télécharge tel fichier » (smb_download_file)."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Freebox OS — accès complet lecture/écriture (réseau, Wi-Fi, domotique
+                 Freebox Home), distinct du partage SMB ci-dessus qui ne donne accès
+                 qu'aux fichiers. Voir FreeboxController. -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📦 Freebox OS (contrôle total)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Contrôle réel de ta Freebox (réseau, Wi-Fi, domotique Freebox Home). app_id et app_token s'obtiennent en autorisant une application dans Freebox OS → Paramètres de la Freebox → Gestion des accès → Applications. Ne partage jamais ce jeton : il reste stocké uniquement sur ce téléphone."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Adresse de la Freebox"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/freeboxHostInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="http://mafreebox.freebox.fr"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="App ID"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/freeboxAppIdInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="ex : fr.jarvis.assistant"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="App Token"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/freeboxAppTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="jeton obtenu lors de l'appairage"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/saveFreeboxButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="ENREGISTRER LA FREEBOX"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Une fois enregistré, demande à JARVIS : « état de ma Freebox », « quels appareils sont connectés », « éteins le Wi-Fi de la Freebox », « liste mes appareils domotique », « allume la prise du salon »."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/text_secondary"
+                android:alpha="0.2"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- DuckDNS — nom de domaine gratuit pour heberger un site JARVIS directement
+                 depuis le telephone (voir DuckDnsController + LocalWebServerController). -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🦆 DuckDNS (nom de domaine gratuit)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Pour héberger un site généré par JARVIS directement depuis ce téléphone, avec une adresse stable même si ton IP change. Crée un compte gratuit sur duckdns.org (connexion via GitHub/Google/Twitter), crée un sous-domaine, puis colle-le ici avec ton jeton (token). Gratuit, sans carte bancaire. Ce jeton reste stocké uniquement sur ce téléphone."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sous-domaine"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/duckdnsDomainInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="ex : monjarvis (sans .duckdns.org)"
+                android:textColorHint="@color/text_secondary"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Token"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/duckdnsTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="jeton affiché en haut de ta page duckdns.org"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/saveDuckDnsButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="ENREGISTRER DUCKDNS"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="@drawable/bg_mic_button"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💡 Une fois enregistré, demande à JARVIS : « publie mon site en local avec DuckDNS », « mets à jour mon adresse DuckDNS », « où en est mon hébergement local »."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp" />
         </LinearLayout>
 
 

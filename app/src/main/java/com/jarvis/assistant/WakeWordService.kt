@@ -7,57 +7,96 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import androidx.core.app.NotificationCompat
-import java.util.Locale
+import com.rementia.openwakeword.lib.WakeWordEngine
+import com.rementia.openwakeword.lib.model.DetectionMode
+import com.rementia.openwakeword.lib.model.WakeWordModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Service qui écoute en permanence en arrière-plan et déclenche le mode
  * vocal dès que le mot-clé configuré est prononcé.
  *
- * Deux moteurs possibles, choisis automatiquement :
+ * Deux moteurs possibles, choisis automatiquement, TOUS DEUX 100% hors-ligne
+ * et basse consommation (aucun des deux n'utilise la reconnaissance vocale
+ * continue en ligne — c'est justement ce qu'on cherchait à éviter) :
  *
- * 1. Porcupine (ai.picovoice) — moteur DÉDIÉ à la détection de mot-clé,
- *    utilisé si une clé d'accès Picovoice est configurée ET que le mot-clé
- *    choisi fait partie des mots-clés intégrés (dont "Jarvis", par défaut).
- *    Fonctionne 100% hors-ligne, consommation très faible — c'est le moteur
- *    normalement utilisé.
+ * 1. Porcupine (ai.picovoice) — moteur dédié Picovoice, utilisé UNIQUEMENT si
+ *    une clé d'accès est configurée (⚙ → Réglages) ET que le mot-clé choisi
+ *    fait partie des mots-clés intégrés Porcupine. Optionnel.
  *
- * 2. Reconnaissance vocale standard Android en boucle — repli automatique
- *    si aucune clé Picovoice n'est configurée, ou si le mot-clé choisi n'est
- *    pas un mot-clé intégré Porcupine. Fonctionne avec n'importe quel mot,
- *    mais consomme plus de batterie et nécessite internet.
+ * 2. openWakeWord — moteur GRATUIT et SANS CLÉ, utilisé par défaut. Trois
+ *    petits modèles ONNX (quelques Mo au total) exécutés localement via
+ *    onnxruntime-android : un modèle de spectrogramme, un modèle d'embedding
+ *    audio, et un classifieur spécifique au mot-clé. Consommation batterie
+ *    très faible car ce n'est PAS de la reconnaissance vocale généraliste,
+ *    juste un petit réseau de neurones qui écoute en boucle un motif précis.
+ *    Aucune donnée audio ne quitte jamais le téléphone. Projet open-source
+ *    (Apache-2.0) : https://github.com/dscripka/openWakeWord
  *
- * ⚠️ Sur certains téléphones (Xiaomi/MIUI, Huawei, Oppo...), Android tue
- * agressivement les services en arrière-plan par défaut. Il faut autoriser
- * manuellement le "démarrage automatique" pour JARVIS dans les paramètres
- * système, sinon l'écoute s'arrêtera après quelques minutes ou au redémarrage.
+ * ⚠️ LIMITE HONNÊTE À CONNAÎTRE : contrairement à l'ancien moteur de repli
+ * (reconnaissance vocale standard Android, retiré à la demande explicite de
+ * l'utilisateur car trop gourmand en batterie et dépendant d'internet), ces
+ * deux moteurs sont des détecteurs PRÉ-ENTRAÎNÉS sur un nombre limité de
+ * mots-clés fixes (voir BUILT_IN_KEYWORDS / OWW_KEYWORDS ci-dessous) — pas un
+ * mot totalement arbitraire tapé par l'utilisateur. Si le mot-clé choisi dans
+ * les réglages ne correspond à aucun des deux, le service écoute automatiquement
+ * « Jarvis » à la place et le signale clairement dans sa notification
+ * permanente, plutôt que de laisser croire qu'un mot non supporté fonctionne.
+ *
+ * Modèles openWakeWord téléchargés au moment du build (pas commités dans git) —
+ * voir la tâche downloadWakeWordModels dans app/build.gradle.
  */
-class WakeWordService : Service(), RecognitionListener {
+class WakeWordService : Service() {
 
-    // ── Moteur 1 : Porcupine (dédié, basse consommation) ──────────────────────
+    // ── Moteur 1 : Porcupine (Picovoice, optionnel) ─────────────────────────────
     private var porcupineManager: PorcupineManager? = null
 
-    // ── Moteur 2 : repli SpeechRecognizer standard ─────────────────────────────
-    private var speechRecognizer: SpeechRecognizer? = null
-    private var restartAttempts = 0
+    // ── Moteur 2 : openWakeWord (gratuit, sans clé, basse consommation) ────────
+    private var owwEngine: WakeWordEngine? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
+    private var lastDetectionAt = 0L
 
     companion object {
         const val CHANNEL_ID = "jarvis_wakeword_channel"
         const val NOTIFICATION_ID = 4242
         const val ACTION_STOP = "com.jarvis.assistant.STOP_WAKEWORD"
+        const val ACTION_PAUSE = "com.jarvis.assistant.PAUSE_WAKEWORD"
+        const val ACTION_RESUME = "com.jarvis.assistant.RESUME_WAKEWORD"
 
-        /** Associe les mots-clés intégrés Porcupine à leur nom en français courant. */
+        /**
+         * À appeler par TOUT autre composant qui a besoin du micro (mode vocal manuel,
+         * déclenché par le bouton micro OU par le mot-clé) : libère temporairement le
+         * micro tenu par l'écoute permanente en arrière-plan. Android ne permet qu'UNE
+         * seule capture audio active à la fois — sans cette mise en pause, l'écoute
+         * permanente (Porcupine ou openWakeWord) continue de monopoliser le micro et
+         * aucune autre fonctionnalité vocale (chat, mode vocal) ne reçoit plus le
+         * moindre son, même en parlant normalement.
+         */
+        fun pauseListening(context: Context) {
+            if (!Prefs.isWakeWordEnabled(context)) return
+            context.startService(Intent(context, WakeWordService::class.java).apply { action = ACTION_PAUSE })
+        }
+
+        /** Reprend l'écoute permanente après la mise en pause ci-dessus. */
+        fun resumeListening(context: Context) {
+            if (!Prefs.isWakeWordEnabled(context)) return
+            context.startService(Intent(context, WakeWordService::class.java).apply { action = ACTION_RESUME })
+        }
+
+        /** Mots-clés intégrés Porcupine (moteur 1 — nécessite une clé Picovoice). */
         private val BUILT_IN_KEYWORDS = mapOf(
             "jarvis" to Porcupine.BuiltInKeyword.JARVIS,
             "alexa" to Porcupine.BuiltInKeyword.ALEXA,
@@ -71,6 +110,20 @@ class WakeWordService : Service(), RecognitionListener {
             "grapefruit" to Porcupine.BuiltInKeyword.GRAPEFRUIT,
             "grasshopper" to Porcupine.BuiltInKeyword.GRASSHOPPER
         )
+
+        /** Modèles ONNX intégrés openWakeWord (moteur 2 — gratuit, sans clé).
+         *  Paire (nom de fichier dans assets/, libellé affiché). */
+        private val OWW_KEYWORDS = mapOf(
+            "jarvis" to ("hey_jarvis.onnx" to "Hey Jarvis"),
+            "hey jarvis" to ("hey_jarvis.onnx" to "Hey Jarvis"),
+            "alexa" to ("alexa.onnx" to "Alexa"),
+            "mycroft" to ("hey_mycroft.onnx" to "Hey Mycroft"),
+            "hey mycroft" to ("hey_mycroft.onnx" to "Hey Mycroft")
+        )
+        private const val OWW_DEFAULT_FILE = "hey_jarvis.onnx"
+        private const val OWW_DEFAULT_LABEL = "Hey Jarvis"
+        private const val OWW_THRESHOLD = 0.5f
+        private const val ANTI_DOUBLON_MS = 1500L
     }
 
     override fun onCreate() {
@@ -79,18 +132,36 @@ class WakeWordService : Service(), RecognitionListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopListeningLoop()
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopListening()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_PAUSE -> {
+                // Un composant obligatoire (Service au premier plan) doit toujours appeler
+                // startForeground rapidement après un startService — on le fait même ici,
+                // en mode pause, pour rester valide vis-à-vis d'Android.
+                startForeground(NOTIFICATION_ID, buildNotification("⏸ en pause — micro utilisé ailleurs (chat/mode vocal)"))
+                stopPorcupine()
+                stopOpenWakeWord()
+                return START_STICKY
+            }
+            ACTION_RESUME -> {
+                startForeground(NOTIFICATION_ID, buildNotification(""))
+                isRunning = true
+                startBestAvailableEngine()
+                return START_STICKY
+            }
+            else -> {
+                startForeground(NOTIFICATION_ID, buildNotification(""))
+                if (!isRunning) {
+                    isRunning = true
+                    startBestAvailableEngine()
+                }
+                return START_STICKY
+            }
         }
-
-        startForeground(NOTIFICATION_ID, buildNotification(""))
-        if (!isRunning) {
-            isRunning = true
-            startBestAvailableEngine()
-        }
-        return START_STICKY
     }
 
     override fun onBind(intent: Intent?) = null
@@ -103,18 +174,16 @@ class WakeWordService : Service(), RecognitionListener {
         val builtIn = BUILT_IN_KEYWORDS[keyword]
 
         if (accessKey.isNotBlank() && builtIn != null) {
-            if (startPorcupine(accessKey, builtIn, keyword)) {
-                updateNotification("moteur dédié Porcupine — faible consommation")
+            if (startPorcupine(accessKey, builtIn)) {
+                updateNotification("moteur Porcupine (Picovoice) — très faible consommation")
                 return
             }
         }
 
-        // Repli : reconnaissance vocale standard en boucle
-        updateNotification("moteur de repli — plus gourmand en batterie")
-        startListeningLoop()
+        startOpenWakeWord(keyword)
     }
 
-    private fun startPorcupine(accessKey: String, keyword: Porcupine.BuiltInKeyword, label: String): Boolean {
+    private fun startPorcupine(accessKey: String, keyword: Porcupine.BuiltInKeyword): Boolean {
         return try {
             val callback = PorcupineManagerCallback {
                 triggerVoiceMode()
@@ -126,7 +195,7 @@ class WakeWordService : Service(), RecognitionListener {
             porcupineManager?.start()
             true
         } catch (e: Exception) {
-            // Clé invalide, quota dépassé, appareil non supporté... on bascule sur le repli.
+            // Clé invalide, quota dépassé, appareil non supporté... on bascule sur openWakeWord.
             porcupineManager = null
             false
         }
@@ -140,108 +209,82 @@ class WakeWordService : Service(), RecognitionListener {
         porcupineManager = null
     }
 
-    // ── Moteur de repli : SpeechRecognizer standard en boucle ──────────────────
+    // ── Moteur 2 : openWakeWord (gratuit, sans clé, basse consommation) ────────
 
-    private fun startListeningLoop() {
-        handler.post {
-            if (!isRunning) return@post
+    private fun startOpenWakeWord(requestedKeyword: String) {
+        val match = OWW_KEYWORDS[requestedKeyword]
+        val (modelFile, label) = match ?: (OWW_DEFAULT_FILE to OWW_DEFAULT_LABEL)
 
-            if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-                updateNotification("reconnaissance vocale indisponible sur cet appareil")
-                return@post
+        if (!assetExists(modelFile) || !assetExists("melspectrogram.onnx") || !assetExists("embedding_model.onnx")) {
+            updateNotification("⚠️ modèles openWakeWord introuvables — recompile l'app avec une connexion internet active pour les télécharger")
+            return
+        }
+
+        try {
+            owwEngine?.release()
+            val engine = WakeWordEngine(
+                context = this,
+                models = listOf(WakeWordModel(label, modelFile, threshold = OWW_THRESHOLD)),
+                detectionMode = DetectionMode.SINGLE_BEST,
+                detectionCooldownMs = 2500L,
+                scope = serviceScope
+            )
+            owwEngine = engine
+            engine.start()
+
+            serviceScope.launch {
+                engine.detections.collect {
+                    triggerVoiceMode()
+                }
             }
 
-            speechRecognizer?.destroy()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-                setRecognitionListener(this@WakeWordService)
+            val note = if (match == null && requestedKeyword != OWW_DEFAULT_LABEL.lowercase()) {
+                "moteur gratuit openWakeWord — « $requestedKeyword » non reconnu par ce moteur, écoute « $label » à la place"
+            } else {
+                "moteur gratuit openWakeWord (« $label ») — faible consommation, 100% hors-ligne"
             }
-
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.FRENCH)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
-            }
-
-            try {
-                speechRecognizer?.startListening(intent)
-            } catch (e: Exception) {
-                scheduleRestart()
-            }
+            updateNotification(note)
+        } catch (e: Exception) {
+            updateNotification("❌ échec du démarrage de l'écoute basse consommation : ${e.message}")
         }
     }
 
-    private fun scheduleRestart() {
-        if (!isRunning) return
-        restartAttempts++
-        val delay = if (restartAttempts > 5) 3000L else 400L
-        handler.postDelayed({ startListeningLoop() }, delay)
+    private fun stopOpenWakeWord() {
+        try {
+            owwEngine?.stop()
+            owwEngine?.release()
+        } catch (_: Exception) { }
+        owwEngine = null
     }
 
-    private fun checkForWakeWord(text: String?): Boolean {
-        if (text.isNullOrBlank()) return false
-        val keyword = Prefs.getWakeWord(this).lowercase().trim().ifBlank { "jarvis" }
-        return text.lowercase().contains(keyword)
+    private fun assetExists(name: String): Boolean = try {
+        assets.open(name).use { true }
+    } catch (e: Exception) {
+        false
     }
 
     // ─────────────────────────────────────────────────────────────────────────
 
-    private fun stopListeningLoop() {
+    private fun stopListening() {
         isRunning = false
         handler.removeCallbacksAndMessages(null)
-        speechRecognizer?.destroy()
-        speechRecognizer = null
         stopPorcupine()
+        stopOpenWakeWord()
     }
 
     private fun triggerVoiceMode() {
-        restartAttempts = 0
+        val now = System.currentTimeMillis()
+        if (now - lastDetectionAt < ANTI_DOUBLON_MS) return
+        lastDetectionAt = now
+
         val intent = Intent(this, VoiceModeActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
             putExtra(VoiceModeActivity.EXTRA_TRIGGERED_BY_WAKEWORD, true)
         }
         startActivity(intent)
-
-        // Le moteur de repli doit être remis en écoute après un délai (pour ne
-        // pas se ré-entendre parler) ; Porcupine, lui, continue de tourner en
-        // continu tout seul et n'a pas besoin d'être relancé.
-        if (porcupineManager == null) {
-            handler.postDelayed({ startListeningLoop() }, 4000L)
-        }
+        // Porcupine et openWakeWord tournent en continu tout seuls après une détection —
+        // contrairement à l'ancien moteur de repli, il n'y a rien à relancer manuellement.
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // RecognitionListener (moteur de repli uniquement)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    override fun onReadyForSpeech(params: Bundle?) {}
-    override fun onBeginningOfSpeech() {}
-    override fun onRmsChanged(rmsdB: Float) {}
-    override fun onBufferReceived(buffer: ByteArray?) {}
-    override fun onEndOfSpeech() {}
-
-    override fun onError(error: Int) {
-        scheduleRestart()
-    }
-
-    override fun onResults(results: Bundle?) {
-        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-        if (matches?.any { checkForWakeWord(it) } == true) {
-            triggerVoiceMode()
-        } else {
-            scheduleRestart()
-        }
-    }
-
-    override fun onPartialResults(partialResults: Bundle?) {
-        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-        if (matches?.any { checkForWakeWord(it) } == true) {
-            speechRecognizer?.stopListening()
-            triggerVoiceMode()
-        }
-    }
-
-    override fun onEvent(eventType: Int, params: Bundle?) {}
 
     // ─────────────────────────────────────────────────────────────────────────
     // Notification (obligatoire pour un service au premier plan)
@@ -283,7 +326,8 @@ class WakeWordService : Service(), RecognitionListener {
     }
 
     override fun onDestroy() {
-        stopListeningLoop()
+        stopListening()
+        serviceScope.cancel()
         super.onDestroy()
     }
 }

@@ -16,6 +16,80 @@ import java.util.TimeZone
 
 object CalendarController {
 
+    private val FRENCH_WEEKDAYS = mapOf(
+        "lundi" to Calendar.MONDAY, "mardi" to Calendar.TUESDAY, "mercredi" to Calendar.WEDNESDAY,
+        "jeudi" to Calendar.THURSDAY, "vendredi" to Calendar.FRIDAY, "samedi" to Calendar.SATURDAY,
+        "dimanche" to Calendar.SUNDAY
+    )
+
+    /**
+     * Résout une date en langage naturel FRANÇAIS (ou un format explicite) en un [Calendar]
+     * calculé à partir de l'horloge ACTUELLE de l'appareil — jamais laissé au LLM, qui n'a
+     * aucune connaissance fiable de "aujourd'hui" ni ne sait faire un calcul d'epoch
+     * millisecondes exact. Même principe que getEventsForWeek (voir son commentaire), appliqué
+     * ici à create_event pour que "demain à 14h" soit TOUJOURS calculé correctement.
+     *
+     * Formats acceptés pour [dateStr] (insensible à la casse/accents) :
+     *  - vide, "aujourd'hui", "auj" → aujourd'hui
+     *  - "demain" → +1 jour ; "après-demain" → +2 jours
+     *  - "hier" → -1 jour ; "avant-hier" → -2 jours
+     *  - un jour de la semaine ("lundi", "mardi"...) → sa PROCHAINE occurrence (jamais
+     *    aujourd'hui même si on est déjà ce jour-là, pour éviter l'ambiguïté "ce lundi" vs
+     *    "lundi prochain")
+     *  - "JJ/MM" ou "JJ/MM/AAAA" → date explicite (année courante si omise)
+     *  - "AAAA-MM-JJ" (ISO) → date explicite
+     *  - non reconnu → reste sur aujourd'hui (comportement de repli sûr, jamais une exception)
+     */
+    fun resolveDate(dateStr: String): Calendar {
+        val cal = Calendar.getInstance()
+        val d = dateStr.trim().lowercase()
+            .replace("é", "e").replace("è", "e").replace("ê", "e").replace("'", "")
+        when {
+            d.isBlank() || d == "aujourdhui" || d == "auj" -> Unit
+            d == "demain" -> cal.add(Calendar.DAY_OF_YEAR, 1)
+            d == "apres-demain" || d == "apresdemain" -> cal.add(Calendar.DAY_OF_YEAR, 2)
+            d == "hier" -> cal.add(Calendar.DAY_OF_YEAR, -1)
+            d == "avant-hier" || d == "avanthier" -> cal.add(Calendar.DAY_OF_YEAR, -2)
+            FRENCH_WEEKDAYS.containsKey(d) -> {
+                val target = FRENCH_WEEKDAYS.getValue(d)
+                do { cal.add(Calendar.DAY_OF_YEAR, 1) } while (cal.get(Calendar.DAY_OF_WEEK) != target)
+            }
+            Regex("^\\d{4}-\\d{2}-\\d{2}$").matches(d) -> {
+                val parts = d.split("-").map { it.toInt() }
+                cal.set(parts[0], parts[1] - 1, parts[2])
+            }
+            Regex("^\\d{1,2}/\\d{1,2}(/\\d{2,4})?$").matches(d) -> {
+                val parts = d.split("/")
+                val day = parts[0].toInt()
+                val month = parts[1].toInt()
+                val year = if (parts.size > 2) {
+                    val yr = parts[2].toInt()
+                    if (yr < 100) 2000 + yr else yr
+                } else cal.get(Calendar.YEAR)
+                cal.set(year, month - 1, day)
+            }
+            else -> Unit
+        }
+        return cal
+    }
+
+    /**
+     * Applique une heure en langage naturel/format libre à [cal] (déjà positionné sur le bon
+     * jour par [resolveDate]) — accepte "14:30", "14h30", "14h", "14". Vide → heure par défaut
+     * fournie par l'appelant (typiquement 9h, une heure raisonnable pour un événement du jour
+     * sans heure précisée).
+     */
+    fun resolveTime(timeStr: String, cal: Calendar, defaultHour: Int = 9, defaultMinute: Int = 0) {
+        val t = timeStr.trim().lowercase().replace("h", ":").trim(':')
+        val parts = t.split(":").filter { it.isNotBlank() }
+        val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: defaultHour
+        val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: defaultMinute
+        cal.set(Calendar.HOUR_OF_DAY, hour)
+        cal.set(Calendar.MINUTE, minute)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+    }
+
     fun getTodayEvents(context: Context, calendarRef: String? = null): String {
         val startOfDay = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
@@ -42,6 +116,48 @@ object CalendarController {
         }.timeInMillis
 
         val title = "📅 **Événements des $days prochains jours**" + calendarLabelSuffix(context, calendarRef)
+        return getEventsTimeRange(context, start, end, title, calendarRef)
+    }
+
+    /**
+     * Événements d'une semaine entière (lundi 00:00 à dimanche 23:59), calculée à partir de
+     * l'horloge réelle de l'appareil — PAS à partir d'une date que le LLM devrait deviner
+     * (le SYSTEM_PROMPT ne lui communique pas la date du jour, donc tout calcul de plage
+     * fait côté LLM ne serait pas fiable). C'est la cause réelle du bug "semaine dernière /
+     * semaine prochaine renvoie toujours cette semaine" : seul upcoming_events{days} existait,
+     * qui ne regarde QUE vers l'avant depuis maintenant — aucune action ne permettait de
+     * reculer dans le temps ou de cibler une semaine calendaire précise.
+     *
+     * @param weekOffset 0 = semaine en cours, -1 = semaine dernière, 1 = semaine prochaine, etc.
+     */
+    fun getEventsForWeek(context: Context, weekOffset: Int = 0, calendarRef: String? = null): String {
+        val cal = Calendar.getInstance().apply {
+            firstDayOfWeek = Calendar.MONDAY
+            add(Calendar.WEEK_OF_YEAR, weekOffset)
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val start = cal.timeInMillis
+        val end = cal.apply {
+            add(Calendar.DAY_OF_YEAR, 6)
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }.timeInMillis
+
+        val sdf = SimpleDateFormat("dd/MM", Locale.FRENCH)
+        val label = when {
+            weekOffset == 0 -> "cette semaine"
+            weekOffset == -1 -> "la semaine dernière"
+            weekOffset == 1 -> "la semaine prochaine"
+            weekOffset < 0 -> "il y a ${-weekOffset} semaines"
+            else -> "dans $weekOffset semaines"
+        }
+        val title = "📅 **Événements de $label (${sdf.format(Date(start))} – ${sdf.format(Date(end))})**" + calendarLabelSuffix(context, calendarRef)
         return getEventsTimeRange(context, start, end, title, calendarRef)
     }
 
@@ -119,6 +235,17 @@ object CalendarController {
         if (filterCalendarId != null) {
             selection += " AND ${CalendarContract.Instances.CALENDAR_ID} = ?"
             selectionArgsList.add(filterCalendarId.toString())
+        } else {
+            // Aucun calendrier precise explicitement : on se limite par defaut aux calendriers
+            // Google (voir getGoogleCalendarIds) pour ne JAMAIS faire remonter un calendrier
+            // LOCAL du fabricant (Xiaomi/MIUI...) parmi "aujourd'hui"/"cette semaine" - demande
+            // explicite : JARVIS ne doit utiliser QUE Google Agenda. Si aucun calendrier Google
+            // n'est configure sur l'appareil, on retombe sur tous les calendriers pour ne pas
+            // rendre la fonction totalement inutilisable.
+            val googleIds = getGoogleCalendarIds(context)
+            if (googleIds.isNotEmpty()) {
+                selection += " AND ${CalendarContract.Instances.CALENDAR_ID} IN (${googleIds.joinToString(",")})"
+            }
         }
 
         return try {
@@ -196,7 +323,11 @@ object CalendarController {
             val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
             if (uri != null) {
                 val sdf = SimpleDateFormat("dd/MM/yyyy à HH:mm", Locale.FRENCH)
-                "✅ Événement **$title** créé avec succès pour le ${sdf.format(Date(startTimeMillis))} !"
+                // Rappelle explicitement le calendrier ciblé — évite qu'un événement parte
+                // silencieusement sur le mauvais calendrier (ex: un calendrier local du
+                // fabricant plutôt que Google) sans que l'utilisateur puisse s'en rendre compte.
+                val calendarName = buildCalendarNameMap(context)[calendarId] ?: "calendrier par défaut"
+                "✅ Événement **$title** créé avec succès pour le ${sdf.format(Date(startTimeMillis))} ! (calendrier : $calendarName)"
             } else {
                 "❌ Impossible de créer l'événement."
             }
@@ -211,14 +342,51 @@ object CalendarController {
         }
 
         return try {
+            val existedBefore = getEventDetails(context, eventId) != null
             val rows = context.contentResolver.delete(
                 CalendarContract.Events.CONTENT_URI,
                 "${CalendarContract.Events._ID} = ?",
                 arrayOf(eventId.toString())
             )
-            if (rows > 0) "🗑️ Événement supprimé." else "❌ Événement introuvable."
+            when {
+                rows > 0 -> "🗑️ Événement supprimé."
+                !existedBefore -> "❌ Événement introuvable (ID $eventId) — relance search_event/today_events pour récupérer un ID à jour."
+                else -> diagnoseWriteFailure(context, eventId, "suppression")
+            }
         } catch (e: Exception) {
             "❌ Erreur lors de la suppression : ${e.message}"
+        }
+    }
+
+    /**
+     * L'événement existe bien (vérifié juste avant) mais l'update()/delete() a affecté
+     * 0 ligne : sur certains Android personnalisés (MIUI/Xiaomi notamment), la modification
+     * d'un événement par une appli tierce peut être silencieusement bloquée par une
+     * restriction système supplémentaire (distincte de la permission WRITE_CALENDAR standard,
+     * déjà accordée ici) plutôt que de lever une exception — d'où "0 ligne modifiée" sans
+     * erreur exploitable. On identifie le calendrier concerné pour donner une piste concrète.
+     */
+    private fun diagnoseWriteFailure(context: Context, eventId: Long, action: String): String {
+        val calendarId = try {
+            context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                arrayOf(CalendarContract.Events.CALENDAR_ID),
+                "${CalendarContract.Events._ID} = ?",
+                arrayOf(eventId.toString()),
+                null
+            )?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+        } catch (_: Exception) { null }
+        val isGoogle = calendarId != null && getGoogleCalendarIds(context).contains(calendarId)
+        val calendarName = calendarId?.let { buildCalendarNameMap(context)[it] } ?: "inconnu"
+        return if (isGoogle) {
+            "⚠️ La $action a été refusée par le système alors que l'événement existe (calendrier : $calendarName). " +
+                "Sur certains téléphones (Xiaomi/MIUI notamment), il faut activer manuellement : Paramètres > " +
+                "Applications > JARVIS > Autorisations supplémentaires > activer « Modifier l'agenda » / « Autostart », " +
+                "en plus de la permission agenda standard déjà accordée."
+        } else {
+            "⚠️ La $action a échoué : cet événement vit sur le calendrier local « $calendarName » (pas un compte Google), " +
+                "que MIUI/le fabricant protège souvent contre l'écriture par des applis tierces. Recrée-le plutôt sur un " +
+                "calendrier Google (list_calendars pour voir les calendriers disponibles)."
         }
     }
 
@@ -251,13 +419,18 @@ object CalendarController {
 
             if (values.size() == 0) return "❌ Aucune modification à appliquer."
 
+            val existedBefore = getEventDetails(context, eventId) != null
             val rows = context.contentResolver.update(
                 CalendarContract.Events.CONTENT_URI,
                 values,
                 "${CalendarContract.Events._ID} = ?",
                 arrayOf(eventId.toString())
             )
-            if (rows > 0) "✏️ Événement mis à jour avec succès." else "❌ Événement introuvable."
+            when {
+                rows > 0 -> "✏️ Événement mis à jour avec succès."
+                !existedBefore -> "❌ Événement introuvable (ID $eventId) — relance search_event/today_events pour récupérer un ID à jour."
+                else -> diagnoseWriteFailure(context, eventId, "modification")
+            }
         } catch (e: Exception) {
             "❌ Erreur lors de la modification : ${e.message}"
         }
@@ -289,6 +462,13 @@ object CalendarController {
             if (filterCalendarId != null) {
                 selection += " AND ${CalendarContract.Events.CALENDAR_ID} = ?"
                 argsList.add(filterCalendarId.toString())
+            } else {
+                // Meme regle par defaut que today_events/upcoming_events : uniquement Google
+                // Agenda tant que l'utilisateur ne demande pas explicitement un autre calendrier.
+                val googleIds = getGoogleCalendarIds(context)
+                if (googleIds.isNotEmpty()) {
+                    selection += " AND ${CalendarContract.Events.CALENDAR_ID} IN (${googleIds.joinToString(",")})"
+                }
             }
             val cursor = context.contentResolver.query(
                 CalendarContract.Events.CONTENT_URI,
@@ -332,7 +512,9 @@ object CalendarController {
             CalendarContract.Calendars._ID,
             CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
             CalendarContract.Calendars.ACCOUNT_NAME,
-            CalendarContract.Calendars.OWNER_ACCOUNT
+            CalendarContract.Calendars.OWNER_ACCOUNT,
+            CalendarContract.Calendars.SYNC_EVENTS,
+            CalendarContract.Calendars.VISIBLE
         )
 
         return try {
@@ -348,13 +530,37 @@ object CalendarController {
                 if (c.count == 0) return "📅 Aucun calendrier disponible."
 
                 val sb = StringBuilder("📅 **Calendriers disponibles** :\n\n")
+                var hasSyncIssue = false
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
                     val name = c.getString(1) ?: "Inconnu"
                     val account = c.getString(2) ?: "?"
+                    val syncEvents = c.getInt(4) != 0
+                    val visible = c.getInt(5) != 0
                     val nickname = Prefs.getCalendarNickname(context, id)
                     val nicknameStr = if (nickname.isNotBlank()) " — surnom : « $nickname »" else ""
                     sb.append("• **$name** (compte : $account, ID: $id)$nicknameStr\n")
+                    // SYNC_EVENTS à 0 = la table Instances/Events reste VIDE pour ce calendrier
+                    // côté Android, même si l'utilisateur le voit très bien dans son appli
+                    // d'agenda (Google Calendar, etc.) — c'est un réglage de synchronisation
+                    // par calendrier, distinct de la visibilité. Cause la plus fréquente d'un
+                    // planning partagé (Skello, calendrier d'équipe, abonnement iCal...) invisible
+                    // pour JARVIS alors qu'il apparaît bien dans l'agenda natif du téléphone.
+                    if (!syncEvents) {
+                        hasSyncIssue = true
+                        sb.append("   ⚠️ Synchronisation désactivée pour ce calendrier — JARVIS ne peut voir AUCUN de ses événements tant que ce n'est pas corrigé (voir note ci-dessous).\n")
+                    } else if (!visible) {
+                        sb.append("   ⚠️ Calendrier masqué (non visible) — vérifie qu'il est bien coché dans ton appli d'agenda.\n")
+                    }
+                }
+                if (hasSyncIssue) {
+                    sb.append(
+                        "\n🔧 Pour activer un calendrier marqué « synchronisation désactivée » : ouvre l'appli " +
+                            "Google Agenda (ou l'appli concernée) → Paramètres → sélectionne ce calendrier " +
+                            "précis (pas juste le compte) → active « Synchroniser » — c'est un réglage séparé " +
+                            "de la simple visibilité, propre à Android, rien à voir avec un bug de JARVIS. " +
+                            "Une fois activé, les événements deviennent immédiatement lisibles par JARVIS.\n"
+                    )
                 }
                 sb.append(
                     "\n💡 Pour distinguer deux calendriers similaires, donne-leur un surnom avec " +
@@ -409,6 +615,60 @@ object CalendarController {
             }
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /**
+     * Efface tous les surnoms de calendrier (name_calendar) enregistrés. Ils sont stockés
+     * dans les préférences de l'app, indépendamment du vault Obsidian — un "réinitialiser
+     * Obsidian" ne les efface donc jamais, il faut passer par ici explicitement.
+     */
+    fun resetCalendarNicknames(context: Context): String {
+        val count = Prefs.clearAllCalendarNicknames(context)
+        return if (count == 0) "ℹ️ Aucun surnom de calendrier n'était enregistré."
+        else "✅ $count surnom(s) de calendrier effacé(s). Les calendriers seront à nouveau identifiés par leur nom/compte d'origine."
+    }
+
+    /**
+     * Active ou réactive la synchronisation ET la visibilité d'un calendrier directement
+     * via le ContentProvider Android (CalendarContract.Calendars.SYNC_EVENTS / VISIBLE),
+     * sans passer par l'appli Google Agenda. L'app possède déjà la permission WRITE_CALENDAR.
+     * Cible typique : un planning partagé (Skello, calendrier d'équipe...) dont le compte
+     * synchronise bien avec le téléphone, mais dont CE calendrier précis a SYNC_EVENTS=0 —
+     * cause la plus fréquente d'un planning "invisible pour JARVIS mais visible sur le site
+     * Skello / dans Google Agenda web". Écrire directement ce champ évite à l'utilisateur de
+     * devoir chercher le bon réglage caché dans les paramètres de l'appli d'agenda.
+     */
+    fun syncCalendar(context: Context, calendarRef: String, enable: Boolean): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission d'écriture de l'agenda non accordée — active-la dans les paramètres de l'app."
+        }
+        val id = findCalendarId(context, calendarRef)
+            ?: return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les calendriers disponibles."
+
+        return try {
+            val values = ContentValues().apply {
+                put(CalendarContract.Calendars.SYNC_EVENTS, if (enable) 1 else 0)
+                put(CalendarContract.Calendars.VISIBLE, if (enable) 1 else 0)
+            }
+            val uri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id)
+            val rows = context.contentResolver.update(uri, values, null, null)
+            val name = buildCalendarNameMap(context)[id] ?: calendarRef
+            if (rows > 0) {
+                if (enable) {
+                    "✅ Synchronisation activée pour « $name ». Si les événements n'apparaissent pas immédiatement, " +
+                        "cela peut prendre quelques minutes le temps qu'Android resynchronise ce calendrier avec le serveur — " +
+                        "sinon relance simplement today_events ou upcoming_events dans une minute."
+                } else {
+                    "✅ Synchronisation désactivée pour « $name »."
+                }
+            } else {
+                "⚠️ Aucune ligne modifiée — soit le calendrier était déjà dans cet état, soit le compte associé " +
+                    "(${buildCalendarNameMap(context)[id]}) refuse l'écriture directe (certains comptes gérés type " +
+                    "Exchange/Google readonly-sync bloquent ce champ ; dans ce cas, seule l'appli Google Agenda peut le modifier)."
+            }
+        } catch (e: Exception) {
+            "❌ Erreur lors de la modification du calendrier : ${e.message}"
         }
     }
 
@@ -469,18 +729,82 @@ object CalendarController {
         return findCalendarId(context, calendarRef)
     }
 
-    private fun getDefaultCalendarId(context: Context): Long? {
-        val cursor = context.contentResolver.query(
-            CalendarContract.Calendars.CONTENT_URI,
-            arrayOf(CalendarContract.Calendars._ID),
-            null,
-            null,
-            null
-        )
+    /**
+     * BUG RÉEL CORRIGÉ : sans filtre ni tri, cette requête renvoyait le TOUT PREMIER calendrier
+     * de la table Calendars — souvent un calendrier LOCAL créé par l'appli d'agenda du
+     * fabricant (ex: Xiaomi/MIUI, un calendrier account_type="LOCAL" propre à l'appareil)
+     * plutôt que le calendrier du compte Google. C'est exactement ce qui a été signalé : les
+     * événements créés par JARVIS apparaissaient dans l'appli Agenda Xiaomi mais jamais dans
+     * Google Agenda — un calendrier "LOCAL" n'est PAS synchronisé vers les serveurs Google par
+     * définition, aucune app (JARVIS ou autre) ne peut le rendre visible ailleurs après coup.
+     *
+     * On choisit maintenant explicitement, par ordre de préférence :
+     *  1. Le calendrier Google DE L'UTILISATEUR (account_type="com.google" ET
+     *     owner_account == account_name — exclut un calendrier Google partagé/abonné qui
+     *     n'est pas le sien), avec la synchronisation active.
+     *  2. N'importe quel calendrier Google synchronisé, à défaut du 1er cas.
+     *  3. N'importe quel calendrier synchronisé (autre compte : Outlook, Samsung...).
+     *  4. Le tout premier calendrier trouvé, en dernier repli (comportement historique,
+     *     garantit que la création d'événement continue de fonctionner même sans aucun
+     *     compte cloud configuré).
+     */
+    /**
+     * Renvoie les IDs de tous les calendriers rattaches a un compte Google (account_type ==
+     * "com.google"), synchronises ou non - utilise pour restreindre par defaut la LECTURE
+     * (today_events/upcoming_events/search_event) et exclure tout calendrier LOCAL du
+     * fabricant (Xiaomi/MIUI...) tant que l'utilisateur ne cible pas explicitement un autre
+     * calendrier via le parametre "calendar". Voir aussi getDefaultCalendarId (choix du
+     * calendrier de destination pour la CREATION d'evenement), qui applique une preference
+     * similaire.
+     */
+    private fun getGoogleCalendarIds(context: Context): List<Long> {
+        val ids = mutableListOf<Long>()
+        try {
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.ACCOUNT_TYPE),
+                null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    if (c.getString(1) == "com.google") ids.add(c.getLong(0))
+                }
+            }
+        } catch (_: Exception) { /* liste vide en cas d'erreur, pas bloquant */ }
+        return ids
+    }
 
-        cursor?.use { c ->
-            if (c.moveToFirst()) return c.getLong(0)
+    private fun getDefaultCalendarId(context: Context): Long? {
+        data class Candidate(val id: Long, val accountType: String, val isOwn: Boolean, val syncEvents: Boolean)
+        val candidates = mutableListOf<Candidate>()
+        context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            arrayOf(
+                CalendarContract.Calendars._ID,
+                CalendarContract.Calendars.ACCOUNT_TYPE,
+                CalendarContract.Calendars.ACCOUNT_NAME,
+                CalendarContract.Calendars.OWNER_ACCOUNT,
+                CalendarContract.Calendars.SYNC_EVENTS
+            ),
+            null, null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val accountName = c.getString(2) ?: ""
+                val owner = c.getString(3) ?: ""
+                candidates.add(
+                    Candidate(
+                        id = c.getLong(0),
+                        accountType = c.getString(1) ?: "",
+                        isOwn = owner.isNotBlank() && owner == accountName,
+                        syncEvents = c.getInt(4) != 0
+                    )
+                )
+            }
         }
-        return null
+        if (candidates.isEmpty()) return null
+
+        return candidates.firstOrNull { it.accountType == "com.google" && it.isOwn && it.syncEvents }?.id
+            ?: candidates.firstOrNull { it.accountType == "com.google" && it.syncEvents }?.id
+            ?: candidates.firstOrNull { it.syncEvents }?.id
+            ?: candidates.first().id
     }
 }

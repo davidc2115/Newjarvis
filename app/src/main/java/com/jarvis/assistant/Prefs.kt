@@ -28,10 +28,11 @@ object Prefs {
     private const val KEY_HF_TOKEN          = "hf_token"
     private const val KEY_ORB_STYLE         = "orb_style"
     private const val KEY_EMAIL_ACCOUNTS    = "email_accounts"     // JSON array
+    private const val KEY_GITHUB_ACCOUNTS   = "github_accounts"    // JSON array
     private const val KEY_ROTATION_STRATEGY = "rotation_strategy"  // "ROUNDROBIN"|"FALLBACK"|"RANDOM"
     private const val KEY_OBSIDIAN_VAULT_PATH = "obsidian_vault_path"
 
-    const val DEFAULT_ACCENT_COLOR = -16724737 // #FF00E5FF (cyan)
+    const val DEFAULT_ACCENT_COLOR = -1525685 // #FFE8B84B (or — thème Apex Studio)
 
     // ═════════════════════════════════════════════════════════════════════════
     // MULTI-CLÉS API PAR PROVIDER
@@ -336,6 +337,85 @@ object Prefs {
         prefs(context).edit().putInt(KEY_ACCENT_COLOR, color).apply()
     }
 
+    // ─── Thème du chat (fond + bulles), personnalisable depuis le chat/vocal ──
+    // 0 = pas de surcharge, on garde les couleurs par défaut du thème Apex Studio.
+    private const val KEY_CHAT_BG_COLOR = "chat_bg_color"
+    private const val KEY_CHAT_BUBBLE_USER_COLOR = "chat_bubble_user_color"
+    private const val KEY_CHAT_BUBBLE_AI_COLOR = "chat_bubble_ai_color"
+
+    fun getChatBackgroundColor(context: Context): Int = prefs(context).getInt(KEY_CHAT_BG_COLOR, 0)
+    fun saveChatBackgroundColor(context: Context, color: Int) {
+        prefs(context).edit().putInt(KEY_CHAT_BG_COLOR, color).apply()
+    }
+
+    fun getChatBubbleUserColor(context: Context): Int = prefs(context).getInt(KEY_CHAT_BUBBLE_USER_COLOR, 0)
+    fun saveChatBubbleUserColor(context: Context, color: Int) {
+        prefs(context).edit().putInt(KEY_CHAT_BUBBLE_USER_COLOR, color).apply()
+    }
+
+    fun getChatBubbleAiColor(context: Context): Int = prefs(context).getInt(KEY_CHAT_BUBBLE_AI_COLOR, 0)
+    fun saveChatBubbleAiColor(context: Context, color: Int) {
+        prefs(context).edit().putInt(KEY_CHAT_BUBBLE_AI_COLOR, color).apply()
+    }
+
+    fun resetChatTheme(context: Context) {
+        prefs(context).edit()
+            .remove(KEY_CHAT_BG_COLOR)
+            .remove(KEY_CHAT_BUBBLE_USER_COLOR)
+            .remove(KEY_CHAT_BUBBLE_AI_COLOR)
+            .apply()
+    }
+
+    // ─── Style de présentation préféré des fiches contact ─────────────────────
+    // Cause réelle du bug "je demande un type de présentation et il ne le reprend pas
+    // automatiquement" : le format d'une fiche contact était toujours généré tel quel par
+    // PeopleController.formatFullDetails (fixe, en dur), et la seule façon de "changer" la
+    // présentation était que l'IA reformule elle-même le texte dans SA réponse pour CE tour
+    // précis — sans aucune mémoire persistante au-delà de la fenêtre de contexte de la
+    // conversation en cours. Dès que la conversation redémarre ou que le contexte s'allonge,
+    // la consigne de mise en forme est oubliée et JARVIS revient au format brut par défaut.
+    private const val KEY_CONTACT_PRESENTATION_STYLE = "contact_presentation_style"
+
+    fun getContactPresentationStyle(context: Context): String =
+        prefs(context).getString(KEY_CONTACT_PRESENTATION_STYLE, "") ?: ""
+
+    fun saveContactPresentationStyle(context: Context, style: String) {
+        prefs(context).edit().putString(KEY_CONTACT_PRESENTATION_STYLE, style.trim()).apply()
+    }
+
+    fun resetContactPresentationStyle(context: Context) {
+        prefs(context).edit().remove(KEY_CONTACT_PRESENTATION_STYLE).apply()
+    }
+
+    // Même principe que ci-dessus mais pour la présentation de la localisation d'une personne
+    // (ha_status{domain:"person"}) — demandé par l'utilisateur en même temps que la persistance
+    // du style des fiches contact.
+    private const val KEY_LOCATION_PRESENTATION_STYLE = "location_presentation_style"
+
+    fun getLocationPresentationStyle(context: Context): String =
+        prefs(context).getString(KEY_LOCATION_PRESENTATION_STYLE, "") ?: ""
+
+    fun saveLocationPresentationStyle(context: Context, style: String) {
+        prefs(context).edit().putString(KEY_LOCATION_PRESENTATION_STYLE, style.trim()).apply()
+    }
+
+    fun resetLocationPresentationStyle(context: Context) {
+        prefs(context).edit().remove(KEY_LOCATION_PRESENTATION_STYLE).apply()
+    }
+
+    // ─── Liens cliquables (tel/mail/itinéraire) dans le texte des fiches ──────
+    // Désactivé par défaut (false) : à la demande explicite de l'utilisateur, ces liens ne
+    // doivent plus apparaître automatiquement dès qu'un numéro/email/adresse est détecté —
+    // seulement quand il le demande, via enable_contact_links.
+    private const val KEY_CONTACT_LINKS_ENABLED = "contact_links_enabled"
+
+    fun isContactLinksEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_CONTACT_LINKS_ENABLED, false)
+
+    fun setContactLinksEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_CONTACT_LINKS_ENABLED, enabled).apply()
+    }
+
     fun getHfToken(context: Context): String =
         prefs(context).getString(KEY_HF_TOKEN, "") ?: ""
 
@@ -345,6 +425,89 @@ object Prefs {
 
     fun getGithubToken(context: Context): String =
         prefs(context).getString("github_token", "") ?: ""
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // MULTI-COMPTES GITHUB
+    // ═════════════════════════════════════════════════════════════════════════
+
+    data class GitHubAccount(
+        val id: String = System.currentTimeMillis().toString(),
+        val label: String = "",   // ex: "Perso", "Pro", "Client X"
+        val token: String = "",
+        val isDefault: Boolean = false
+    ) {
+        fun toJson(): JSONObject = JSONObject().apply {
+            put("id", id); put("label", label); put("token", token); put("isDefault", isDefault)
+        }
+
+        companion object {
+            fun fromJson(j: JSONObject) = GitHubAccount(
+                id        = j.optString("id", System.currentTimeMillis().toString()),
+                label     = j.optString("label", ""),
+                token     = j.optString("token", ""),
+                isDefault = j.optBoolean("isDefault", false)
+            )
+        }
+    }
+
+    /**
+     * Migration douce : si aucun compte n'a encore été ajouté à la nouvelle liste
+     * multi-comptes mais qu'un ancien jeton unique (github_token, ⚙ → Clés API) existe,
+     * il est exposé comme un compte "Principal" par défaut — la configuration existante
+     * de l'utilisateur continue de fonctionner sans qu'il ait besoin de tout reconfigurer.
+     */
+    fun getGithubAccounts(context: Context): List<GitHubAccount> {
+        val json = prefs(context).getString(KEY_GITHUB_ACCOUNTS, "[]") ?: "[]"
+        val stored = try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { GitHubAccount.fromJson(arr.getJSONObject(it)) }
+        } catch (_: Exception) { emptyList() }
+        if (stored.isNotEmpty()) return stored
+        val legacyToken = getGithubToken(context)
+        return if (legacyToken.isNotBlank()) {
+            listOf(GitHubAccount(id = "legacy", label = "Principal", token = legacyToken, isDefault = true))
+        } else {
+            emptyList()
+        }
+    }
+
+    fun getDefaultGithubAccount(context: Context): GitHubAccount? =
+        getGithubAccounts(context).firstOrNull { it.isDefault }
+            ?: getGithubAccounts(context).firstOrNull()
+
+    /** Recherche floue d'un compte GitHub par son libellé (ex: "perso", "pro", "client X"). */
+    fun findGithubAccount(context: Context, label: String): GitHubAccount? {
+        if (label.isBlank()) return null
+        val q = label.trim().lowercase()
+        val all = getGithubAccounts(context)
+        return all.firstOrNull { it.label.lowercase() == q }
+            ?: all.firstOrNull { it.label.lowercase().contains(q) }
+    }
+
+    fun saveGithubAccounts(context: Context, accounts: List<GitHubAccount>) {
+        val arr = JSONArray()
+        accounts.forEach { arr.put(it.toJson()) }
+        prefs(context).edit().putString(KEY_GITHUB_ACCOUNTS, arr.toString()).apply()
+    }
+
+    fun addGithubAccount(context: Context, account: GitHubAccount) {
+        val list = getGithubAccounts(context).toMutableList()
+        list.removeAll { it.id == account.id }
+        // Le tout premier compte ajouté devient automatiquement celui par défaut.
+        val withDefault = if (list.isEmpty()) account.copy(isDefault = true) else account
+        list.add(withDefault)
+        saveGithubAccounts(context, list)
+    }
+
+    fun removeGithubAccount(context: Context, id: String) {
+        val list = getGithubAccounts(context).filter { it.id != id }
+        saveGithubAccounts(context, list)
+    }
+
+    fun setDefaultGithubAccount(context: Context, id: String) {
+        val list = getGithubAccounts(context).map { it.copy(isDefault = it.id == id) }
+        saveGithubAccounts(context, list)
+    }
 
     // ─── Écoute permanente (mot-clé d'activation) ───────────────────────────────
 
@@ -390,6 +553,21 @@ object Prefs {
             }
         }
         return null
+    }
+
+    /**
+     * Efface TOUS les surnoms de calendrier enregistrés. Ces surnoms vivent dans les
+     * SharedPreferences de l'app (pas dans le vault Obsidian) — "réinitialiser Obsidian"
+     * ne les touche donc jamais, ce qui explique qu'ils survivent à un vidage du vault.
+     * Cette fonction est le vrai bouton de réinitialisation pour eux spécifiquement.
+     */
+    fun clearAllCalendarNicknames(context: Context): Int {
+        val p = prefs(context)
+        val keysToRemove = p.all.keys.filter { it.startsWith("calendar_nickname_") }
+        val editor = p.edit()
+        keysToRemove.forEach { editor.remove(it) }
+        editor.apply()
+        return keysToRemove.size
     }
 
 
@@ -445,29 +623,33 @@ object Prefs {
         prefs(context).edit().putString("ha_token", token.trim()).apply()
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // FREEBOX SERVER (stockage + Wi-Fi de la box)
-    // ═════════════════════════════════════════════════════════════════════════
+    /**
+     * URL distante de secours pour Home Assistant (ex: URL Nabu Casa
+     * "https://xxxx.ui.nabu.casa", ou une URL externe/DDNS + reverse-proxy configurée
+     * par l'utilisateur) — utilisée UNIQUEMENT quand l'URL locale (ha_url) est
+     * injoignable, pour piloter la maison même hors du réseau Wi-Fi local.
+     */
+    fun getHaRemoteUrl(context: Context): String =
+        prefs(context).getString("ha_remote_url", "") ?: ""
 
-    fun getFreeboxHost(context: Context): String =
-        prefs(context).getString("freebox_host", "http://mafreebox.freebox.fr") ?: "http://mafreebox.freebox.fr"
-
-    fun saveFreeboxHost(context: Context, host: String) {
-        prefs(context).edit().putString("freebox_host", host.trim().trimEnd('/').ifBlank { "http://mafreebox.freebox.fr" }).apply()
-    }
-
-    fun getFreeboxAppToken(context: Context): String =
-        prefs(context).getString("freebox_app_token", "") ?: ""
-
-    fun saveFreeboxAppToken(context: Context, token: String) {
-        prefs(context).edit().putString("freebox_app_token", token.trim()).apply()
+    fun saveHaRemoteUrl(context: Context, url: String) {
+        prefs(context).edit().putString("ha_remote_url", url.trim().trimEnd('/')).apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════
     // RÉSEAU LOCAL — appareils enregistrés (pour Wake-on-LAN rapide)
     // ═════════════════════════════════════════════════════════════════════════
 
-    data class SavedDevice(val name: String, val mac: String, val ip: String = "")
+    /**
+     * [remoteHost] = adresse publique/DDNS (optionnellement suivie de ":port") vers laquelle
+     * basculer quand l'appareil n'est plus joignable en local (donc hors du Wi-Fi domestique).
+     * JARVIS ne peut PAS créer cet accès lui-même : l'utilisateur doit avoir configuré une
+     * redirection de port (port forwarding) sur sa box/routeur vers cet appareil, idéalement
+     * avec une IP fixe ou un nom DDNS (No-IP, DuckDNS...) puisque l'IP publique change souvent.
+     * Une fois ce champ renseigné, network_ping/network_open_web/wake_on_lan/print_file
+     * basculent automatiquement dessus si l'accès local échoue.
+     */
+    data class SavedDevice(val name: String, val mac: String, val ip: String = "", val remoteHost: String = "")
 
     fun getSavedNetworkDevices(context: Context): List<SavedDevice> {
         val json = prefs(context).getString("network_saved_devices", "[]") ?: "[]"
@@ -475,7 +657,7 @@ object Prefs {
             val arr = JSONArray(json)
             (0 until arr.length()).map {
                 val o = arr.getJSONObject(it)
-                SavedDevice(o.optString("name"), o.optString("mac"), o.optString("ip", ""))
+                SavedDevice(o.optString("name"), o.optString("mac"), o.optString("ip", ""), o.optString("remoteHost", ""))
             }
         } catch (_: Exception) { emptyList() }
     }
@@ -488,6 +670,18 @@ object Prefs {
 
     fun removeNetworkDevice(context: Context, name: String) {
         writeSavedNetworkDevices(context, getSavedNetworkDevices(context).filter { it.name != name })
+    }
+
+    /** Enregistre/actualise l'adresse distante (publique/DDNS) d'un appareil déjà connu (ou nouveau). */
+    fun setDeviceRemoteHost(context: Context, name: String, remoteHost: String) {
+        val list = getSavedNetworkDevices(context).toMutableList()
+        val idx = list.indexOfFirst { it.name.equals(name, ignoreCase = true) }
+        if (idx >= 0) {
+            list[idx] = list[idx].copy(remoteHost = remoteHost.trim())
+        } else {
+            list.add(SavedDevice(name = name, mac = "", ip = "", remoteHost = remoteHost.trim()))
+        }
+        writeSavedNetworkDevices(context, list)
     }
 
     /**
@@ -528,7 +722,7 @@ object Prefs {
     private fun writeSavedNetworkDevices(context: Context, list: List<SavedDevice>) {
         val arr = JSONArray()
         list.forEach { d ->
-            arr.put(JSONObject().put("name", d.name).put("mac", d.mac).put("ip", d.ip))
+            arr.put(JSONObject().put("name", d.name).put("mac", d.mac).put("ip", d.ip).put("remoteHost", d.remoteHost))
         }
         prefs(context).edit().putString("network_saved_devices", arr.toString()).apply()
     }
@@ -543,6 +737,111 @@ object Prefs {
 
     fun saveReplicateToken(context: Context, token: String) {
         prefs(context).edit().putString("replicate_token", token.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // IMPRIMANTE RÉSEAU PAR DÉFAUT (IPP)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** Adresse IP de l'imprimante réseau à utiliser par défaut quand aucune n'est précisée dans la commande. */
+    fun getDefaultPrinterIp(context: Context): String =
+        prefs(context).getString("default_printer_ip", "") ?: ""
+
+    fun saveDefaultPrinterIp(context: Context, ip: String) {
+        prefs(context).edit().putString("default_printer_ip", ip.trim()).apply()
+    }
+
+    /**
+     * Adresse distante (publique/DDNS, ex: "monreseau.ddns.net:6310") de l'imprimante par
+     * défaut, utilisée en repli si l'IP locale est injoignable (donc aussi hors Wi-Fi
+     * domestique) — nécessite que l'utilisateur ait redirigé le port 631 (ou un port de son
+     * choix) de sa box/routeur vers l'imprimante.
+     */
+    fun getDefaultPrinterRemoteHost(context: Context): String =
+        prefs(context).getString("default_printer_remote_host", "") ?: ""
+
+    fun saveDefaultPrinterRemoteHost(context: Context, host: String) {
+        prefs(context).edit().putString("default_printer_remote_host", host.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // ACCÈS SMB/CIFS GÉNÉRIQUE (voir SmbController) — remplace la réintégration
+    // complète de l'API Freebox par un accès standard au partage réseau
+    // (fonctionne aussi avec un NAS, un PC Windows partagé, etc.), à la
+    // demande explicite de l'utilisateur suite au retrait de FreeboxController.
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getSmbHost(context: Context): String =
+        prefs(context).getString("smb_host", "") ?: ""
+
+    fun saveSmbHost(context: Context, host: String) {
+        prefs(context).edit().putString("smb_host", host.trim()).apply()
+    }
+
+    fun getSmbUsername(context: Context): String =
+        prefs(context).getString("smb_username", "") ?: ""
+
+    fun saveSmbUsername(context: Context, username: String) {
+        prefs(context).edit().putString("smb_username", username.trim()).apply()
+    }
+
+    fun getSmbPassword(context: Context): String =
+        prefs(context).getString("smb_password", "") ?: ""
+
+    fun saveSmbPassword(context: Context, password: String) {
+        prefs(context).edit().putString("smb_password", password).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // FREEBOX OS API (contrôle complet : LAN, Wi-Fi, domotique Freebox Home)
+    // Ré-ajoutée à la demande explicite de l'utilisateur (accès total lecture/écriture
+    // depuis JARVIS). app_token = jeton obtenu lors de l'appairage de l'app avec la
+    // Freebox (Freebox OS -> Paramètres -> Gestion des accès -> Applications), JAMAIS
+    // codé en dur dans le code source (dépôt public) : uniquement saisi ici via ⚙.
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getFreeboxHost(context: Context): String {
+        val raw = prefs(context).getString("freebox_host", "") ?: ""
+        return raw.ifBlank { "http://mafreebox.freebox.fr" }
+    }
+
+    fun saveFreeboxHost(context: Context, host: String) {
+        prefs(context).edit().putString("freebox_host", host.trim()).apply()
+    }
+
+    fun getFreeboxAppId(context: Context): String =
+        prefs(context).getString("freebox_app_id", "") ?: ""
+
+    fun saveFreeboxAppId(context: Context, appId: String) {
+        prefs(context).edit().putString("freebox_app_id", appId.trim()).apply()
+    }
+
+    fun getFreeboxAppToken(context: Context): String =
+        prefs(context).getString("freebox_app_token", "") ?: ""
+
+    fun saveFreeboxAppToken(context: Context, token: String) {
+        prefs(context).edit().putString("freebox_app_token", token.trim()).apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // DUCKDNS (nom de domaine gratuit + mise a jour d'IP, pour heberger un site
+    // genere par JARVIS directement depuis le telephone). Le jeton DuckDNS n'est
+    // JAMAIS code en dur dans le code source (depot public) : uniquement saisi
+    // ici via l'ecran Parametres, comme pour les autres cles/jetons de l'app.
+    // ═════════════════════════════════════════════════════════════════════════
+
+    fun getDuckDnsDomain(context: Context): String =
+        prefs(context).getString("duckdns_domain", "") ?: ""
+
+    fun saveDuckDnsDomain(context: Context, domain: String) {
+        prefs(context).edit().putString("duckdns_domain", domain.trim().lowercase().removeSuffix(".duckdns.org")).apply()
+    }
+
+    fun getDuckDnsToken(context: Context): String =
+        prefs(context).getString("duckdns_token", "") ?: ""
+
+    fun saveDuckDnsToken(context: Context, token: String) {
+        prefs(context).edit().putString("duckdns_token", token.trim()).apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -592,16 +891,96 @@ object Prefs {
         val list = getGenerationHistory(context).toMutableList()
         list.add(0, record)
         writeGenerationHistory(context, list.take(MAX_GENERATION_HISTORY))
+        if (record.status == "success") logGenerationToVault(context, record)
     }
 
     /** Met à jour l'enregistrement identifié par [id] (ex: passage pending → success/failed). */
     fun updateGenerationRecord(context: Context, id: String, transform: (GenerationRecord) -> GenerationRecord) {
-        val list = getGenerationHistory(context).map { if (it.id == id) transform(it) else it }
+        var updated: GenerationRecord? = null
+        val list = getGenerationHistory(context).map {
+            if (it.id == id) {
+                val was = it.status
+                val t = transform(it)
+                if (was != "success" && t.status == "success") updated = t
+                t
+            } else it
+        }
         writeGenerationHistory(context, list)
+        updated?.let { logGenerationToVault(context, it) }
+    }
+
+    /**
+     * Obsidian en premier plan : toute génération réussie (image, vidéo, site web, graphique,
+     * PDF/Word/Excel/ZIP) est aussi tracée sous forme de note dans le vault (dossier « Générations »),
+     * en plus de rester listée par list_generations — ainsi obsidian_search/obsidian_list retrouvent
+     * aussi ces actions, et l'historique survit même si le cache generation_history est un jour purgé.
+     * Best-effort : une erreur d'écriture vault (permission stockage manquante, etc.) ne doit jamais
+     * faire échouer la génération elle-même, d'où le try/catch silencieux (déjà loggé côté ObsidianController).
+     */
+    private fun logGenerationToVault(context: Context, record: GenerationRecord) {
+        try {
+            val typeLabel = when (record.type) {
+                "image" -> "🎨 Image générée"
+                "video" -> "🎬 Vidéo générée"
+                "website", "website_edit" -> "🌐 Site web généré"
+                "chart" -> "📊 Graphique généré"
+                "file_pdf" -> "📄 PDF créé"
+                "file_docx" -> "📝 Document Word créé"
+                "file_xlsx" -> "📊 Tableur Excel créé"
+                "file_zip" -> "🗜️ Archive ZIP créée"
+                else -> "✨ Génération (${record.type})"
+            }
+            val safePrompt = record.prompt.ifBlank { "(sans description)" }
+            val title = "$typeLabel — ${safePrompt.take(60)}"
+            val content = buildString {
+                append("Type : ${record.type}\n")
+                append("Description : $safePrompt\n")
+                if (!record.resultPath.isNullOrBlank()) append("Fichier : ${record.resultPath}\n")
+            }
+            ObsidianController.createNote(context, title, content, folder = "Générations", tags = listOf("jarvis", "generation", record.type))
+        } catch (_: Exception) {
+            // best-effort, ne jamais faire échouer la génération pour ça
+        }
     }
 
     fun removeGenerationRecord(context: Context, id: String) {
         writeGenerationHistory(context, getGenerationHistory(context).filter { it.id != id })
+    }
+
+    // Au-delà de ce délai, aucune génération ne travaille légitimement encore : la vidéo
+    // est plafonnée à ~3min20 de sondage (MAX_POLL_ATTEMPTS côté VideoGenController), l'image
+    // à 90s de délai réseau max, le site à la durée d'un simple appel de chat. Un enregistrement
+    // encore "pending" après ce délai signifie que GenerationService a été tué par le système
+    // (optimisation de batterie, manque de mémoire, app fermée de force) avant d'avoir pu écrire
+    // un résultat — pas qu'il travaille toujours. Sans cette réconciliation, ces enregistrements
+    // restaient bloqués sur "en cours" indéfiniment, ce qui donnait l'impression d'une boucle
+    // infinie côté utilisateur.
+    private const val STALE_GENERATION_TIMEOUT_MS = 10 * 60 * 1000L
+
+    /**
+     * Marque comme "failed" (avec une cause honnête) tout enregistrement resté "pending"
+     * plus longtemps que ce qu'une génération met légitimement à se terminer. À appeler à
+     * chaque ouverture/rafraîchissement de l'écran Génération. Retourne true si au moins un
+     * enregistrement a été corrigé.
+     */
+    fun reconcileStaleGenerations(context: Context): Boolean {
+        val now = System.currentTimeMillis()
+        var changed = false
+        val list = getGenerationHistory(context).map { record ->
+            if (record.status == "pending" && now - record.timestamp > STALE_GENERATION_TIMEOUT_MS) {
+                changed = true
+                record.copy(
+                    status = "failed",
+                    errorMessage = "Interrompue : le service a été arrêté par le système avant la fin " +
+                        "(optimisation de batterie, manque de mémoire, ou application fermée de force), " +
+                        "sans message d'erreur explicite du moteur de génération. Réessaie ; si ça se " +
+                        "reproduit souvent, désactive l'optimisation de batterie pour JARVIS dans les " +
+                        "réglages système Android."
+                )
+            } else record
+        }
+        if (changed) writeGenerationHistory(context, list)
+        return changed
     }
 
     private fun writeGenerationHistory(context: Context, list: List<GenerationRecord>) {

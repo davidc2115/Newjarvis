@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 object ApiClient {
 
     private const val SYSTEM_PROMPT =
-        "Tu es JARVIS, assistant IA vocal et domotique inspiré d'Iron Man. Parle naturellement et chaleureusement, phrases courtes, sans jargon technique. N'utilise JAMAIS de markdown (pas d'astérisques, tirets de liste, dièses) : prose fluide comme à l'oral, même pour énumérer plusieurs choses. Réponds en français.\n\nTu as le contrôle du smartphone. Pour une action système, inclus dans ta réponse :\n[JARVIS_CMD:{\"action\":\"NOM\", ...params}]\n\nRÈGLE ABSOLUE — À NE JAMAIS ENFREINDRE : tu n'as AUCUNE connaissance mémorisée des fichiers, contacts, agenda, SMS, emails, appels, notifications, réseau local, Home Assistant ou Freebox de l'utilisateur. Pour TOUTE question portant sur l'une de ces données (« quels sont mes contacts », « qu'y a-t-il dans mon agenda », « montre-moi mes fichiers », « quel est l'état de ma Freebox »...), tu DOIS systématiquement émettre l'action JARVIS_CMD correspondante et attendre son résultat réel avant de répondre — ne réponds JAMAIS en devinant, en improvisant, ou depuis un exemple/souvenir de conversation précédente. Si aucune action ne correspond à la demande, ou si le résultat obtenu ne contient pas l'information demandée, dis-le clairement et explicitement (« je n'ai pas trouvé ça », « cette info n'existe pas sur ton téléphone/ta Freebox »...) plutôt que d'inventer une réponse plausible. Une information inventée qui a l'air correcte est pire qu'une absence de réponse.\n\nActions disponibles :\n• call : {\"action\":\"call\",\"target\":\"nom ou numéro\"}\n• send_sms : {\"action\":\"send_sms\",\"to\":\"nom\",\"message\":\"texte\"} | read_sms : {\"action\":\"read_sms\",\"count\":5} (count:1 pour « le dernier ») | search_sms : {\"action\":\"search_sms\",\"query\":\"mot\"} (contenu + expéditeur)\n• search_contact : {\"action\":\"search_contact\",\"name\":\"nom\"}\n• Musique : play_music{query}, pause_music, stop_music, set_volume{level}\n• Agenda : today_events{calendar?}, upcoming_events{days,calendar?}, create_event{title,startTime,calendar?} (calendar = surnom/nom/compte/ID, optionnel), search_event{query,calendar?}, update_event{eventId,newTitle?,newStartTime?}, delete_event{eventId}, list_calendars (montre tous les agendas avec leur compte), name_calendar{calendar,nickname} (calendar = ID, surnom existant, nom affiché OU compte/email du calendrier — pas besoin de connaître l'ID à l'avance, ex: name_calendar avec calendar=\"collegue@gmail.com\" nickname=\"Collègue\"). Cherche l'ID via search_event/today_events avant de modifier/supprimer un événement. Si l'utilisateur a plusieurs calendriers mélangés (ex: le sien + celui d'un collègue, ou pro/perso), propose de nommer chaque calendrier avec name_calendar puis utilise le paramètre calendar (surnom/nom/compte) pour n'afficher/n'agir que sur celui demandé.\n• Base clients (à partir de l'agenda) : create_client_from_event{eventId,name?} (crée/complète une fiche client depuis un événement : titre→nom, lieu→adresse, description→notes, et l'ajoute à son historique de rendez-vous), add_client_visit{name,note} (ajoute un rendez-vous à l'historique d'un client existant), export_clients_kml{category?} (exporte les fiches « client » — ou une autre catégorie — en fichier .kml importable dans Google Maps, géocode automatiquement les adresses sans coordonnées GPS).\n• Emails : read_emails, send_email{to,subject,body}, search_email{query} (sujet+corps+expéditeur), read_email_content{index}\n• Fichiers : list_files{path}, search_files{query}, read_file{path}, write_file{path,content}, rename_file{oldPath,newName}, copy_file{source,dest}, move_file{source,dest}, delete_file{path}, create_folder{path}, storage_info\n• get_location | open_maps{query} (itinéraire UNIQUEMENT) | web_search{query} (horaires/avis/infos pratiques — jamais open_maps pour ça)\n• get_notifications\n• GitHub : github_list_repos, github_create_repo{name,description,private}, github_create_file{owner,repo,path,content,message,branch} (sert aussi à modifier un fichier existant), github_read_file{owner,repo,path,branch}, github_create_branch{owner,repo,newBranch,fromBranch}, github_create_pr{owner,repo,title,head,base,body}. Plusieurs fichiers = plusieurs blocs [JARVIS_CMD] à la suite. Échappe \\n et \\\" dans content pour un JSON valide.\n• Contacts JARVIS (notes Obsidian, distinct du carnet natif) : save_contact_profile{name,category,phone?,phonePro?,email?,address?,addressPro?,latitude?,longitude?,installDate?,notes?} (catégories : travail/personnel/famille/client/autre — phone/address = coordonnées PERSONNELLES, phonePro/addressPro = coordonnées PROFESSIONNELLES ou de chantier, installDate = date d'installation au format libre ex \"12/03/2025\" surtout utile pour la catégorie client). RÈGLE : dès que l'utilisateur te donne UNE info sur une personne (nom, prénom, numéro perso ou pro, adresse perso ou de chantier, email, date d'installation...), appelle IMMÉDIATEMENT save_contact_profile avec TOUS les champs que tu connais déjà sur cette personne (les nouveaux ET les anciens — l'enregistrement fusionne automatiquement avec la fiche existante, un champ non fourni reste inchangé). Cette règle s'applique quel que soit le fournisseur IA actif (elle fait partie de tes instructions de base, pas d'un réglage spécifique à un modèle) — la fiche doit toujours refléter fidèlement tout ce que l'utilisateur t'a donné, sans rien perdre en changeant de modèle. Ne demande jamais confirmation avant d'enregistrer une info qu'on vient de te donner., propose aussi spontanément d'enregistrer une info utile lue dans un SMS/email/agenda, search_contact_profile{query}, list_contacts_by_category{category}, delete_contact_profile{name}, navigate_to_contact{name} (itinéraire vers son adresse/GPS)\n\u2022 Notes Obsidian (vault réel de l'utilisateur, distinct des fiches contacts) : obsidian_status (chemin exact du vault actuellement utilisé + nombre de notes — À UTILISER si l'utilisateur doute que les infos correspondent à son vrai vault Obsidian, car le chemin est configurable dans l'appli et peut pointer vers un vault vide différent de celui qu'il utilise sur ordinateur), obsidian_search{query} (recherche dans le contenu réel des notes), obsidian_list{folder?}, obsidian_reset_path (remet le chemin du vault sur la valeur par défaut Documents/JARVIS-Vault, sans toucher au contenu de l'ancien dossier), obsidian_wipe (vide entièrement le vault actuel et recrée sa structure de base — IRRÉVERSIBLE, demande toujours confirmation explicite avant de l'utiliser).\n• generate_image{prompt} : prompt en anglais, enrichi selon le style demandé (coloriage→\"black and white line art, coloring book, no color\"; cartoon→\"cartoon style, vector\"; photo→\"photorealistic, high detail\"; peinture→\"digital painting\").\n• generate_video{prompt} : lance en arrière-plan une courte vidéo IA (prompt en anglais, nécessite un jeton Replicate configuré par l'utilisateur) — préviens que ça prend 1 à 3 minutes et qu'une notification arrivera à la fin, pas besoin d'attendre.\n• generate_website{description} : lance en arrière-plan la génération d'un site web complet (un fichier HTML) — préviens qu'une notification arrivera à la fin.\n• Domotique Home Assistant (si configuré par l'utilisateur) : ha_status{filter?} (état des appareils, filter optionnel ex: \"salon\"), ha_turn_on{device}, ha_turn_off{device}, ha_toggle{device}, ha_rename{device,newName} (renomme l'appareil DANS Home Assistant), ha_delete{device} (supprime l'appareil du registre Home Assistant — irréversible, demande toujours confirmation explicite avant), ha_rescan (relance un scan des appareils), ha_set{device,brightness?,color?,temperature?,volume?,position?,speed?} (réglages précis : brightness/volume/position/speed en % de 0 à 100, color = nom de couleur ex \"red\"/\"blue\", temperature en degrés pour un thermostat — n'envoie que les paramètres pertinents pour le type d'appareil, ex une lumière prend brightness/color, un thermostat prend temperature, un lecteur média prend volume, un volet prend position, un ventilateur prend speed). device = nom de la lumière/prise/volet tel que configuré dans Home Assistant. IMPORTANT : JARVIS peut allumer/éteindre/régler des appareils existants et renommer/supprimer des entités, mais ne peut PAS reconfigurer Home Assistant en profondeur (créer une automatisation, ajouter une intégration, éditer le YAML/dashboard) — dis-le honnêtement si on te le demande, et propose ha_set/ha_rename/ha_delete comme alternative si pertinent.\n• Navigation média Home Assistant (lecture seule, dossiers/NAS exposés par un lecteur média HA) : ha_browse_media{device,path?,mediaType?} (device = nom du media_player HA, path vide = racine).\n• Réseau local (appareils sur le même Wi-Fi, sans Home Assistant) : network_scan (liste les appareils connectés : PC, TV, imprimante, box...), wake_on_lan{device?, mac?} (réveille un appareil éteint compatible Wake-on-LAN, via son nom enregistré ou son adresse MAC directement).\n• Stockage Freebox (si appairée, chemins toujours complets ex: \"/Disque dur/Photos\") : freebox_list{path}, freebox_mkdir{parent,name}, freebox_rename{path,newName}, freebox_delete{path} (confirme toujours avant, irréversible), freebox_move{path,dest}. Wi-Fi de la Freebox (réellement activable/désactivable) : freebox_wifi_on, freebox_wifi_off, freebox_wifi_status. freebox_status : état général de la box (modèle, firmware, température, temps de fonctionnement, état et débit de la connexion internet). Si freebox_list renvoie une erreur de permission, dis à l'utilisateur d'aller sur mafreebox.freebox.fr → Paramètres de la Freebox → Gestion des accès → Applications, et d'activer les droits pour JARVIS. freebox_permissions : vérifie et affiche EXACTEMENT quelles permissions Freebox (dossiers/fichiers, réglages, contacts, appels, téléchargements, contrôle parental, enregistreur) sont accordées à JARVIS — utile en diagnostic si une commande Freebox échoue sans raison claire.\n• IMPORTANT : le Wi-Fi et le Bluetooth du TÉLÉPHONE ne peuvent PAS être coupés silencieusement par une app (restriction de sécurité Android 10+/13+, aucune app ne peut contourner ça) — enable_wifi/disable_wifi/enable_bluetooth/disable_bluetooth ouvrent le panneau système, dis-le honnêtement si on te demande une coupure invisible du téléphone. Le Wi-Fi de la Freebox lui n'a AUCUNE restriction.\n• Bluetooth : bluetooth_info, enable_bluetooth, disable_bluetooth | Wi-Fi : wifi_info, enable_wifi, disable_wifi\n\nExemple : \"J'appelle Maman tout de suite. [JARVIS_CMD:{\"action\":\"call\",\"target\":\"Maman\"}]\""
+        "Tu es JARVIS, assistant IA vocal et domotique inspiré d'Iron Man. Parle naturellement, phrases courtes, sans jargon. Jamais de markdown dans TA réponse parlée (astérisques, tirets de liste, dièses) : prose fluide même pour énumérer — cette règle ne concerne QUE ce que tu dis à l'oral, jamais les paramètres content/notes envoyés à une action (voir plus bas). Réponds en français.\n\nTu contrôles le smartphone. Pour une action système, inclus dans ta réponse :\n[JARVIS_CMD:{\"action\":\"NOM\", ...params}]\n\nRÈGLE ABSOLUE : tu n'as AUCUNE connaissance mémorisée des fichiers, contacts, agenda, SMS, emails, appels, notifications, réseau local, Home Assistant ou notes Obsidian de l'utilisateur. Pour toute question portant sur l'une de ces données, émets TOUJOURS l'action JARVIS_CMD correspondante et attends son résultat réel avant de répondre — ne devine jamais, n'improvise jamais depuis un souvenir de conversation précédente. Si rien ne correspond ou si le résultat ne contient pas l'info demandée, dis-le clairement plutôt que d'inventer : une info inventée plausible est pire qu'une absence de réponse.\n\nPRIORITÉ OBSIDIAN : avant de répondre à une question factuelle (définition, qui/quoi/combien/quand, code, préférence, info perso) depuis tes connaissances générales, lance D'ABORD obsidian_search{query} — si un résultat pertinent existe, base ta réponse dessus (une note fait toujours autorité en cas de conflit) ; sinon réponds normalement.\n\nPRÉFÉRENCES DURABLES : si l'utilisateur demande un réglage permanent (format d'affichage, couleur...) — ex: \"présente mes fiches comme ça à chaque fois\", \"change la couleur du chat\" — appelle TOUJOURS l'action de sauvegarde dédiée (set_contact_presentation_style, set_location_presentation_style, set_chat_theme, enable_contact_links...), pas seulement une reformulation ponctuelle, sinon la préférence est perdue au message suivant.\n\nActions disponibles :\n• call{target}\n• send_sms{to,message} | read_sms{count} (1=dernier) | search_sms{query} (contenu+expéditeur)\n• search_contact{name} (carnet natif, inclut libellés 🏷️ créés dans l'appli Contacts), list_contact_labels, list_contacts_by_label{label} — distinct des catégories Contacts JARVIS (save_contact_profile, plus bas)\n• Musique : play_music{query}, pause_music, stop_music, set_volume{level}\n• Agenda : today_events{calendar?}, upcoming_events{days,calendar?}, week_events{offset,calendar?} (offset=0/-1/1... TOUJOURS utiliser pour \"semaine dernière/prochaine\", ne jamais calculer de dates toi-même), create_event{title,date?,time?,durationMinutes?,description?,location?,calendar?} (date en langage naturel: \"demain\",\"lundi\",\"JJ/MM\"... ; time: \"14h30\" ; jamais d'epoch, CalendarController calcule), search_event{query,calendar?}, update_event{eventId,newTitle?,newDate?,newTime?,newDurationMinutes?}, delete_event{eventId}, list_calendars, name_calendar{calendar,nickname} (calendar=ID/nom/compte), reset_calendar_nicknames, sync_calendar{calendar,enable} (active/désactive sync+visibilité d'un calendrier). Cherche l'ID via search_event/today_events avant modif/suppr. Si plusieurs calendriers mélangés, propose name_calendar puis filtre avec calendar.\n• Clients (depuis l'agenda) : create_client_from_event{eventId,name?}, add_client_visit{name,note}, export_clients_kml{category?}\n• Emails : read_emails, send_email{to,subject,body}, search_email{query}, read_email_content{index}\n• Fichiers : list_files{path}, search_files{query}, read_file{path}, write_file{path,content}, rename_file{oldPath,newName}, copy_file{source,dest}, move_file{source,dest}, delete_file{path}, create_folder{path}, storage_info\n• get_location | open_maps{query} (itinéraire uniquement) | web_search{query} (horaires/avis/infos pratiques, jamais open_maps pour ça)\n• get_notifications\n• GitHub : github_list_repos{account?}, github_list_contents{owner,repo,path?,branch?,account?} (path vide=racine), github_create_repo{name,description?,private?,account?}, github_create_file{owner,repo,path,content,message,branch?,account?} (crée ou modifie), github_delete_file{owner,repo,path,message?,branch?,account?}, github_delete_folder{owner,repo,path,message?,branch?,account?} (récursif, IRRÉVERSIBLE, confirme avant), github_delete_repo{owner,repo,account?} (IRRÉVERSIBLE, confirme avant), github_read_file{owner,repo,path,branch?,account?}, github_create_branch{owner,repo,newBranch,fromBranch?,account?}, github_create_pr{owner,repo,title,head,base?,body?,account?}. account (optionnel sur tous github_*) = compte à utiliser, vide=défaut. github_list_accounts, github_add_account{label,token} (token créé par l'utilisateur sur github.com, jamais inventé), github_remove_account{label}, github_set_default_account{label}. github_test_access{owner?,repo?,account?} : diagnostic réel de permissions — à utiliser SYSTÉMATIQUEMENT si GitHub \"ne marche pas\" avant de deviner une cause. Plusieurs fichiers = plusieurs blocs JARVIS_CMD. Échappe \\n et \\\" dans content.\n• Contacts JARVIS (notes Obsidian, distinct du carnet natif) : save_contact_profile{name,category,nickname?,phone?,phonePro?,email?,address?,addressPro?,birthday?,company?,position?,latitude?,longitude?,installDate?,notes?} (category: travail/personnel/famille/client/autre, plusieurs possibles séparées par virgule ex \"famille, travail\" ; omets ce champ pour NE PAS toucher la catégorie déjà enregistrée lors d'une simple mise à jour d'un autre champ ; phone/email/address/birthday = perso, phonePro/addressPro/company/position = pro). Dès que l'utilisateur donne UNE info sur une personne, appelle IMMÉDIATEMENT avec TOUS les champs déjà connus (fusionne avec la fiche existante sans écraser). Ne demande jamais confirmation avant d'enregistrer. Dans notes, reproduis exactement les emojis/mise en forme demandés (la règle \"jamais de markdown\" ne s'applique qu'à ta réponse parlée). search_contact_profile{query,format_hint?}, list_contacts_by_category{category,format_hint?} (format_hint seulement pour une demande ponctuelle différente, sinon utilise set_contact_presentation_style pour du permanent), delete_contact_profile{name}, navigate_to_contact{name}, attach_contact_file{name} (attache la dernière pièce jointe envoyée dans CE chat), set_contact_presentation_style{style}, reset_contact_presentation_style. Liens cliquables tél/email dans les fiches : désactivés par défaut, enable_contact_links / disable_contact_links seulement si demandé explicitement. Adresses postales : toujours cliquables si précédées de 🏠 (ex: \"🏠 12 rue de la Paix, 75002 Paris\") — prends cette habitude à chaque adresse complète donnée, pas seulement dans les fiches.\n• Notes Obsidian (vault réel de l'utilisateur, distinct des fiches contacts) : obsidian_status, obsidian_search{query}, obsidian_list{folder?}, obsidian_reset_path, obsidian_wipe (IRRÉVERSIBLE, confirme avant), obsidian_create_note{title,content,folder?} (sans folder → Notes Rapides), obsidian_create_folder{path}, obsidian_daily_note{content?}, obsidian_append{query,text}, obsidian_read{query} (contenu complet, contrairement à obsidian_search), obsidian_delete_note{query} (confirme avant), obsidian_move_file{query,folder} (dossier de destination créé automatiquement si absent). Utilise TOUJOURS ces actions plutôt que de dire que tu ne peux pas créer de note — c'est une capacité réelle. Important : dans content/notes, reproduis EXACTEMENT ce que l'utilisateur a demandé (emojis, tirets, listes, ordre des infos) — la règle \"jamais de markdown\" plus haut ne s'applique qu'à ta réponse parlée, jamais à ces paramètres, qui sont enregistrés tels quels dans le fichier.\n• generate_image{prompt,count?} : prompt en anglais, détaillé (plusieurs phrases, pas 2-3 mots), enrichi selon le style (coloriage→\"black and white line art, coloring book\" ; cartoon→\"cartoon style, vector\" ; photo→\"photorealistic, sharp focus, 8k\" ; peinture→\"digital painting\" ; abstrait→\"abstract art, bold shapes\"). count (2-20) génère plusieurs images en arrière-plan (visibles dans l'onglet 🎨 Génération). Cascade auto (Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué, puis AI Horde gratuit/sans clé en dernier recours — plus lent car file d'attente anonyme) — en cas d'échec total, relaie fidèlement le détail réel de chaque échec.\n• generate_video{prompt,duration?} : arrière-plan, audio synchronisé, jeton Replicate requis. duration 2-15s (défaut 5, déduis de la demande). Prévenir que ça prend plusieurs minutes, notification à la fin.\n• generate_website{description,images?} : arrière-plan, VRAI site multi-pages (accueil + 3-5 pages, CSS partagé, animations scroll, menu mobile), vraies images (photos déjà envoyées, chemins dans images, + généré par IA pour le reste). Dossier dans Documents/JARVIS-Sites/. Prévenir du délai et de la notification finale. edit_website{instructions,path?} (modifie une page, défaut = accueil du dernier site — seul le contenu change, pas besoin de renvoyer le HTML complet). publish_website_github{repo?,account?,private?,path?} (GitHub Pages, gratuit, réutilise le jeton GitHub existant, renvoie l'URL publique https://<compte>.github.io/<repo>/).\n• Fichiers bureautiques réels (Documents/JARVIS-Fichiers, ouvrables immédiatement) : create_pdf{title,content,name?,images?}, create_docx{title,content,name?,images?} (content=texte, \\n par paragraphe ; images=chemins EXACTS déjà existants, jamais inventés — pour des images déjà générées, passe D'ABORD par list_generations{type:\"image\"} pour récupérer les chemins exacts), create_xlsx{title,data,name?} (data: \"En-tête1;En-tête2\\nligne1;val1\", 1ère ligne=en-têtes), create_zip{paths,name?} (chemins complets déjà existants, obtenus via list_files/search_files). open_file{path?,type?} (sans path, retrouve automatiquement le dernier fichier du type demandé dans l'historique réel — jamais dire que tu ne t'en souviens pas ; si le type est ambigu, appelle d'abord list_generations{type?,count?} pour voir ce qui a été créé récemment). print_file{path?,type?,printer?} (impression IPP directe) — si aucune imprimante configurée : list_printers puis set_default_printer{ip}. print_test_page{printer?} (TOUJOURS pour \"imprime une page de test\", jamais print_file qui a besoin d'un fichier réel). set_printer_remote_host{host} (bascule auto hors Wi-Fi local si l'utilisateur a fait la redirection de port).\n• create_chart{type,title,data} : image de graphique affichée dans le chat. type: bar/line/pie. data=\"étiquette;valeur\" par ligne — valeurs réelles connues ou données par l'utilisateur, jamais inventées.\n• set_chat_theme{target,color} (target: fond/bulle_utilisateur/bulle_jarvis ; color: nom FR courant ou #RRGGBB), reset_chat_theme\n• test_api_keys : teste réellement (appel HTTP) chaque clé configurée et dit laquelle échoue et pourquoi. À utiliser si une génération échoue de façon répétée et inexpliquée, avant de supposer un bug.\n• Home Assistant (si configuré) : ha_status{filter?,domain?} (domain à TOUJOURS préciser si la demande est ciblée, ex: domain=\"person\",filter=\"Marie\" pour n'avoir QUE sa localisation, pas d'autres capteurs du même prénom ; laisse vide seulement pour une demande générale ; adresse géocodée incluse automatiquement pour domain=\"person\" quand disponible — relaie-la toujours ; set_location_presentation_style{style}/reset_location_presentation_style{} pour une préférence permanente d'affichage), ha_turn_on{device}, ha_turn_off{device}, ha_toggle{device}, ha_rename{device,newName}, ha_delete{device} (confirme avant), ha_rescan, ha_set{device,brightness?,color?,temperature?,volume?,position?,speed?,hvacMode?,presetMode?,fanMode?,option?,value?,command?,source?} (n'envoie que les params pertinents au type d'appareil — climate/poêle: hvacMode/presetMode/fanMode ; select: option ; number: value ; remote (télé): command ex \"KEY_VOLUP\" ; media_player: source ex \"Netflix\"), ha_call_service{domain,service,device?,data?} (contrôle total pour tout ce que ha_set ne couvre pas). Automatisations : ha_list_automations, ha_create_automation{id?,config} (config au format HA: alias/trigger/condition?/action), ha_delete_automation{id}, ha_trigger_automation{device}. Ne peut pas installer d'intégration ni éditer le YAML brut, dis-le honnêtement si demandé. Accès distant (URL HA configurée dans ⚙) : tout ha_* fonctionne aussi hors réseau local automatiquement.\n• ha_browse_media{device,path?,mediaType?} (media_player HA, navigation lecture seule)\n• Réseau local (sans Home Assistant) : network_scan (à lancer d'abord pour qu'un appareil soit connu), wake_on_lan{device?,mac?}, network_ping{device}, network_open_web{device} (dis clairement si pas d'interface web détectée plutôt que d'inventer une URL). set_remote_access{device,host} (adresse distante/DDNS pour un appareil déjà scanné — nécessite une redirection de port faite par l'utilisateur sur sa box, JARVIS ne peut pas la créer lui-même, explique-le si besoin) ; network_ping/network_open_web/wake_on_lan basculent dessus automatiquement si le local ne répond plus.\n• Partage réseau SMB (Freebox ou tout NAS/PC partagé) : smb_configure{host,username?,password?} (compte SMB créé côté serveur, PAS l'identifiant Freebox Connect), smb_list_files{share,path?}, smb_download_file{share,path} (fichier ensuite utilisable comme un fichier local). Client SMB générique = accès aux FICHIERS seulement, pas aux réglages internes de la box.\n• Freebox OS (accès complet lecture/écriture, si configurée dans ⚙ Domotique) : freebox_status, freebox_devices{filter?}, freebox_wifi_status, freebox_wifi_set{enable} (Wi-Fi de la Freebox, pas du téléphone), freebox_home_devices{filter?}, freebox_home_set{device,on?,value?}. API propriétaire distincte du SMB générique ci-dessus — contrôle réellement la box et sa domotique.\n• Hébergement d'un site généré (voir generate_website) : publish_website_github{repo?,account?,private?,path?} (GitHub Pages, permanent, gratuit, recommandé par défaut) OU hébergement local, plus fragile mais autonome : start_local_web_server{path?,port?} (défaut: dernier site généré, port 8080), stop_local_web_server, local_web_server_status, duckdns_status/duckdns_update (compte DuckDNS gratuit configuré par l'utilisateur dans ⚙, jamais par toi), port_forward_freebox{wanPort?,lanPort?,comment?} / remove_port_forward_freebox{wanPort?} (nécessite la Freebox déjà configurée). Précise toujours que l'hébergement local dépend du téléphone (allumé, connecté, batterie), contrairement à GitHub Pages qui reste en ligne en permanence.\n• IMPORTANT : le Wi-Fi/Bluetooth du TÉLÉPHONE ne peuvent pas être coupés silencieusement (restriction Android 10+/13+) — enable_wifi/disable_wifi/enable_bluetooth/disable_bluetooth ouvrent le panneau système, dis-le honnêtement si on demande une coupure invisible.\n• Bluetooth : bluetooth_info, enable_bluetooth, disable_bluetooth | Wi-Fi : wifi_info, enable_wifi, disable_wifi\n• Lampe torche : flashlight_on, flashlight_off (direct et immédiat, aucun panneau). Réveils : set_alarm{hour,minute,message?,daysOfWeek?} (hour 0-23, minute 0-59 ; daysOfWeek optionnel = tableau d'entiers 1=dimanche à 7=samedi pour un réveil répété ; déduis toujours hour/minute de l'heure ACTUELLE réelle pour une demande relative comme \"dans 2h\", ne calcule jamais un jour toi-même), show_alarms (SEUL moyen de désactiver un réveil — Android n'expose aucune API pour ça, dis-le honnêtement au lieu de prétendre l'avoir désactivé). Itinéraire GPS : open_maps{query} (jamais web_search pour ça).\n\nExemple : \"J'appelle Maman tout de suite. [JARVIS_CMD:{\"action\":\"call\",\"target\":\"Maman\"}]\""
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -36,13 +36,49 @@ object ApiClient {
     private fun trimHistory(history: List<HistoryEntry>): List<HistoryEntry> =
         if (history.size <= MAX_HISTORY_MESSAGES) history else history.takeLast(MAX_HISTORY_MESSAGES)
 
+    // Prompt système utilisé UNIQUEMENT pour le second appel IA de reformulation
+    // (summarizeNaturally, ci-dessous) — volontairement minuscule (~40 tokens) au lieu
+    // du catalogue complet d'actions SYSTEM_PROMPT (~2900 tokens) : cette reformulation
+    // n'a besoin de connaître AUCUNE action JARVIS_CMD, juste de reformuler un texte déjà
+    // obtenu. Économise environ la moitié des tokens consommés sur chaque question
+    // "informationnelle" (agenda, SMS, contacts, domotique...), qui représentent la
+    // majorité des échanges avec un assistant vocal.
+    private const val SUMMARY_SYSTEM_PROMPT =
+        "Tu reformules un texte déjà obtenu en réponse orale naturelle et concise, en français, sans markdown. " +
+            "Règle absolue : ne change, n'ajoute, ne devine et n'omets aucun fait — reprends noms, dates, heures, " +
+            "numéros, adresses et montants strictement à l'identique du texte fourni."
+
     suspend fun sendChat(context: Context, fullHistory: List<HistoryEntry>): ChatResult =
         withContext(Dispatchers.IO) {
             val provider = Prefs.getProvider(context)
             val history = trimHistory(fullHistory)
 
+            // Obsidian en premier plan : la récupération du vault ne doit PAS dépendre
+            // uniquement du bon vouloir du modèle à émettre lui-même obsidian_search (certains
+            // fournisseurs/modèles moins "agentiques" ne le font jamais, même quand le system
+            // prompt le leur demande) — on fait donc une recherche automatique, systématique,
+            // AVANT l'appel IA, et on injecte ce qui est trouvé directement dans le system
+            // prompt de CETTE requête. Le modèle n'a alors plus qu'à LIRE le contexte fourni
+            // au lieu de devoir décider d'appeler un outil, ce qui est bien plus fiable, et ça
+            // fonctionne dès le tout premier message d'une conversation qui vient de démarrer.
+            val lastUserMsg = history.lastOrNull { it.role == "user" }?.text ?: ""
+            val vaultContext = try {
+                ObsidianController.quickContextSearch(context, lastUserMsg)
+            } catch (_: Exception) {
+                null
+            }
+            val effectiveSystemPrompt = if (!vaultContext.isNullOrBlank()) {
+                SYSTEM_PROMPT + "\n\nCONTEXTE OBSIDIAN (extraits de notes du vault réel de l'utilisateur, " +
+                    "trouvés automatiquement à partir de son dernier message — utilise-les EN PRIORITÉ s'ils " +
+                    "répondent à sa question, ignore-les s'ils ne sont pas pertinents ; ce ne sont que des " +
+                    "extraits, appelle quand même obsidian_search{query} ou obsidian_list si tu as besoin de " +
+                    "voir une note en entier ou d'en chercher d'autres) :\n" + vaultContext
+            } else {
+                SYSTEM_PROMPT
+            }
+
             val rawResponse = try {
-                dispatchToProvider(context, provider, history)
+                dispatchToProvider(context, provider, history, effectiveSystemPrompt)
             } catch (e: Exception) {
                 "Connexion impossible. Vérifiez les paramètres dans ⚙. Détail : ${e.message}"
             }
@@ -50,11 +86,15 @@ object ApiClient {
             // Exécution automatique des commandes système si présentes dans la réponse
             val commandResult = JarvisCommandParser.parseAndExecute(context, rawResponse)
             val cleanText = JarvisCommandParser.cleanResponse(rawResponse)
-            val lastUserMsg = history.lastOrNull { it.role == "user" }?.text ?: ""
 
             when (commandResult) {
                 is JarvisCommandParser.CommandResult.Executed -> {
-                    val text = if (commandResult.isInformational) {
+                    val marker = listOf(JarvisCommandParser.CONTACT_FORMAT_MARKER, JarvisCommandParser.LOCATION_FORMAT_MARKER)
+                        .firstOrNull { commandResult.outputMessage.contains(it) }
+                    val text = if (marker != null) {
+                        val formatted = applyMarkerFormatting(context, provider, commandResult.outputMessage, marker)
+                        if (cleanText.isBlank()) formatted else "$cleanText\n\n$formatted"
+                    } else if (commandResult.isInformational) {
                         summarizeNaturally(context, provider, lastUserMsg, commandResult.outputMessage)
                     } else if (cleanText.isBlank()) {
                         commandResult.outputMessage
@@ -67,7 +107,12 @@ object ApiClient {
                     // Cas d'un projet à plusieurs fichiers / plusieurs actions d'un coup.
                     val combined = commandResult.results.joinToString("\n\n") { it.outputMessage }
                     val anyInformational = commandResult.results.any { it.isInformational }
-                    val text = if (anyInformational) {
+                    val combinedMarker = listOf(JarvisCommandParser.CONTACT_FORMAT_MARKER, JarvisCommandParser.LOCATION_FORMAT_MARKER)
+                        .firstOrNull { combined.contains(it) }
+                    val text = if (combinedMarker != null) {
+                        val formatted = applyMarkerFormatting(context, provider, combined, combinedMarker)
+                        if (cleanText.isBlank()) formatted else "$cleanText\n\n$formatted"
+                    } else if (anyInformational) {
                         summarizeNaturally(context, provider, lastUserMsg, combined)
                     } else if (cleanText.isBlank()) {
                         combined
@@ -102,7 +147,7 @@ object ApiClient {
 
         val summaryPrompt =
             "L'utilisateur a demandé : \"$userQuestion\"\n\n" +
-                "Voici le résultat EXACT et RÉEL obtenu depuis son téléphone/sa Freebox/ses comptes (ne le montre " +
+                "Voici le résultat EXACT et RÉEL obtenu depuis son téléphone/son réseau/ses comptes (ne le montre " +
                 "jamais tel quel avec son formatage brut) :\n" +
                 "$rawOutput\n\n" +
                 "Reformule ce résultat en réponse naturelle et orale, MAIS règle absolue : ne change, n'ajoute, " +
@@ -117,7 +162,13 @@ object ApiClient {
                 "en forme markdown (pas d'astérisques, pas de tirets de liste, pas de dièses) : écris en " +
                 "prose naturelle comme à l'oral."
         return try {
-            val summary = dispatchToProvider(context, provider, listOf(HistoryEntry("user", summaryPrompt)))
+            // systemPrompt minimal (voir SUMMARY_SYSTEM_PROMPT) : cette reformulation n'a besoin
+            // d'aucune action JARVIS_CMD, donc pas besoin du catalogue complet SYSTEM_PROMPT —
+            // économise environ 2900 tokens à chaque question informationnelle.
+            val summary = dispatchToProvider(
+                context, provider, listOf(HistoryEntry("user", summaryPrompt)),
+                systemPrompt = SUMMARY_SYSTEM_PROMPT
+            )
             val cleaned = JarvisCommandParser.cleanResponse(summary).trim()
             if (cleaned.isBlank()) rawOutput else cleaned
         } catch (e: Exception) {
@@ -125,22 +176,112 @@ object ApiClient {
         }
     }
 
-    private suspend fun dispatchToProvider(context: Context, provider: Provider, history: List<HistoryEntry>): String {
-        return when {
-            provider.isAuto -> sendAuto(context, history)
-            provider.isLocal -> sendLocal(context, history)
-            provider == Provider.CLAUDE -> sendClaudeWithRotation(context, history)
-            provider == Provider.GEMINI -> sendGeminiWithRotation(context, history)
-            provider == Provider.SERPAPI -> sendSerpApiWithRotation(context, history)
-            else -> sendOpenAiWithRotation(context, history, provider)
+    /**
+     * Reformate un résultat structuré (fiche contact OU localisation d'une personne) selon la
+     * consigne détectée via un marqueur (JarvisCommandParser.CONTACT_FORMAT_MARKER ou
+     * LOCATION_FORMAT_MARKER, consigne persistée via set_contact_presentation_style /
+     * set_location_presentation_style et/ou demande ponctuelle format_hint) — c'est le SEUL
+     * point d'entrée qui peut réellement changer la présentation par défaut, puisque
+     * search_contact_profile/list_contacts_by_category/ha_status(person) ne passent pas par
+     * summarizeNaturally (qui produit une réponse orale sans mise en forme, incompatible avec
+     * une fiche visuelle en sections/emojis). Contrairement à summarizeNaturally, ce prompt
+     * autorise explicitement les retours à la ligne, sections et emojis. Factorisé en un seul
+     * endroit (au lieu d'une copie par type de donnée) pour ne pas dupliquer ce filet de
+     * sécurité anti-hallucination et la consigne "aucun champ vide" à deux endroits.
+     */
+    private suspend fun applyMarkerFormatting(context: Context, provider: Provider, rawWithInstruction: String, marker: String): String {
+        val idx = rawWithInstruction.indexOf(marker)
+        if (idx < 0) return rawWithInstruction
+        val data = rawWithInstruction.substring(0, idx).trim()
+        val instruction = rawWithInstruction.substring(idx + marker.length).trim()
+
+        // Même filet de sécurité que summarizeNaturally : une erreur/absence de résultat
+        // ne passe jamais par une reformulation IA qui pourrait inventer un succès.
+        if (data.startsWith("❌") || data.contains("Aucun contact trouvé") || data.contains("aucun résultat") ||
+            data.contains("Aucun appareil Home Assistant")
+        ) {
+            return data
         }
+
+        val prompt =
+            "Voici un résultat (fiche contact, liste de fiches, ou localisation), avec des données EXACTES " +
+                "et RÉELLES extraites de l'application :\n\n$data\n\n" +
+                "Consigne(s) de présentation à appliquer : $instruction\n\n" +
+                "Réécris ce résultat en respectant ces consignes. Règle absolue : ne change, n'ajoute, " +
+                "ne devine et n'omets AUCUNE donnée (noms, numéros, adresses, dates, notes, historique, " +
+                "coordonnées restent strictement identiques à ceux fournis ci-dessus) — seule la FORME peut " +
+                "changer (ordre, libellés, structure en sections, tableau texte...), jamais le fond. " +
+                "Règle absolue supplémentaire (TOUJOURS active, même si la consigne ci-dessus n'en parle pas) : " +
+                "si un champ n'a PAS de valeur dans les données ci-dessus (absent, vide, null), NE L'AFFICHE " +
+                "PAS DU TOUT — ni le libellé, ni un texte de substitution type \"non renseigné\"/\"inconnu\" : " +
+                "un champ vide doit être totalement invisible dans le résultat final, pas juste vidé de son " +
+                "contenu. Règle absolue supplémentaire (TOUJOURS active par défaut) : CONSERVE les emojis déjà " +
+                "présents dans les données ci-dessus (📞🏠📧🎂🏢 etc., un par type d'info) — ne les retire QUE " +
+                "si la consigne de l'utilisateur demande explicitement un format sans emoji (ex: \"sans " +
+                "emojis\", \"texte simple\", \"format sobre\"). Dans tous les autres cas, y compris un format " +
+                "en tableau, GARDE un emoji par ligne/catégorie pour l'identifier visuellement. Tu PEUX utiliser " +
+                "des retours à la ligne et une structure visuelle : ceci est affiché dans un chat, pas une " +
+                "phrase à prononcer à l'oral. Ne mentionne jamais de commande système, de terme technique ni " +
+                "la consigne elle-même — donne directement le résultat final tel qu'il doit apparaître à l'écran."
+        return try {
+            val response = dispatchToProvider(
+                context, provider, listOf(HistoryEntry("user", prompt)),
+                systemPrompt = "Tu mets en forme un résultat (fiche contact ou localisation) selon une consigne de présentation donnée, sans jamais altérer ni omettre les données fournies, et sans jamais afficher un champ vide."
+            )
+            val cleaned = JarvisCommandParser.cleanResponse(response).trim()
+            if (cleaned.isBlank()) data else cleaned
+        } catch (e: Exception) {
+            data // repli sur les données brutes (sans la consigne) si la reformulation échoue
+        }
+    }
+
+    private suspend fun dispatchToProvider(context: Context, provider: Provider, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
+        val grounded = withCurrentDateTime(systemPrompt)
+        return when {
+            provider.isAuto -> sendAuto(context, history, grounded)
+            provider.isLocal -> sendLocal(context, history, grounded)
+            provider == Provider.CLAUDE -> sendClaudeWithRotation(context, history, grounded)
+            provider == Provider.GEMINI -> sendGeminiWithRotation(context, history, grounded)
+            provider == Provider.SERPAPI -> sendSerpApiWithRotation(context, history)
+            else -> sendOpenAiWithRotation(context, history, provider, grounded)
+        }
+    }
+
+    /**
+     * Préfixe [prompt] avec la date et l'heure RÉELLES actuelles de l'appareil — demandé
+     * explicitement par l'utilisateur pour que JARVIS "sache exactement la date et l'heure
+     * actuelle" et comprenne correctement "demain", "hier", "ce week-end", etc. dans ses
+     * réponses. Calculé à CHAQUE requête (impossible à figer dans SYSTEM_PROMPT, qui est un
+     * `const val` — une constante Kotlin ne peut PAS contenir de valeur dynamique), donc
+     * toujours à jour, y compris après minuit sans redémarrer l'app. Point d'entrée UNIQUE
+     * (dispatchToProvider) : s'applique à TOUTES les requêtes, y compris la reformulation
+     * légère et le formatage de fiches contact, pas seulement le chat principal.
+     *
+     * Ceci ne remplace PAS le calcul de date déjà fait côté Kotlin pour create_event/
+     * getEventsForWeek (voir CalendarController.resolveDate) — ce calcul reste la source de
+     * vérité pour la logique métier, cette grounding sert uniquement à ce que le TEXTE généré
+     * par le modèle (ex: une confirmation orale) référence la bonne date.
+     */
+    private fun withCurrentDateTime(prompt: String): String {
+        val sdf = java.text.SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", java.util.Locale.FRENCH)
+        val now = sdf.format(java.util.Date())
+        return "Date et heure actuelles (réelles, celles de l'appareil de l'utilisateur EN CE MOMENT) : $now. " +
+            "Base-toi TOUJOURS sur cette date/heure exacte pour comprendre \"aujourd'hui\", \"demain\", \"hier\", " +
+            "\"ce week-end\", \"dans 3 jours\", etc. — ne devine ni n'invente jamais une autre date.\n\n$prompt"
     }
 
     // ─── Mode Automatique avec multi-clés + sélection intelligente ────────────
 
-    private fun sendAuto(context: Context, history: List<HistoryEntry>): String {
+    private fun sendAuto(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
+        // Un fournisseur est candidat s'il a au moins une clé configurée, OU s'il ne nécessite
+        // aucune clé (ex: POLLINATIONS, filet de secours gratuit/anonyme placé en dernier dans
+        // AUTO_FALLBACK_ORDER) — avant ce correctif, needsApiKey=false n'était vérifié nulle part
+        // ici, donc un fournisseur sans clé n'apparaissait JAMAIS dans les candidats malgré sa
+        // présence dans l'ordre de repli, et le mode Automatique échouait immédiatement si
+        // l'utilisateur n'avait configuré aucune clé — alors qu'un vrai filet de secours gratuit
+        // existe désormais et devrait toujours être tenté en dernier recours.
         val candidates = Provider.AUTO_FALLBACK_ORDER.filter {
-            Prefs.getApiKeysFor(context, it).isNotEmpty()
+            !it.needsApiKey || Prefs.getApiKeysFor(context, it).isNotEmpty()
         }
 
         if (candidates.isEmpty()) {
@@ -157,18 +298,30 @@ object ApiClient {
         for (provider in orderedCandidates) {
             val result = try {
                 when (provider) {
-                    Provider.CLAUDE -> sendClaudeWithRotation(context, history)
-                    Provider.GEMINI -> sendGeminiWithRotation(context, history)
-                    else -> sendOpenAiWithRotation(context, history, provider)
+                    Provider.CLAUDE -> sendClaudeWithRotation(context, history, systemPrompt)
+                    Provider.GEMINI -> sendGeminiWithRotation(context, history, systemPrompt)
+                    else -> sendOpenAiWithRotation(context, history, provider, systemPrompt)
                 }
             } catch (e: Exception) {
                 "Erreur : ${e.message}"
             }
 
+            // BUG RÉEL CORRIGÉ : sendClaudeWithRotation/sendGeminiWithRotation renvoient leurs
+            // propres messages d'échec final ("Toutes les clés API X ont échoué...", "Aucune
+            // clé API X configurée.") qui NE COMMENÇAIENT PAR AUCUN des préfixes reconnus
+            // ci-dessous — le mode Automatique les traitait donc comme une VRAIE réponse de
+            // l'IA et s'arrêtait là, sans jamais essayer les fournisseurs suivants (OpenAI,
+            // Mistral... jusqu'à Pollinations en dernier recours). Cas réel observé : toutes
+            // les clés Gemini en quota dépassé (429) → l'utilisateur voyait littéralement
+            // "Toutes les clés API Gemini ont échoué" affiché comme réponse de JARVIS, alors
+            // que d'autres fournisseurs configurés (voire le filet de secours gratuit) auraient
+            // pu répondre à sa place.
             if (!result.startsWith("Erreur") &&
                 !result.startsWith("Connexion impossible") &&
                 !result.startsWith("Format de réponse inattendu") &&
-                !result.startsWith("Clé API")
+                !result.startsWith("Clé API") &&
+                !result.startsWith("Toutes les clés") &&
+                !result.startsWith("Aucune clé API")
             ) {
                 return result
             }
@@ -187,8 +340,11 @@ object ApiClient {
     private fun rankProvidersForRequest(candidates: List<Provider>, lastUserEntry: HistoryEntry?): List<Provider> {
         if (lastUserEntry == null) return candidates
 
-        // Une photo jointe exige un fournisseur capable de vision.
-        if (lastUserEntry.imageBase64 != null) {
+        // Une photo jointe (directe, ou n'importe laquelle des pièces jointes — ex: une image
+        // qui n'est pas la première du lot, ou une page de PDF rendue en image) exige un
+        // fournisseur capable de vision.
+        val hasAnyImage = lastUserEntry.imageBase64 != null || lastUserEntry.attachments.any { it.imageBase64 != null }
+        if (hasAnyImage) {
             val visionCapable = listOf(Provider.CLAUDE, Provider.OPENAI, Provider.GEMINI)
             val preferred = candidates.filter { it in visionCapable }
             if (preferred.isNotEmpty()) {
@@ -224,22 +380,25 @@ object ApiClient {
 
     // ─── Modèle local sur l'appareil ──────────────────────────────────────────
 
-    private suspend fun sendLocal(context: Context, history: List<HistoryEntry>): String {
+    private suspend fun sendLocal(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val modelPath = Prefs.getLocalModelPath(context)
         if (modelPath.isBlank()) {
             return "Aucun modèle local configuré. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
         }
-        val prompt = buildPromptFromHistory(history)
+        val prompt = buildPromptFromHistory(history, systemPrompt)
         return LocalLlmManager.generate(context, modelPath, prompt)
     }
 
-    private fun buildPromptFromHistory(history: List<HistoryEntry>): String {
+    private fun buildPromptFromHistory(history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val recent = history.takeLast(8)
-        val sb = StringBuilder(SYSTEM_PROMPT).append("\n\n")
+        val sb = StringBuilder(systemPrompt).append("\n\n")
         for (entry in recent) {
             val label = if (entry.role == "user") "Utilisateur" else "JARVIS"
-            val suffix = if (entry.imageBase64 != null) " [photo jointe]" else ""
-            sb.append(label).append(": ").append(entry.text).append(suffix).append("\n")
+            // Le modèle local n'a pas de vision : une image jointe est juste signalée en texte,
+            // mais le texte extrait d'un document (DOCX/TXT/ZIP...) fonctionne, lui, sans vision.
+            val hasImage = entry.imageBase64 != null || entry.attachments.any { it.imageBase64 != null }
+            val suffix = if (hasImage) " [photo jointe — non visible par ce modèle local, pas de vision]" else ""
+            sb.append(label).append(": ").append(textWithAttachments(entry)).append(suffix).append("\n")
         }
         sb.append("JARVIS: ")
         return sb.toString()
@@ -250,7 +409,8 @@ object ApiClient {
     private fun sendOpenAiWithRotation(
         context: Context,
         history: List<HistoryEntry>,
-        provider: Provider
+        provider: Provider,
+        systemPrompt: String = SYSTEM_PROMPT
     ): String {
         val keys = Prefs.getApiKeysFor(context, provider)
         val baseUrl = if (!provider.isAuto && !provider.isLocal && provider != Provider.CUSTOM) provider.defaultBaseUrl else Prefs.getBaseUrl(context)
@@ -265,7 +425,7 @@ object ApiClient {
 
         for (attempt in 0 until maxAttempts) {
             val apiKey = if (keys.isNotEmpty()) Prefs.getNextApiKey(context, provider) else ""
-            val result = sendOpenAiCompatible(baseUrl, model, apiKey, history, provider)
+            val result = sendOpenAiCompatible(baseUrl, model, apiKey, history, provider, systemPrompt)
 
             if (!result.startsWith("Erreur API (429)") && !result.startsWith("Erreur API (401)")) {
                 return result
@@ -278,28 +438,50 @@ object ApiClient {
         return lastErr
     }
 
+    // ─── Pièces jointes multiples : helpers partagés par tous les fournisseurs ─────────────
+    // entry.attachments (voir Attachment.kt) est la source de vérité pour les messages RÉCENTS
+    // (plusieurs fichiers, pages de PDF...) ; entry.imageBase64/imageMime restent le repli pour
+    // les anciens appels qui ne remplissent que ces champs (ex: mode vocal, réponse assistant).
+
+    /** Toutes les images exploitables en "vision" d'une entrée — base64 + mime. */
+    private fun collectImageParts(entry: HistoryEntry): List<Pair<String, String>> {
+        if (entry.attachments.isNotEmpty()) {
+            return entry.attachments.mapNotNull { a -> a.imageBase64?.let { it to (a.imageMime ?: "image/jpeg") } }
+        }
+        return entry.imageBase64?.let { listOf(it to (entry.imageMime ?: "image/jpeg")) } ?: emptyList()
+    }
+
+    /** Texte du message + tout texte extrait des pièces jointes (DOCX/TXT/ZIP...), pour un envoi universel (fonctionne sans vision). */
+    private fun textWithAttachments(entry: HistoryEntry): String {
+        val texts = entry.attachments.mapNotNull { it.extractedText }.filter { it.isNotBlank() }
+        if (texts.isEmpty()) return entry.text
+        return entry.text + "\n\n" + texts.joinToString("\n\n") { "[Contenu d'un fichier joint]\n$it" }
+    }
+
     private fun sendOpenAiCompatible(
         baseUrl: String,
         model: String,
         apiKey: String,
         history: List<HistoryEntry>,
-        provider: Provider
+        provider: Provider,
+        systemPrompt: String = SYSTEM_PROMPT
     ): String {
         val messagesArray = JSONArray()
-        messagesArray.put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
+        messagesArray.put(JSONObject().put("role", "system").put("content", systemPrompt))
         for (entry in history) {
-            if (entry.imageBase64 != null) {
+            val images = collectImageParts(entry)
+            val textContent = textWithAttachments(entry)
+            if (images.isNotEmpty()) {
                 val contentArray = JSONArray()
-                contentArray.put(JSONObject().put("type", "text").put("text", entry.text))
-                contentArray.put(
-                    JSONObject().put("type", "image_url").put(
-                        "image_url",
-                        JSONObject().put("url", "data:${entry.imageMime ?: "image/jpeg"};base64,${entry.imageBase64}")
+                contentArray.put(JSONObject().put("type", "text").put("text", textContent))
+                images.forEach { (b64, mime) ->
+                    contentArray.put(
+                        JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:$mime;base64,$b64"))
                     )
-                )
+                }
                 messagesArray.put(JSONObject().put("role", entry.role).put("content", contentArray))
             } else {
-                messagesArray.put(JSONObject().put("role", entry.role).put("content", entry.text))
+                messagesArray.put(JSONObject().put("role", entry.role).put("content", textContent))
             }
         }
 
@@ -338,28 +520,52 @@ object ApiClient {
 
     // ─── Claude (Anthropic) avec rotation ──────────────────────────────────────
 
-    private fun sendClaudeWithRotation(context: Context, history: List<HistoryEntry>): String {
+    private fun sendClaudeWithRotation(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val keys = Prefs.getApiKeysFor(context, Provider.CLAUDE)
         if (keys.isEmpty()) return "Aucune clé API Claude configurée."
 
         for (apiKey in keys) {
-            val res = sendClaude(Provider.CLAUDE.defaultBaseUrl, Provider.CLAUDE.defaultModel, apiKey, history)
+            val res = sendClaude(Provider.CLAUDE.defaultBaseUrl, Provider.CLAUDE.defaultModel, apiKey, history, systemPrompt)
             if (!res.startsWith("Erreur API Claude (429)") && !res.startsWith("Erreur API Claude (401)")) return res
             Prefs.markKeyFailed(context, Provider.CLAUDE, apiKey)
         }
         return "Toutes les clés API Claude ont échoué."
     }
 
-    private fun sendClaude(baseUrl: String, model: String, apiKey: String, history: List<HistoryEntry>): String {
+    private fun sendClaude(baseUrl: String, model: String, apiKey: String, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val messagesArray = JSONArray()
+        // BUG RÉEL CORRIGÉ : cette fonction ignorait complètement les images jointes (seul le
+        // texte était envoyé), alors que rankProvidersForRequest priorise pourtant Claude comme
+        // fournisseur "vision" dès qu'une image est attachée — l'IA répondait donc à côté sans
+        // jamais voir l'image. Format Claude : blocs "image" (base64) + "text" dans le content.
         for (entry in history) {
-            messagesArray.put(JSONObject().put("role", entry.role).put("content", entry.text))
+            val images = collectImageParts(entry)
+            val textContent = textWithAttachments(entry)
+            if (images.isNotEmpty()) {
+                val contentArray = JSONArray()
+                images.forEach { (b64, mime) ->
+                    contentArray.put(
+                        JSONObject().put("type", "image").put(
+                            "source",
+                            JSONObject().put("type", "base64").put("media_type", mime).put("data", b64)
+                        )
+                    )
+                }
+                contentArray.put(JSONObject().put("type", "text").put("text", textContent))
+                messagesArray.put(JSONObject().put("role", entry.role).put("content", contentArray))
+            } else {
+                messagesArray.put(JSONObject().put("role", entry.role).put("content", textContent))
+            }
         }
 
         val body = JSONObject()
             .put("model", model)
-            .put("max_tokens", 1024)
-            .put("system", SYSTEM_PROMPT)
+            // 1024 était TROP BAS : une commande [JARVIS_CMD] avec plusieurs chemins de fichiers
+            // (ex: create_pdf{images:[...]} avec 5 images) + du texte d'accompagnement dépasse
+            // facilement ce budget, tronquant le JSON en plein milieu — cause réelle et vérifiée
+            // d'erreurs "Unterminated array"/JSON invalide qui cassaient l'action ENTIÈRE.
+            .put("max_tokens", 4096)
+            .put("system", systemPrompt)
             .put("messages", messagesArray)
             .toString()
             .toRequestBody(JSON)
@@ -386,32 +592,46 @@ object ApiClient {
 
     // ─── Google Gemini avec rotation ──────────────────────────────────────────
 
-    private fun sendGeminiWithRotation(context: Context, history: List<HistoryEntry>): String {
+    private fun sendGeminiWithRotation(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
         if (keys.isEmpty()) return "Aucune clé API Gemini configurée."
 
+        // Garde le détail RÉEL de la dernière erreur (ex: "429" quota dépassé) au lieu d'un
+        // message générique "toutes les clés ont échoué" qui masquait la vraie cause — corrigé
+        // suite à un cas réel où TOUTES les clés Gemini d'un utilisateur renvoyaient 429 à cause
+        // d'un modèle Preview au quota gratuit trop restrictif, sans qu'aucun message ne le
+        // dise explicitement.
+        var lastDetail = ""
         for (apiKey in keys) {
-            val res = sendGemini(Provider.GEMINI.defaultBaseUrl, apiKey, history)
+            val res = sendGemini(Provider.GEMINI.defaultBaseUrl, apiKey, history, systemPrompt)
             if (!res.startsWith("Erreur API Gemini (429)") && !res.startsWith("Erreur API Gemini (401)")) return res
+            lastDetail = res
             Prefs.markKeyFailed(context, Provider.GEMINI, apiKey)
         }
-        return "Toutes les clés API Gemini ont échoué."
+        return "Toutes les clés API Gemini ont échoué (${keys.size} clé(s) testée(s)) — dernière erreur : $lastDetail"
     }
 
-    private fun sendGemini(baseUrl: String, apiKey: String, history: List<HistoryEntry>): String {
+    private fun sendGemini(baseUrl: String, apiKey: String, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val separator = if (baseUrl.contains("?")) "&" else "?"
         val url = "$baseUrl${separator}key=$apiKey"
 
         val contentsArray = JSONArray()
+        // BUG RÉEL CORRIGÉ : comme pour Claude, cette fonction ignorait les images jointes
+        // malgré Gemini priorisé comme fournisseur "vision" — voir sendClaude ci-dessus pour
+        // le détail. Format Gemini : inlineData (base64) en plus de la part texte.
         for (entry in history) {
             val geminiRole = if (entry.role == "assistant") "model" else "user"
-            val partsArray = JSONArray().put(JSONObject().put("text", entry.text))
+            val images = collectImageParts(entry)
+            val partsArray = JSONArray().put(JSONObject().put("text", textWithAttachments(entry)))
+            images.forEach { (b64, mime) ->
+                partsArray.put(JSONObject().put("inlineData", JSONObject().put("mimeType", mime).put("data", b64)))
+            }
             contentsArray.put(JSONObject().put("role", geminiRole).put("parts", partsArray))
         }
 
         val body = JSONObject()
             .put("contents", contentsArray)
-            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM_PROMPT))))
+            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt))))
             .toString()
             .toRequestBody(JSON)
 

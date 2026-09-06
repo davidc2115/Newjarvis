@@ -47,15 +47,37 @@ class ConversationDatabase private constructor(context: Context) :
 
 object ConversationHistoryManager {
 
+    private fun attachmentToJson(a: Attachment): JSONObject = JSONObject()
+        .put("path", a.path)
+        .put("name", a.name)
+        .put("mimeType", a.mimeType)
+        .put("imageBase64", a.imageBase64 ?: JSONObject.NULL)
+        .put("imageMime", a.imageMime ?: JSONObject.NULL)
+        .put("extractedText", a.extractedText ?: JSONObject.NULL)
+
+    private fun attachmentFromJson(o: JSONObject): Attachment = Attachment(
+        path = o.optString("path", ""),
+        name = o.optString("name", ""),
+        mimeType = o.optString("mimeType", ""),
+        imageBase64 = if (o.isNull("imageBase64")) null else o.optString("imageBase64"),
+        imageMime = if (o.isNull("imageMime")) null else o.optString("imageMime"),
+        extractedText = if (o.isNull("extractedText")) null else o.optString("extractedText")
+    )
+
     private fun messagesToJson(messages: List<Message>): String {
         val arr = JSONArray()
         for (m in messages) {
+            val attachmentsArr = JSONArray()
+            m.attachments.forEach { attachmentsArr.put(attachmentToJson(it)) }
             arr.put(
                 JSONObject()
                     .put("text", m.text)
                     .put("isUser", m.isUser)
                     .put("imageBase64", m.imageBase64 ?: JSONObject.NULL)
                     .put("imageMimeType", m.imageMimeType ?: JSONObject.NULL)
+                    .put("attachmentPath", m.attachmentPath ?: JSONObject.NULL)
+                    .put("attachmentName", m.attachmentName ?: JSONObject.NULL)
+                    .put("attachments", attachmentsArr)
             )
         }
         return arr.toString()
@@ -67,12 +89,22 @@ object ConversationHistoryManager {
             val arr = JSONArray(json)
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
+                // "attachments" et "attachmentPath"/"attachmentName" sont absents des messages
+                // sauvegardés AVANT l'ajout du multi-pièces-jointes — optJSONArray/optString
+                // gèrent nativement cette absence (liste vide / null), aucune migration requise.
+                val attachmentsArr = o.optJSONArray("attachments")
+                val attachments = if (attachmentsArr != null) {
+                    (0 until attachmentsArr.length()).map { attachmentFromJson(attachmentsArr.getJSONObject(it)) }
+                } else emptyList()
                 result.add(
                     Message(
                         text = o.optString("text", ""),
                         isUser = o.optBoolean("isUser", false),
                         imageBase64 = if (o.isNull("imageBase64")) null else o.optString("imageBase64"),
-                        imageMimeType = if (o.isNull("imageMimeType")) null else o.optString("imageMimeType")
+                        imageMimeType = if (o.isNull("imageMimeType")) null else o.optString("imageMimeType"),
+                        attachmentPath = if (o.isNull("attachmentPath")) null else o.optString("attachmentPath"),
+                        attachmentName = if (o.isNull("attachmentName")) null else o.optString("attachmentName"),
+                        attachments = attachments
                     )
                 )
             }

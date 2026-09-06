@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Onglets inactifs de la barre de nav : invisible au repos, mais réagit au toucher
+     (ondulation) au lieu de rester totalement inerte comme avant — donne un vrai
+     retour visuel même sur un onglet non sélectionné. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/ripple_cyan">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</ripple>

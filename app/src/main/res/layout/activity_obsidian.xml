@@ -107,6 +107,25 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        <TextView
+            android:id="@+id/btnResetCalendarNicknames"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center"
+            android:text="📅 Effacer les surnoms de calendrier"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ℹ️ Les surnoms de calendrier (name_calendar) sont stockés séparément du vault Obsidian — vider le vault ci-dessus ne les efface pas, utilise ce bouton pour ça."
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp"
+            android:layout_marginBottom="20dp" />
+
         <!-- ══════════════════════════════════════════════════════════════════ -->
         <!-- SECTION : Créer une note                                          -->
         <!-- ══════════════════════════════════════════════════════════════════ -->

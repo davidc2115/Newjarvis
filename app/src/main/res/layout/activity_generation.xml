@@ -277,7 +277,7 @@
         </LinearLayout>
 
         <TextView
-            android:id="@+id/historyText"
+            android:id="@+id/historyEmptyText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@drawable/bg_input"
@@ -285,7 +285,15 @@
             android:text="Aucune génération pour l'instant."
             android:textColor="@color/text_primary"
             android:textSize="11sp"
-            android:lineSpacingExtra="2dp" />
+            android:visibility="gone" />
+
+        <!-- Galerie : rempli dynamiquement par GenerationActivity, une carte cliquable
+             par génération (image/vidéo/site), pour afficher ou modifier chaque élément. -->
+        <LinearLayout
+            android:id="@+id/historyContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
 
     </LinearLayout>
 </ScrollView>

@@ -1,6 +1,7 @@
 package com.jarvis.assistant
 
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +15,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSnapHelper
+import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -45,13 +49,14 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var downloadProgressText: TextView
 
 
-    private lateinit var styleOrbPulse: TextView
-    private lateinit var styleOrbNetwork: TextView
-    private val colorSwatchIds = listOf(
-        R.id.colorCyan, R.id.colorRed, R.id.colorBlue,
-        R.id.colorPurple, R.id.colorGold, R.id.colorGreen
+    private lateinit var colorCarousel: RecyclerView
+    private lateinit var orbStyleCarousel: RecyclerView
+    private lateinit var colorCarouselAdapter: ColorCarouselAdapter
+    private lateinit var orbStyleCarouselAdapter: OrbStyleCarouselAdapter
+    private val carouselColors = listOf(
+        Color.parseColor("#00E5FF"), Color.parseColor("#FF3B30"), Color.parseColor("#2979FF"),
+        Color.parseColor("#B388FF"), Color.parseColor("#FFC400"), Color.parseColor("#00E676")
     )
-    private lateinit var colorSwatches: List<View>
 
     private var selectedProvider: Provider = Provider.GROQ
     private var selectedAccentColor: Int = Prefs.DEFAULT_ACCENT_COLOR
@@ -70,6 +75,31 @@ class SettingsActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) importSdModelFile(uri)
+    }
+
+    // Cause réelle trouvée du bug "l'écoute permanente ne fonctionne pas" : le bouton
+    // ACTIVER se contentait de vérifier la permission micro et abandonnait avec un Toast
+    // si elle manquait, sans jamais afficher la popup de demande d'autorisation Android —
+    // seul le bouton micro du chat/mode vocal la déclenchait. Un utilisateur qui active
+    // l'écoute permanente en premier, avant d'avoir jamais utilisé le mode vocal manuel,
+    // ne pouvait donc JAMAIS l'activer tant qu'il n'allait pas cocher la permission dans
+    // les réglages système Android lui-même.
+    private val wakeWordMicPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startWakeWordServiceNow()
+        else {
+            Prefs.saveWakeWordEnabled(this, false)
+            Toast.makeText(this, "❌ Permission micro refusée — l'écoute permanente reste désactivée", Toast.LENGTH_LONG).show()
+        }
+        updateWakeWordButtonLabel(findViewById(R.id.toggleWakeWordButton))
+    }
+
+    private fun startWakeWordServiceNow() {
+        val serviceIntent = Intent(this, WakeWordService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+        else startService(serviceIntent)
+        Toast.makeText(this, "✅ Écoute permanente activée", Toast.LENGTH_SHORT).show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,14 +141,12 @@ class SettingsActivity : AppCompatActivity() {
         downloadProgressText  = findViewById(R.id.downloadProgressText)
 
 
-        styleOrbPulse         = findViewById(R.id.styleOrbPulse)
-        styleOrbNetwork       = findViewById(R.id.styleOrbNetwork)
-        colorSwatches         = colorSwatchIds.map { findViewById(it) }
+        colorCarousel         = findViewById(R.id.colorCarousel)
+        orbStyleCarousel      = findViewById(R.id.orbStyleCarousel)
 
         setupTabs()
         setupProviderSpinner()
-        setupColorSwatches()
-        setupOrbStyleSelector()
+        setupColorAndStyleCarousels()
         buildApiKeyFields()
         loadSavedValues()
         setupButtons()
@@ -251,6 +279,61 @@ class SettingsActivity : AppCompatActivity() {
         picovoiceKeyInput.setText(Prefs.getPicovoiceKey(this))
         updateWakeWordButtonLabel(toggleWakeWordButton)
 
+        // ── Accès SMB (voir SmbController) — demandé explicitement, absent des Paramètres
+        // jusqu'ici (seule la commande chat smb_configure existait pour le régler).
+        val smbHostInput     = findViewById<EditText>(R.id.smbHostInput)
+        val smbUsernameInput = findViewById<EditText>(R.id.smbUsernameInput)
+        val smbPasswordInput = findViewById<EditText>(R.id.smbPasswordInput)
+        val saveSmbButton    = findViewById<TextView>(R.id.saveSmbButton)
+
+        smbHostInput.setText(Prefs.getSmbHost(this))
+        smbUsernameInput.setText(Prefs.getSmbUsername(this))
+        smbPasswordInput.setText(Prefs.getSmbPassword(this))
+
+        saveSmbButton.setOnClickListener {
+            val message = SmbController.configure(
+                this,
+                smbHostInput.text.toString().trim(),
+                smbUsernameInput.text.toString().trim(),
+                smbPasswordInput.text.toString()
+            )
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        }
+
+        // ── Freebox OS (voir FreeboxController) — accès complet lecture/écriture,
+        // distinct du partage SMB ci-dessus qui ne donne accès qu'aux fichiers.
+        val freeboxHostInput     = findViewById<EditText>(R.id.freeboxHostInput)
+        val freeboxAppIdInput    = findViewById<EditText>(R.id.freeboxAppIdInput)
+        val freeboxAppTokenInput = findViewById<EditText>(R.id.freeboxAppTokenInput)
+        val saveFreeboxButton    = findViewById<TextView>(R.id.saveFreeboxButton)
+
+        freeboxHostInput.setText(Prefs.getFreeboxHost(this))
+        freeboxAppIdInput.setText(Prefs.getFreeboxAppId(this))
+        freeboxAppTokenInput.setText(Prefs.getFreeboxAppToken(this))
+
+        saveFreeboxButton.setOnClickListener {
+            val host = freeboxHostInput.text.toString().trim()
+            Prefs.saveFreeboxHost(this, if (host.isBlank()) "http://mafreebox.freebox.fr" else host)
+            Prefs.saveFreeboxAppId(this, freeboxAppIdInput.text.toString().trim())
+            Prefs.saveFreeboxAppToken(this, freeboxAppTokenInput.text.toString().trim())
+            Toast.makeText(this, "✅ Freebox enregistrée.", Toast.LENGTH_LONG).show()
+        }
+
+        // ── DuckDNS (voir DuckDnsController) — nom de domaine gratuit pour héberger
+        // un site JARVIS directement depuis ce téléphone.
+        val duckdnsDomainInput = findViewById<EditText>(R.id.duckdnsDomainInput)
+        val duckdnsTokenInput  = findViewById<EditText>(R.id.duckdnsTokenInput)
+        val saveDuckDnsButton  = findViewById<TextView>(R.id.saveDuckDnsButton)
+
+        duckdnsDomainInput.setText(Prefs.getDuckDnsDomain(this))
+        duckdnsTokenInput.setText(Prefs.getDuckDnsToken(this))
+
+        saveDuckDnsButton.setOnClickListener {
+            Prefs.saveDuckDnsDomain(this, duckdnsDomainInput.text.toString().trim())
+            Prefs.saveDuckDnsToken(this, duckdnsTokenInput.text.toString().trim())
+            Toast.makeText(this, "✅ DuckDNS enregistré.", Toast.LENGTH_LONG).show()
+        }
+
         // ── Cartes dynamiques de modèles ──────────────────────────────────────
         modelCardsContainer.removeAllViews()
         ModelDownloader.MODEL_CATALOG.forEachIndexed { index, entry ->
@@ -308,22 +391,23 @@ class SettingsActivity : AppCompatActivity() {
             val nowEnabled = !Prefs.isWakeWordEnabled(this)
             Prefs.saveWakeWordEnabled(this, nowEnabled)
 
-            val serviceIntent = Intent(this, WakeWordService::class.java)
             if (nowEnabled) {
                 val hasMicPermission = androidx.core.content.ContextCompat.checkSelfPermission(
                     this, android.Manifest.permission.RECORD_AUDIO
                 ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
-                if (!hasMicPermission) {
-                    Prefs.saveWakeWordEnabled(this, false)
-                    Toast.makeText(this, "❌ Permission micro requise pour l'écoute permanente", Toast.LENGTH_LONG).show()
+                if (hasMicPermission) {
+                    startWakeWordServiceNow()
                 } else {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
-                    else startService(serviceIntent)
-                    Toast.makeText(this, "✅ Écoute permanente activée", Toast.LENGTH_SHORT).show()
+                    // Avant : abandon silencieux avec juste un Toast, jamais de vraie demande
+                    // de permission tant que l'utilisateur n'était pas passé par le mode vocal
+                    // manuel — c'était la cause réelle du bug. On demande maintenant la
+                    // permission directement ici ; le service démarre dans le callback
+                    // ci-dessus si elle est accordée.
+                    wakeWordMicPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
             } else {
-                stopService(serviceIntent)
+                stopService(Intent(this, WakeWordService::class.java))
                 Toast.makeText(this, "Écoute permanente désactivée", Toast.LENGTH_SHORT).show()
             }
             updateWakeWordButtonLabel(toggleWakeWordButton)
@@ -411,40 +495,41 @@ class SettingsActivity : AppCompatActivity() {
     }
 
 
-    private fun setupColorSwatches() {
+    /**
+     * Carrousels défilants pour la couleur et le style de l'orbe — remplacent les
+     * anciennes rangées fixes de pastilles/boutons. Les deux restent synchronisés :
+     * changer la couleur met immédiatement à jour l'aperçu live dans le carrousel
+     * de styles, puisque chaque carte y affiche une vraie mini-instance d'OrbView.
+     *
+     * IMPORTANT : contrairement au reste de l'écran (qui n'est sauvegardé qu'au clic
+     * sur ENREGISTRER, plus bas et facile à manquer), une sélection ici est enregistrée
+     * IMMÉDIATEMENT — un choix de couleur/style qu'on oublie de "confirmer" via un
+     * bouton lointain est l'explication la plus probable d'un orbe qui semble "ne
+     * jamais changer" alors que le tapotement a bien été pris en compte à l'écran.
+     */
+    private fun setupColorAndStyleCarousels() {
         selectedAccentColor = Prefs.getAccentColor(this)
-        highlightSelectedSwatch()
-        for ((index, _) in colorSwatchIds.withIndex()) {
-            val swatch = colorSwatches[index]
-            swatch.setOnClickListener {
-                val bg = swatch.background
-                selectedAccentColor = if (bg is android.graphics.drawable.ColorDrawable) bg.color else Prefs.DEFAULT_ACCENT_COLOR
-                highlightSelectedSwatch()
-            }
-        }
-    }
-
-    private fun highlightSelectedSwatch() {
-        for (swatch in colorSwatches) {
-            val bg = swatch.background
-            val isSelected = bg is android.graphics.drawable.ColorDrawable && bg.color == selectedAccentColor
-            swatch.alpha  = if (isSelected) 1f else 0.45f
-            swatch.scaleX = if (isSelected) 1.15f else 1f
-            swatch.scaleY = if (isSelected) 1.15f else 1f
-        }
-    }
-
-    private fun setupOrbStyleSelector() {
         selectedOrbStyle = Prefs.getOrbStyle(this)
-        highlightOrbStyle()
-        styleOrbPulse.setOnClickListener   { selectedOrbStyle = "PULSE";          highlightOrbStyle() }
-        styleOrbNetwork.setOnClickListener { selectedOrbStyle = "NETWORK_SPHERE"; highlightOrbStyle() }
-    }
 
-    private fun highlightOrbStyle() {
-        val pulseSelected = selectedOrbStyle == "PULSE"
-        styleOrbPulse.alpha   = if (pulseSelected) 1f else 0.5f
-        styleOrbNetwork.alpha = if (pulseSelected) 0.5f else 1f
+        colorCarouselAdapter = ColorCarouselAdapter(this, carouselColors, selectedAccentColor) { color ->
+            selectedAccentColor = color
+            orbStyleCarouselAdapter.updateAccentColor(color)
+            Prefs.saveAccentColor(this, color)
+            Toast.makeText(this, "✅ Couleur enregistrée — relance le mode vocal pour la voir.", Toast.LENGTH_SHORT).show()
+        }
+        colorCarousel.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
+        colorCarousel.adapter = colorCarouselAdapter
+        LinearSnapHelper().attachToRecyclerView(colorCarousel)
+
+        val styleOptions = listOf("PULSE" to "Orbe pulsante", "NETWORK_SPHERE" to "Sphère réseau")
+        orbStyleCarouselAdapter = OrbStyleCarouselAdapter(this, styleOptions, selectedOrbStyle, selectedAccentColor) { styleId ->
+            selectedOrbStyle = styleId
+            Prefs.saveOrbStyle(this, styleId)
+            Toast.makeText(this, "✅ Style d'orbe enregistré — relance le mode vocal pour le voir.", Toast.LENGTH_SHORT).show()
+        }
+        orbStyleCarousel.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
+        orbStyleCarousel.adapter = orbStyleCarouselAdapter
+        LinearSnapHelper().attachToRecyclerView(orbStyleCarousel)
     }
 
     private fun startDownload(url: String, format: LocalLlmManager.LocalModelFormat, useToken: Boolean) {

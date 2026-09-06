@@ -1,15 +1,26 @@
 package com.jarvis.assistant
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.text.Spannable
 import android.text.SpannableStringBuilder
+import android.text.TextPaint
+import android.text.style.ClickableSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
+import android.view.View
 
 /**
  * Rendu markdown minimal (gras **texte**, italique *texte*, code `texte`,
  * titres #, listes - et numérotées) pour éviter d'afficher les symboles
  * bruts (astérisques, dièses, tirets) dans les bulles de chat ou à l'oral.
+ *
+ * Ajoute aussi des liens cliquables (téléphone → composeur, email → nouveau
+ * message, adresse → GPS par défaut du téléphone) directement dans le texte
+ * affiché — utile pour les fiches contact, résultats SMS/emails, etc. sans
+ * changer leur format d'affichage existant.
  */
 object MarkdownUtils {
 
@@ -21,7 +32,30 @@ object MarkdownUtils {
     private val italicOnlyRegex = Regex("(?<!\\*)\\*([^*\\n]+?)\\*(?!\\*)")
     private val codeOnlyRegex = Regex("`(.+?)`")
 
-    fun toSpannable(raw: String): CharSequence {
+    // Téléphone : formats français les plus courants (0X XX XX XX XX / +33 X XX XX XX XX),
+    // avec séparateurs espace/point/tiret optionnels. Volontairement restrictif (plutôt que
+    // "tout ce qui ressemble à des chiffres") pour éviter de rendre cliquables des dates,
+    // identifiants ou codes postaux par erreur.
+    private val phoneRegex = Regex(
+        "(?<![\\w.])(?:\\+33[\\s.-]?[1-9](?:[\\s.-]?\\d{2}){4}|0[1-9](?:[\\s.-]?\\d{2}){4})(?![\\w.])"
+    )
+    private val emailRegex = Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
+    // Adresses : repose sur les marqueurs emoji que JARVIS utilise lui-même de façon
+    // cohérente pour afficher une adresse (fiches contact — voir PeopleController). Une
+    // détection générique d'adresse en texte libre est trop peu fiable (pas de motif fixe
+    // en français) ; se limiter à ce que l'app génère elle-même garantit zéro faux positif.
+    private val addressColonRegex = Regex("(?:🏠|🏗️)[^:\\n]*:\\s*([^\\n]+)")
+    private val addressInlineRegex = Regex("🏠\\s+([^\\n—]+)")
+
+    /**
+     * [context] est optionnel : quand fourni, les liens cliquables (tel/mail/itinéraire) ne
+     * sont posés QUE si l'utilisateur a explicitement demandé à JARVIS de les activer
+     * (Prefs.isContactLinksEnabled — via enable_contact_links). Avant ce correctif, ces liens
+     * étaient posés automatiquement sur chaque message contenant un numéro/email/adresse, ce
+     * que l'utilisateur ne voulait pas — désormais c'est un comportement opt-in, désactivé par
+     * défaut.
+     */
+    fun toSpannable(raw: String, context: Context? = null): CharSequence {
         var text = headerRegex.replace(raw) { "**${it.groupValues[1]}**" }
         text = bulletRegex.replace(text) { "• " }
 
@@ -52,7 +86,76 @@ object MarkdownUtils {
             lastEnd = match.range.last + 1
         }
         builder.append(text.substring(lastEnd))
+        // Adresses toujours actives (marqueur 🏠/🏗️ explicite posé par JARVIS lui-même =
+        // zéro faux positif possible, donc pas besoin de l'activation manuelle contrairement
+        // au numéro/email qui eux peuvent matcher du texte non voulu). Corrige le cas où
+        // l'utilisateur demande "rends les adresses cliquables" et que ça ne marchait pas car
+        // la fonctionnalité entière était encore désactivée par défaut.
+        val claimed = mutableListOf<IntRange>()
+        applyAddressLinks(builder, claimed)
+        if (context != null && Prefs.isContactLinksEnabled(context)) {
+            applyContactLinks(builder, claimed)
+        }
         return builder
+    }
+
+    /** Rend cliquable toute adresse marquée 🏠/🏗️ par JARVIS (vers le GPS par défaut du téléphone). */
+    private fun applyAddressLinks(builder: SpannableStringBuilder, claimed: MutableList<IntRange>) {
+        val text = builder.toString()
+        fun isClaimed(range: IntRange) = claimed.any { it.first <= range.last && range.first <= it.last }
+        for (regex in listOf(addressColonRegex, addressInlineRegex)) {
+            for (match in regex.findAll(text)) {
+                val group = match.groups[1] ?: continue
+                val range = group.range
+                if (range.isEmpty() || isClaimed(range)) continue
+                claimed.add(range)
+                val address = group.value.trim()
+                builder.setSpan(object : ClickableSpan() {
+                    override fun onClick(widget: View) { LocationController.openMaps(widget.context, address) }
+                    override fun updateDrawState(ds: TextPaint) {
+                        super.updateDrawState(ds)
+                        ds.isUnderlineText = true
+                    }
+                }, range.first, range.last + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+    }
+
+    /** Rend cliquables les numéros de téléphone et emails détectés dans [builder] — opt-in (Prefs.isContactLinksEnabled). */
+    private fun applyContactLinks(builder: SpannableStringBuilder, claimed: MutableList<IntRange>) {
+        val text = builder.toString()
+        fun isClaimed(range: IntRange) = claimed.any { it.first <= range.last && range.first <= it.last }
+
+        fun addClickSpan(range: IntRange, onClick: (View) -> Unit) {
+            claimed.add(range)
+            builder.setSpan(object : ClickableSpan() {
+                override fun onClick(widget: View) = onClick(widget)
+                override fun updateDrawState(ds: TextPaint) {
+                    super.updateDrawState(ds)
+                    ds.isUnderlineText = true
+                }
+            }, range.first, range.last + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+
+        for (match in emailRegex.findAll(text)) {
+            val range = match.range
+            if (isClaimed(range)) continue
+            val email = match.value
+            addClickSpan(range) { view ->
+                val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$email"))
+                try { view.context.startActivity(intent) } catch (_: Exception) { }
+            }
+        }
+
+        for (match in phoneRegex.findAll(text)) {
+            val range = match.range
+            if (isClaimed(range)) continue
+            val phone = match.value
+            addClickSpan(range) { view ->
+                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(phone)}"))
+                try { view.context.startActivity(intent) } catch (_: Exception) { }
+            }
+        }
     }
 
     fun stripForSpeech(raw: String): String {

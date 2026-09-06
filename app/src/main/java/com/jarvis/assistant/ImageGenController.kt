@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Environment
 import android.util.Base64
+import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -21,26 +22,44 @@ import java.util.concurrent.TimeUnit
  * maximiser la fiabilité (si l'un échoue, essaie automatiquement le suivant) :
  *
  * 1. Google Gemini (Nano Banana) — si une clé Gemini est configurée.
- * 2. OpenAI DALL-E 3 — si une clé OpenAI est configurée.
- * 3. Stable Diffusion (via Hugging Face Inference API) — si un jeton
- *    Hugging Face est configuré (celui déjà utilisé pour les modèles locaux).
+ * 2. OpenAI gpt-image-1 — si une clé OpenAI est configurée. (DALL-E 2/3 ont été
+ *    RETIRÉS de l'API OpenAI le 12 mai 2026 — tout appel avec l'ancien modèle
+ *    échouait systématiquement ; c'était une cause réelle des échecs signalés.)
+ * 3. Stable Diffusion (via la passerelle Hugging Face "Inference Providers",
+ *    router.huggingface.co — l'ancien endpoint api-inference.huggingface.co
+ *    n'est plus supporté par Hugging Face) — si un jeton Hugging Face est
+ *    configuré (celui déjà utilisé pour les modèles locaux).
  * 4. Stable Diffusion EMBARQUÉ sur le téléphone (stable-diffusion.cpp compilé
  *    nativement, aucun réseau) — si un modèle a été importé dans les
  *    paramètres. ⚠️ Sans GPU dédié, compte plusieurs MINUTES par image sur
- *    CPU de téléphone — c'est la réalité du calcul de diffusion sur mobile,
- *    pas un défaut de l'intégration.
+ *    CPU de téléphone, et peut échouer par manque de mémoire sur des appareils
+ *    avec peu de RAM disponible — c'est la réalité du calcul de diffusion sur
+ *    mobile, pas un défaut de l'intégration.
+ * 5. AI Horde (aihorde.net, anciennement Stable Horde) — gratuit, SANS clé
+ *    (accès anonyme officiel avec la clé publique documentée "0000000000"),
+ *    DERNIER filet de secours uniquement. REMPLACE Pollinations (retiré à la
+ *    demande de l'utilisateur suite à des rendus jugés trop flous) : AI Horde
+ *    fait tourner de VRAIS modèles Stable Diffusion/SDXL sur des GPU de
+ *    volontaires (pas un modèle dégradé propriétaire), donc un rendu
+ *    généralement plus fidèle. ⚠️ HONNÊTETÉ, contrepartie réelle : les
+ *    requêtes anonymes ont la PRIORITÉ LA PLUS BASSE dans leur file d'attente
+ *    communautaire — la génération peut prendre de quelques secondes à
+ *    plusieurs minutes selon la charge du moment, contrairement à Pollinations
+ *    qui répondait quasi instantanément (mais avec un rendu régulièrement
+ *    flou). Ce n'est utilisé qu'en tout dernier recours de toute façon, donc
+ *    ce compromis vitesse/fiabilité est acceptable ici.
  *
- * Pollinations AI a été retiré : leur service traverse une période de
- * qualité dégradée reconnue par Pollinations eux-mêmes (issue GitHub #5372).
+ * Chaque échec (y compris ceux du SD embarqué) alimente un diagnostic partagé
+ * affiché en cas d'échec total — un échec du SD local ne doit JAMAIS écraser
+ * silencieusement les diagnostics des fournisseurs essayés avant lui (bug
+ * réel corrigé : l'utilisateur ne voyait que "mémoire insuffisante" même
+ * quand sa clé Gemini, pourtant valide, avait échoué pour une autre raison).
  *
  * ⚠️ Microsoft Copilot n'a PAS d'API publique de génération d'image
  * accessible aux applications tierces — impossible à intégrer honnêtement.
  *
  * L'image est sauvegardée dans Pictures/JARVIS-Generated et affichée
  * directement dans le chat.
- *
- * Vidéo et musique : toujours PAS implémenté — aucune API publique simple et
- * largement accessible pour ça actuellement.
  */
 object ImageGenController {
 
@@ -59,49 +78,67 @@ object ImageGenController {
             return Result("❌ Aucune description d'image fournie.", null, null)
         }
 
+        // Diagnostic collecté au fil des tentatives — auparavant, un échec HTTP sur un
+        // provider CONFIGURÉ (mauvaise clé, quota, erreur serveur...) était avalé
+        // silencieusement pour passer au suivant ; si tous échouaient, l'utilisateur ne
+        // voyait qu'un message générique "configure une clé" même quand une clé était
+        // bel et bien configurée mais rejetée pour une raison précise (ex: HTTP 400/403).
+        val diagnostics = mutableListOf<String>()
+
         // 1. Google Gemini, si une clé est configurée.
-        tryGemini(context, prompt)?.let { return it }
+        tryGemini(context, prompt, diagnostics)?.let { return it }
 
         // 2. OpenAI DALL-E 3, si une clé est configurée.
-        tryOpenAI(context, prompt)?.let { return it }
+        tryOpenAI(context, prompt, diagnostics)?.let { return it }
 
         // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
-        tryHuggingFace(context, prompt)?.let { return it }
+        tryHuggingFace(context, prompt, diagnostics)?.let { return it }
 
         // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé.
-        tryOnDeviceStableDiffusion(context, prompt)?.let { return it }
+        tryOnDeviceStableDiffusion(context, prompt, diagnostics)?.let { return it }
+
+        // 5. AI Horde (gratuit, sans clé — accès anonyme officiel) — en tout dernier
+        // recours seulement : c'est un cluster communautaire, les requêtes anonymes
+        // passent en dernière priorité et peuvent prendre plusieurs minutes selon la
+        // charge. Remplace Pollinations (qualité jugée insuffisante par l'utilisateur).
+        tryAiHorde(context, prompt, diagnostics)?.let { return it }
+
+        val detail = if (diagnostics.isNotEmpty()) {
+            "\n\nDétail des échecs :\n" + diagnostics.joinToString("\n") { "• $it" }
+        } else ""
 
         return Result(
             "❌ Échec de la génération d'image sur tous les moteurs disponibles " +
-                "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué). " +
+                "(Gemini, OpenAI, Hugging Face, Stable Diffusion embarqué, AI Horde). " +
                 "Configure au moins une clé API dans ⚙ → Clés API, ou importe un modèle " +
-                "Stable Diffusion local dans ⚙ → Modèles Locaux.",
+                "Stable Diffusion local dans ⚙ → Modèles Locaux.$detail",
             null, null
         )
     }
 
     // ─── 4. Stable Diffusion EMBARQUÉ (stable-diffusion.cpp natif) ─────────────
 
-    private fun tryOnDeviceStableDiffusion(context: Context, prompt: String): Result? {
+    private fun tryOnDeviceStableDiffusion(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val modelPath = Prefs.getLocalSdModelPath(context)
         if (modelPath.isBlank()) return null
 
+        // IMPORTANT : chaque échec ici ajoute au diagnostic PARTAGÉ et renvoie null (continue
+        // vers le fournisseur suivant), au lieu de renvoyer directement un Result — avant ce
+        // correctif, un échec du SD local écrasait silencieusement les diagnostics Gemini/
+        // OpenAI/Hugging Face déjà collectés : l'utilisateur ne voyait QUE l'erreur du SD
+        // local (ex: "mémoire insuffisante"), même quand une clé Gemini pourtant valide avait
+        // échoué pour une tout autre raison plus haut dans la cascade — cause réelle du
+        // symptôme "la génération échoue toujours sans qu'on comprenne pourquoi".
         if (!NativeStableDiffusion.isAvailable()) {
-            return Result(
-                "❌ Le moteur Stable Diffusion embarqué n'a pas pu être chargé sur cet appareil.\n" +
-                    "Détail : ${NativeStableDiffusion.getLoadError() ?: "bibliothèque native introuvable"}",
-                null, null
-            )
+            diagnostics.add("Stable Diffusion embarqué : moteur non chargé sur cet appareil (${NativeStableDiffusion.getLoadError() ?: "bibliothèque native introuvable"})")
+            return null
         }
 
         return try {
             val loaded = NativeStableDiffusion.loadModel(modelPath)
             if (!loaded) {
-                return Result(
-                    "❌ Échec du chargement du modèle Stable Diffusion local. " +
-                        "Vérifie qu'il s'agit bien d'un modèle compatible (.safetensors, .ckpt ou .gguf).",
-                    null, null
-                )
+                diagnostics.add("Stable Diffusion embarqué : échec du chargement du modèle (vérifie qu'il est compatible .safetensors/.ckpt/.gguf)")
+                return null
             }
 
             // Résolution modeste et peu d'étapes pour rester dans un temps raisonnable sur CPU mobile.
@@ -110,7 +147,10 @@ object ImageGenController {
             val steps = 20
 
             val rgbBytes = NativeStableDiffusion.generate(prompt, width, height, steps)
-                ?: return Result("❌ Échec de la génération d'image embarquée (mémoire insuffisante ou erreur interne).", null, null)
+            if (rgbBytes == null) {
+                diagnostics.add("Stable Diffusion embarqué : échec de la génération (mémoire insuffisante ou erreur interne)")
+                return null
+            }
 
             val channels = NativeStableDiffusion.getChannelCount()
             val bitmap = rgbBytesToBitmap(rgbBytes, width, height, channels)
@@ -129,7 +169,125 @@ object ImageGenController {
                 savedPath
             )
         } catch (e: Exception) {
-            Result("❌ Erreur du moteur Stable Diffusion embarqué : ${e.message}", null, null)
+            diagnostics.add("Stable Diffusion embarqué : erreur — ${e.message}")
+            null
+        }
+    }
+
+    // ─── 5. AI Horde (gratuit, sans clé, dernier recours) ─────────────────────
+    // Cluster communautaire de VRAIS modèles Stable Diffusion/SDXL — accès anonyme
+    // officiel et documenté (clé publique "0000000000", aucune inscription requise).
+    // Fonctionnement asynchrone : on soumet la demande, on interroge périodiquement
+    // son statut jusqu'à ce qu'elle soit prête, puis on récupère le résultat — contrairement
+    // aux autres fournisseurs de cette cascade qui répondent en un seul appel HTTP direct.
+    // Documentation officielle : https://aihorde.net/api (endpoints generate/async,
+    // generate/check/{id}, generate/status/{id}), vérifiée disponible et fonctionnelle.
+
+    private suspend fun tryAiHorde(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
+        return try {
+            val submitBody = JSONObject()
+                .put("prompt", prompt)
+                .put(
+                    "params",
+                    JSONObject()
+                        .put("width", 512)
+                        .put("height", 512)
+                        .put("steps", 20)
+                        .put("cfg_scale", 7)
+                        .put("sampler_name", "k_euler")
+                        .put("n", 1)
+                )
+                .put("nsfw", false)
+                // r2=false : demande le résultat directement encodé en base64 dans la réponse
+                // de statut, sans passer par un second téléchargement depuis un lien externe.
+                .put("r2", false)
+                .toString()
+                .toRequestBody(JSON)
+
+            val submitRequest = Request.Builder()
+                .url("https://aihorde.net/api/v2/generate/async")
+                .addHeader("apikey", "0000000000") // accès anonyme officiel documenté par AI Horde
+                .addHeader("Content-Type", "application/json")
+                .post(submitBody)
+                .build()
+
+            val jobId = client.newCall(submitRequest).execute().use { response ->
+                val bodyStr = response.body?.string() ?: ""
+                if (!response.isSuccessful) {
+                    diagnostics.add("AI Horde : HTTP ${response.code} lors de la soumission — ${bodyStr.take(200)}")
+                    return null
+                }
+                val id = JSONObject(bodyStr).optString("id")
+                if (id.isBlank()) {
+                    diagnostics.add("AI Horde : demande non acceptée — ${bodyStr.take(200)}")
+                    return null
+                }
+                id
+            }
+
+            // Sondage périodique (la horde recommande d'éviter plus d'1 requête/seconde ; on
+            // espace davantage par courtoisie) — budget total ~2 minutes, cohérent avec une
+            // file d'attente anonyme (priorité la plus basse) qui peut être lente sans pour
+            // autant faire attendre l'utilisateur indéfiniment sur un dernier recours gratuit.
+            var done = false
+            var faulted = false
+            var attempts = 0
+            while (attempts < 40 && !done && !faulted) {
+                delay(3000)
+                val checkRequest = Request.Builder()
+                    .url("https://aihorde.net/api/v2/generate/check/$jobId")
+                    .get().build()
+                client.newCall(checkRequest).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val checkJson = JSONObject(response.body?.string() ?: "")
+                        done = checkJson.optBoolean("done", false)
+                        faulted = checkJson.optBoolean("faulted", false)
+                    }
+                }
+                attempts++
+            }
+
+            if (faulted) {
+                diagnostics.add("AI Horde : la génération a échoué côté worker communautaire")
+                return null
+            }
+            if (!done) {
+                diagnostics.add(
+                    "AI Horde : délai d'attente dépassé (file d'attente anonyme surchargée) — " +
+                        "réessaie plus tard, ou crée un compte gratuit sur aihorde.net pour une priorité plus élevée"
+                )
+                return null
+            }
+
+            val statusRequest = Request.Builder()
+                .url("https://aihorde.net/api/v2/generate/status/$jobId")
+                .get().build()
+
+            client.newCall(statusRequest).execute().use { response ->
+                if (!response.isSuccessful) {
+                    diagnostics.add("AI Horde : HTTP ${response.code} lors de la récupération du résultat")
+                    return null
+                }
+                val statusJson = JSONObject(response.body?.string() ?: "")
+                val first = statusJson.optJSONArray("generations")?.optJSONObject(0)
+                val b64 = first?.optString("img")
+                if (b64.isNullOrBlank()) {
+                    diagnostics.add("AI Horde : réponse terminée mais sans image exploitable")
+                    return null
+                }
+                val bytes = Base64.decode(b64, Base64.DEFAULT)
+                val savedPath = saveToGallery(context, bytes, prompt)
+                val model = first.optString("model", "Stable Diffusion")
+                Result(
+                    "🎨 Image générée pour « $prompt » (AI Horde — $model, cluster Stable Diffusion communautaire gratuit).\n📁 Enregistrée dans : $savedPath",
+                    b64,
+                    "image/png",
+                    savedPath
+                )
+            }
+        } catch (e: Exception) {
+            diagnostics.add("AI Horde : exception réseau — ${e.message}")
+            null
         }
     }
 
@@ -149,7 +307,7 @@ object ImageGenController {
 
     // ─── 1. Google Gemini (Nano Banana) ────────────────────────────────────────
 
-    private fun tryGemini(context: Context, prompt: String): Result? {
+    private fun tryGemini(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
         if (keys.isEmpty()) return null
 
@@ -190,20 +348,33 @@ object ImageGenController {
                         if (response.code == 429 || response.code == 401) {
                             Prefs.markKeyFailed(context, Provider.GEMINI, apiKey)
                         }
+                        diagnostics.add("Gemini : HTTP ${response.code} — ${bodyStr.take(200)}")
                         return@use // essaie la clé suivante s'il y en a une
                     }
 
                     val json = JSONObject(bodyStr)
-                    val candidates = json.optJSONArray("candidates") ?: return@use
-                    if (candidates.length() == 0) return@use
+                    val candidates = json.optJSONArray("candidates")
+                    if (candidates == null || candidates.length() == 0) {
+                        diagnostics.add("Gemini : réponse HTTP 200 sans « candidates » exploitable — ${bodyStr.take(200)}")
+                        return@use
+                    }
+                    // L'API Gemini répond en camelCase ("inlineData"/"mimeType"), mais on
+                    // vérifie aussi le snake_case par sécurité : une réponse HTTP 200 sans
+                    // aucune image détectée à cause d'un nom de champ inattendu se traduisait
+                    // auparavant par un échec silencieux, impossible à distinguer d'un vrai
+                    // manque d'image dans la réponse.
                     val parts = candidates.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
-                        ?: return@use
+                    if (parts == null) {
+                        diagnostics.add("Gemini : réponse sans contenu exploitable — ${bodyStr.take(200)}")
+                        return@use
+                    }
 
                     for (i in 0 until parts.length()) {
-                        val inlineData = parts.getJSONObject(i).optJSONObject("inline_data")
+                        val part = parts.getJSONObject(i)
+                        val inlineData = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data")
                         val b64 = inlineData?.optString("data")
                         if (!b64.isNullOrBlank()) {
-                            val mime = inlineData.optString("mime_type", "image/png")
+                            val mime = inlineData.optString("mimeType", inlineData.optString("mime_type", "image/png"))
                             val bytes = Base64.decode(b64, Base64.DEFAULT)
                             val savedPath = saveToGallery(context, bytes, prompt)
                             return Result(
@@ -214,28 +385,35 @@ object ImageGenController {
                             )
                         }
                     }
+                    diagnostics.add("Gemini : réponse reçue mais aucune image dans les parts (texte seul renvoyé ?) — ${bodyStr.take(200)}")
                 }
             } catch (e: Exception) {
-                // essaie la clé suivante
+                diagnostics.add("Gemini : exception réseau — ${e.message}")
             }
         }
         return null
     }
 
-    // ─── 2. OpenAI DALL-E 3 ─────────────────────────────────────────────────────
+    // ─── 2. OpenAI (gpt-image-1) ────────────────────────────────────────────────
+    // DALL-E 2 et DALL-E 3 ont été retirés de l'API OpenAI le 12 mai 2026 — tout appel
+    // avec model="dall-e-3" échoue désormais systématiquement (404/erreur de modèle
+    // inconnu). C'était une cause RÉELLE et vérifiée des échecs de génération d'image
+    // signalés à répétition, pas un problème côté app. Migré vers "gpt-image-1", le
+    // modèle actuel recommandé par OpenAI (gpt-image-2 existe aussi mais gpt-image-1
+    // reste supporté jusqu'à fin 2026 ; le paramètre response_format n'existe plus sur
+    // ces modèles — ils renvoient TOUJOURS du base64 dans data[0].b64_json).
 
-    private fun tryOpenAI(context: Context, prompt: String): Result? {
+    private fun tryOpenAI(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val keys = Prefs.getApiKeysFor(context, Provider.OPENAI)
         if (keys.isEmpty()) return null
 
         for (apiKey in keys) {
             try {
                 val body = JSONObject()
-                    .put("model", "dall-e-3")
+                    .put("model", "gpt-image-1")
                     .put("prompt", prompt)
                     .put("n", 1)
                     .put("size", "1024x1024")
-                    .put("response_format", "b64_json")
                     .toString()
                     .toRequestBody(JSON)
 
@@ -252,40 +430,48 @@ object ImageGenController {
                         if (response.code == 429 || response.code == 401) {
                             Prefs.markKeyFailed(context, Provider.OPENAI, apiKey)
                         }
+                        diagnostics.add("OpenAI : HTTP ${response.code} — ${bodyStr.take(200)}")
                         return@use // essaie la clé OpenAI suivante s'il y en a une
                     }
 
                     val json = JSONObject(bodyStr)
                     val dataArr = json.optJSONArray("data")
                     val b64 = dataArr?.optJSONObject(0)?.optString("b64_json")
-                    if (b64.isNullOrBlank()) return@use
+                    if (b64.isNullOrBlank()) {
+                        diagnostics.add("OpenAI : réponse HTTP 200 sans image encodée — ${bodyStr.take(200)}")
+                        return@use
+                    }
 
                     val bytes = Base64.decode(b64, Base64.DEFAULT)
                     val savedPath = saveToGallery(context, bytes, prompt)
                     return Result(
-                        "🎨 Image générée pour « $prompt » (OpenAI DALL-E 3).\n📁 Enregistrée dans : $savedPath",
+                        "🎨 Image générée pour « $prompt » (OpenAI gpt-image-1).\n📁 Enregistrée dans : $savedPath",
                         b64,
                         "image/png",
                         savedPath
                     )
                 }
             } catch (e: Exception) {
-                // essaie la clé suivante
+                diagnostics.add("OpenAI : exception réseau — ${e.message}")
             }
         }
         return null
     }
 
-    // ─── 3. Stable Diffusion via Hugging Face Inference API ───────────────────
+    // ─── 3. Stable Diffusion via Hugging Face Inference Providers ─────────────
+    // L'ancien endpoint "api-inference.huggingface.co" n'est PLUS supporté par
+    // Hugging Face (confirmé : renvoie une erreur invitant à migrer) — remplacé par
+    // leur passerelle "Inference Providers" sur router.huggingface.co. C'était la
+    // deuxième cause réelle et vérifiée des échecs de génération d'image en cascade.
 
-    private fun tryHuggingFace(context: Context, prompt: String): Result? {
+    private fun tryHuggingFace(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val token = Prefs.getHfToken(context)
         if (token.isBlank()) return null
 
         return try {
             val body = JSONObject().put("inputs", prompt).toString().toRequestBody(JSON)
             val request = Request.Builder()
-                .url("https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0")
+                .url("https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0")
                 .addHeader("Authorization", "Bearer $token")
                 .addHeader("Content-Type", "application/json")
                 .post(body)
@@ -293,7 +479,11 @@ object ImageGenController {
 
             client.newCall(request).execute().use { response ->
                 val contentType = response.header("Content-Type") ?: ""
-                if (!response.isSuccessful || !contentType.startsWith("image/")) return null
+                if (!response.isSuccessful || !contentType.startsWith("image/")) {
+                    val bodyPreview = if (!response.isSuccessful) response.body?.string()?.take(200) else "Content-Type inattendu: $contentType"
+                    diagnostics.add("Hugging Face : HTTP ${response.code} — $bodyPreview")
+                    return null
+                }
 
                 val bytes = response.body?.bytes() ?: return null
                 val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
@@ -306,6 +496,7 @@ object ImageGenController {
                 )
             }
         } catch (e: Exception) {
+            diagnostics.add("Hugging Face : exception réseau — ${e.message}")
             null
         }
     }
@@ -323,6 +514,14 @@ object ImageGenController {
             val fileName = "${fileDateFormat.format(Date())}_$safePrompt.png"
             val file = File(dir, fileName)
             file.writeBytes(bytes)
+            // BUG REEL CORRIGE : ecrire via File/writeBytes n'informe pas MediaStore -- l'image
+            // existe bien sur le disque mais restait invisible dans Galerie/Photos tant qu'un
+            // scan media spontane n'avait pas lieu (meme correctif applique dans
+            // JarvisCommandParser.logFileRecord pour les fichiers bureautiques). On declenche
+            // l'indexation tout de suite, sans attendre.
+            try {
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
+            } catch (e: Exception) { /* non bloquant */ }
             file.absolutePath
         } catch (e: Exception) {
             "(échec de la sauvegarde locale : ${e.message})"

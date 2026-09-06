@@ -40,15 +40,24 @@
             android:layout_marginBottom="14dp" />
 
         <TextView
-            android:id="@+id/networkOutputText"
+            android:id="@+id/networkEmptyText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@drawable/bg_input"
             android:padding="14dp"
-            android:text="Touche « Scanner le réseau » pour lister les appareils connectés à ton Wi-Fi."
+            android:text="Touche « Scanner le réseau » pour lister les appareils connectés à ton Wi-Fi. Touche ensuite un appareil trouvé (imprimante, box, NAS...) pour ouvrir son interface web, le réveiller ou le retester."
             android:textColor="@color/text_primary"
             android:textSize="12sp"
             android:lineSpacingExtra="3dp"
+            android:layout_marginBottom="20dp" />
+
+        <!-- Rempli dynamiquement par NetworkActivity après un scan : une carte cliquable
+             par appareil détecté, avec accès direct à son interface web/Wake-on-LAN. -->
+        <LinearLayout
+            android:id="@+id/networkDevicesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
             android:layout_marginBottom="20dp" />
 
         <!-- Wake-on-LAN -->
