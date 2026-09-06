@@ -5,8 +5,10 @@ plugins {
 
 android {
     namespace 'com.jarvis.assistant'
-    compileSdk 35
-    ndkVersion "27.0.12077973"
+    // compileSdk 36 requis par com.llamatik:library:1.10.1 (greffe moteur GGUF Jarvis2,
+    // voir GgufLlmController) -- targetSdk reste a 35, bascule independante (AGP autorise
+    // compileSdk > targetSdk).
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.jarvis.assistant"
@@ -14,27 +16,6 @@ android {
         targetSdk 35
         versionCode 5
         versionName "5.0"
-
-        ndk {
-            // 32 bits (armeabi-v7a) retiré : llama.cpp utilise des instructions
-            // NEON fp16 (vld1q_f16) qui n'existent que sur 64 bits. Les téléphones
-            // modernes (2019+) sont quasiment tous en 64 bits de toute façon.
-            abiFilters 'arm64-v8a'
-        }
-
-        externalNativeBuild {
-            cmake {
-                cppFlags "-std=c++17"
-                arguments "-DANDROID_STL=c++_shared"
-            }
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-            version "3.22.1"
-        }
     }
 
     signingConfigs {
@@ -62,16 +43,25 @@ android {
 
     packaging {
         resources {
-            pickFirsts += ['**/libc++_shared.so', '**/libllama.so', 'META-INF/NOTICE.md', 'META-INF/LICENSE.md']
-            excludes += ['META-INF/DEPENDENCIES']
+            pickFirsts += ['META-INF/NOTICE.md', 'META-INF/LICENSE.md']
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/AL2.0', 'META-INF/LGPL2.1']
         }
     }
 }
 
-dependencies {
-    // ── Module natif isolé : génération d'image Stable Diffusion embarquée ─────
-    implementation project(':sdcpp')
+// FIX CI : une dependance transitive (play-services-auth 21.6.0 ou googleid 1.2.0) tire
+// androidx.credentials en 1.6.0-beta01 malgre la version 1.5.0 declaree explicitement
+// ci-dessous (resolution Gradle = plus haute version demandee, directe OU transitive gagne).
+// 1.6.x exige AGP 8.6.0 (ce projet est en 8.5.2, voir plus haut) -- on force donc la
+// resolution sur 1.5.0 pour toute la config, peu importe qui la redemande en interne.
+configurations.all {
+    resolutionStrategy {
+        force 'androidx.credentials:credentials:1.5.0'
+        force 'androidx.credentials:credentials-play-services-auth:1.5.0'
+    }
+}
 
+dependencies {
     // ── Core Android ──────────────────────────────────────────────────────────
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
@@ -90,10 +80,26 @@ dependencies {
     // Bibliothèque Java pure, aucune dépendance native, aucune clé/API requise.
     implementation 'eu.agno3.jcifs:jcifs-ng:2.1.10'
 
-    // ── IA embarquée : MediaPipe LLM Inference (.task) ────────────────────────
-    implementation 'com.google.mediapipe:tasks-genai:0.10.14'
+    // ── IA embarquée : Gemini Nano via AICore (ML Kit GenAI Prompt API) -- gratuit,
+    // sans clé, tourne 100% sur l'appareil une fois le modèle téléchargé (Pixel 8+/Galaxy
+    // S24 notamment). Remplace MediaPipe tasks-genai (API legacy, voir LocalLlmController
+    // ci-dessous pour son successeur activement maintenu) -- tâches #247/#248, demande
+    // explicite : garder l'IA on-device ACTUELLE de l'appli réécrite.
+    implementation 'com.google.mlkit:genai-prompt:1.0.0-beta2'
 
-    // ── IA embarquée : ONNX Runtime GenAI (.onnx) ────────────────────────────
+    // ── IA embarquée : LiteRT-LM (voir LocalLlmController) -- modèles Qwen (Apache 2.0,
+    // dépôts publics litert-community, aucun compte/jeton requis), fonctionne sur N'IMPORTE
+    // QUEL appareil suffisamment puissant (dont Xiaomi/Redmi/Poco, sans AICore). Remplace
+    // le moteur natif llama.cpp (NDK/CMake, module cpp/ retiré) et onnxruntime-android côté
+    // génération de texte -- gardé ci-dessous uniquement pour le wake-word (openWakeWord).
+    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.16.1'
+
+    // ── Moteur GGUF local (Llamatik/llama.cpp) -- greffe Jarvis2, voir GgufLlmController ──
+    implementation 'com.llamatik:library:1.10.1'
+
+    // ── ONNX Runtime : uniquement requis par la détection de mot-clé (openWakeWord,
+    // voir WakeWordService) qui exécute ses propres petits modèles ONNX de classification
+    // audio -- distinct de la génération de texte ci-dessus (retirée de ce runtime).
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.19.2'
 
     // ── Email IMAP / SMTP ─────────────────────────────────────────────────────
@@ -103,6 +109,19 @@ dependencies {
 
     // ── Localisation ──────────────────────────────────────────────────────────
     implementation 'com.google.android.gms:play-services-location:21.3.0'
+
+    // ── OAuth Google (Agenda/Mail) -- greffe de l'integration actuelle (taches #247-249,
+    // demande explicite de l'utilisateur de garder l'OAuth Google actuel en plus du systeme
+    // IMAP/SMTP existant). Deux briques distinctes, toutes deux officiellement recommandees
+    // par Google : Credential Manager = AUTHENTIFICATION (selecteur de compte natif) ;
+    // play-services-auth (AuthorizationClient) = AUTORISATION (acces Gmail/Agenda, consentement
+    // separe par scope). Un ID client OAuth (Google Cloud Console) reste indispensable dans les
+    // deux cas -- exigence de l'infrastructure OAuth de Google elle-meme. 1.6.0+ de credentials
+    // exige AGP 8.6.0 (ce projet est en 8.5.2) ; 1.5.0 est la derniere version stable compatible.
+    implementation 'androidx.credentials:credentials:1.5.0'
+    implementation 'androidx.credentials:credentials-play-services-auth:1.5.0'
+    implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.0'
+    implementation 'com.google.android.gms:play-services-auth:21.6.0'
 
     // ── Médias / ExoPlayer (optionnel : meilleure gestion audio) ─────────────
     implementation 'androidx.media3:media3-exoplayer:1.4.1'

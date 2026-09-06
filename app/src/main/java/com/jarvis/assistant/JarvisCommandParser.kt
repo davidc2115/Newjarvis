@@ -3,6 +3,7 @@ package com.jarvis.assistant
 import android.content.Context
 import android.media.MediaScannerConnection
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
 
@@ -69,7 +70,8 @@ object JarvisCommandParser {
         "github_list_repos", "github_read_file", "github_list_contents", "github_list_accounts", "github_test_access", "list_generations",
         "perplexity_search", "firecrawl_scrape", "run_glif",
         "termux_sd_setup", "termux_sd_status", "refresh_all_contacts", "read_debug_logs", "token_usage",
-        "list_contact_templates", "get_history_limit", "get_compact_mode", "get_memory_limit"
+        "list_contact_templates", "get_history_limit", "get_compact_mode", "get_memory_limit",
+        "get_local_first_mode"
     )
 
     // Fait correspondre les mots-clés que l'utilisateur/l'IA peuvent employer (« pdf »,
@@ -169,7 +171,7 @@ object JarvisCommandParser {
         val matches = findJarvisCommands(llmResponse)
         if (matches.isEmpty()) return CommandResult.None
 
-        val results = matches.map { match ->
+        val results = matches.mapNotNull { match ->
             val jsonStr = match.payload.trim()
             // action extrait AVANT le try/catch de l'exécution (pas juste du parsing JSON) pour
             // pouvoir l'inclure dans DiagnosticsLog même si executeAction lève une exception —
@@ -185,10 +187,33 @@ object JarvisCommandParser {
                 pendingImageBase64 = null
                 pendingImageMime = null
                 CommandResult.Executed(resultText, action, action in INFORMATIONAL_ACTIONS, img, mime)
+            } catch (e: JSONException) {
+                // Bloc [JARVIS_CMD:...] repéré (crochets équilibrés) mais JSON invalide À
+                // L'INTÉRIEUR (guillemets manquants, virgule en trop...) — typiquement un
+                // modèle IA LOCAL plus limité qui rate le format exact, pas une vraie erreur
+                // système. Signalé par l'utilisateur : le message technique Java brut
+                // ("Value ... of type java.lang.String cannot be converted to JSONObject")
+                // s'affichait tel quel dans le chat comme si JARVIS avait planté. On journalise
+                // pour debug et on ignore silencieusement CE bloc : le reste de la réponse
+                // (texte hors bloc, déjà nettoyé par cleanResponse côté appelant) continue de
+                // s'afficher normalement, sans jargon technique visible par l'utilisateur.
+                DiagnosticsLog.log(context, "JARVIS_CMD", "Bloc [JARVIS_CMD] mal formé ignoré (JSON invalide, probablement IA locale) : ${e.message}")
+                null
             } catch (e: Exception) {
-                DiagnosticsLog.log(context, "JARVIS_CMD", "Action « $action » — exception : ${e.javaClass.simpleName} ${e.message}")
+                DiagnosticsLog.logError(context, "JARVIS_CMD", "Action « $action » — exception : ${e.javaClass.simpleName} ${e.message}")
                 CommandResult.Executed("❌ Erreur d'exécution de la commande système : ${e.message}", "", false)
             }
+        }
+
+        if (results.isEmpty()) {
+            // TOUS les blocs [JARVIS_CMD] détectés étaient du JSON invalide (voir ci-dessus).
+            // On retombe sur le texte restant déjà nettoyé plutôt que sur CommandResult.None,
+            // qui aurait réaffiché la réponse BRUTE (donc le bloc cassé visible) côté appelant.
+            val remainder = cleanResponse(llmResponse)
+            return if (remainder.isBlank())
+                CommandResult.Executed("🤔 Je n'ai pas réussi à formuler ma réponse correctement, tu peux reformuler ?", "", isInformational = false)
+            else
+                CommandResult.Executed("", "", isInformational = false)
         }
 
         return if (results.size == 1) results[0] else CommandResult.ExecutedMultiple(results)
@@ -277,15 +302,27 @@ object JarvisCommandParser {
             // CALENDAR_FORMAT_MARKER, Prefs, action set_calendar_presentation_style...) mais
             // n'était en fait JAMAIS appelée ici -- un style personnalisé enregistré par
             // l'utilisateur pour son planning n'avait donc strictement aucun effet.
-            "today_events" -> withCalendarPresentationStyleNote(context, CalendarController.getTodayEvents(context, json.optString("calendar", "").ifBlank { null }))
+            //
+            // BUG RÉEL CORRIGÉ (signalement utilisateur : "je demande un planning en
+            // particulier, il me répond calendrier null introuvable") : le paramètre
+            // "calendar" n'était filtré qu'avec .ifBlank { null } -- si l'IA (surtout un
+            // modèle plus limité) écrivait littéralement la chaîne "calendar":"null" au lieu
+            // d'omettre le champ (schéma classique déjà connu, voir BLANK_PLACEHOLDER_VALUES/
+            // cleanOptionalField utilisés pour les fiches contact), cette chaîne n'était PAS
+            // vide donc passait telle quelle -- CalendarController cherchait alors un vrai
+            // calendrier nommé "null", ne le trouvait jamais, et affichait littéralement
+            // "Calendrier « null » introuvable." Les 7 usages de "calendar" dans les actions
+            // agenda passent maintenant par cleanOptionalField, qui filtre aussi "null"/
+            // "aucun"/"n/a"/etc. comme pour les autres champs optionnels.
+            "today_events" -> withCalendarPresentationStyleNote(context, CalendarController.getTodayEvents(context, cleanOptionalField(json.optString("calendar", ""))))
             // offsetDays (nouveau) : décale le DÉBUT de la plage en jours calendaires entiers
             // par rapport à aujourd'hui -- 0=aujourd'hui (défaut, comportement inchangé),
             // 1=demain, 2=après-demain... BUG RÉEL CORRIGÉ (signalement utilisateur : "demain",
             // "à partir de demain" mal compris) : sans ce paramètre, aucune action ne permettait
             // de cibler un jour précis autre qu'aujourd'hui ; l'IA n'avait alors aucun moyen
             // fiable de répondre à ces demandes.
-            "upcoming_events" -> withCalendarPresentationStyleNote(context, CalendarController.getUpcomingEvents(context, json.optInt("days", 7), json.optString("calendar", "").ifBlank { null }, json.optInt("offsetDays", 0)))
-            "week_events" -> withCalendarPresentationStyleNote(context, CalendarController.getEventsForWeek(context, json.optInt("offset", 0), json.optString("calendar", "").ifBlank { null }))
+            "upcoming_events" -> withCalendarPresentationStyleNote(context, CalendarController.getUpcomingEvents(context, json.optInt("days", 7), cleanOptionalField(json.optString("calendar", "")), json.optInt("offsetDays", 0)))
+            "week_events" -> withCalendarPresentationStyleNote(context, CalendarController.getEventsForWeek(context, json.optInt("offset", 0), cleanOptionalField(json.optString("calendar", ""))))
             "create_event" -> {
                 val title = json.optString("title", "Événement")
                 val dateStr = json.optString("date", "")
@@ -293,7 +330,7 @@ object JarvisCommandParser {
                 val durationMinutes = json.optInt("durationMinutes", 60).coerceAtLeast(1)
                 val desc = json.optString("description", "")
                 val loc = json.optString("location", "")
-                val calendarRef = json.optString("calendar", "").ifBlank { null }
+                val calendarRef = cleanOptionalField(json.optString("calendar", ""))
 
                 // BUG RÉEL CORRIGÉ : create_event exigeait auparavant que le modèle calcule
                 // lui-même des epoch millisecondes (startTime/endTime) pour "demain à 14h" —
@@ -328,27 +365,49 @@ object JarvisCommandParser {
             "name_calendar" -> {
                 // "calendar" accepte un ID, un nom affiché, ou un compte (email) — pas besoin
                 // d'appeler list_calendars avant. "calendarId" reste accepté pour compatibilité.
-                val calendarRef = json.optString("calendar", "").ifBlank {
+                val calendarRef = cleanOptionalField(json.optString("calendar", "")) ?: run {
                     val legacyId = json.optLong("calendarId", -1)
-                    if (legacyId != -1L) legacyId.toString() else ""
+                    if (legacyId != -1L) legacyId.toString() else null
                 }
                 val nickname = json.optString("nickname", "")
-                if (calendarRef.isBlank() || nickname.isBlank()) "❌ Calendrier ou surnom manquant. Précise le nom affiché du calendrier, son compte (email), ou son ID (via list_calendars)."
+                if (calendarRef.isNullOrBlank() || nickname.isBlank()) "❌ Calendrier ou surnom manquant. Précise le nom affiché du calendrier, son compte (email), ou son ID (via list_calendars)."
                 else CalendarController.nameCalendar(context, calendarRef, nickname)
             }
             "reset_calendar_nicknames" -> CalendarController.resetCalendarNicknames(context)
             "sync_calendar" -> {
-                val calendarRef = json.optString("calendar", "")
-                if (calendarRef.isBlank()) "❌ Précise quel calendrier synchroniser (nom, compte, ID — voir list_calendars)."
+                val calendarRef = cleanOptionalField(json.optString("calendar", ""))
+                if (calendarRef == null) "❌ Précise quel calendrier synchroniser (nom, compte, ID — voir list_calendars)."
                 else CalendarController.syncCalendar(context, calendarRef, json.optBoolean("enable", true))
             }
 
-            "read_emails" -> EmailController.readInbox(context, json.optInt("count", 5))
-            "read_unread_emails" -> EmailController.readUnread(context)
+            // Mail : IMAP/SMTP (mot de passe d'application) reste le chemin PAR DEFAUT ---
+            // repli sur l'API Gmail OAuth (voir GmailApiController/GoogleAccountController)
+            // UNIQUEMENT si aucun compte IMAP n'est configure ET qu'un compte Google est deja
+            // lie/autorise (voir Reglages > Systeme > Compte(s) Google) -- greffe de
+            // l'integration OAuth actuelle (taches #247-249, demande explicite de
+            // l'utilisateur de la garder en plus du systeme IMAP/SMTP existant).
+            "read_emails" -> {
+                if (Prefs.getDefaultEmailAccount(context) == null) {
+                    val token = Prefs.getGoogleAccessToken(context)
+                    if (token != null) GmailApiController.readInbox(token, json.optInt("count", 5))
+                    else EmailController.readInbox(context, json.optInt("count", 5))
+                } else EmailController.readInbox(context, json.optInt("count", 5))
+            }
+            "read_unread_emails" -> {
+                if (Prefs.getDefaultEmailAccount(context) == null) {
+                    val token = Prefs.getGoogleAccessToken(context)
+                    if (token != null) GmailApiController.readUnread(token)
+                    else EmailController.readUnread(context)
+                } else EmailController.readUnread(context)
+            }
             "search_email" -> {
                 val query = json.optString("query", "")
                 if (query.isBlank()) "❌ Aucun mot-clé de recherche fourni."
-                else EmailController.searchEmails(context, query)
+                else if (Prefs.getDefaultEmailAccount(context) == null) {
+                    val token = Prefs.getGoogleAccessToken(context)
+                    if (token != null) GmailApiController.searchEmails(token, query)
+                    else EmailController.searchEmails(context, query)
+                } else EmailController.searchEmails(context, query)
             }
             "read_email_content" -> EmailController.readEmailContent(context, json.optInt("index", 1))
             "send_email" -> {
@@ -356,7 +415,11 @@ object JarvisCommandParser {
                 val subject = json.optString("subject", "")
                 val body = json.optString("body", "")
                 if (to.isBlank()) "❌ Adresse email destinataire manquante."
-                else EmailController.sendEmail(context, to, subject, body)
+                else if (Prefs.getDefaultEmailAccount(context) == null) {
+                    val token = Prefs.getGoogleAccessToken(context)
+                    if (token != null) GmailApiController.sendEmail(token, to, subject, body)
+                    else EmailController.sendEmail(context, to, subject, body)
+                } else EmailController.sendEmail(context, to, subject, body)
             }
 
             "list_files" -> {
@@ -486,6 +549,29 @@ object JarvisCommandParser {
             // consultable en conversation est la façon honnête de "voir les logs".
             "read_debug_logs" -> DiagnosticsLog.readRecent(context)
             "clear_debug_logs" -> DiagnosticsLog.clear(context)
+            // Fichier .txt (journal complet, pas juste les 60 dernières lignes comme
+            // read_debug_logs) que l'utilisateur peut envoyer en un geste (email, Drive, ou
+            // directement ici en pièce jointe) au lieu de copier/coller du texte tronqué.
+            "export_debug_logs" -> {
+                val result = FileGenController.exportDebugLogs(context)
+                logFileRecord(context, "logs", "logs_JARVIS", result.success, result.filePath, result.message)
+                result.message
+            }
+            "share_file" -> {
+                val path = json.optString("path", "").ifBlank {
+                    findRecentGenerationPath(context, json.optString("type", ""))
+                }
+                if (path.isNullOrBlank()) "❌ Aucun fichier correspondant trouvé à partager. Précise le chemin exact ou utilise d'abord export_debug_logs/list_generations."
+                else FileGenController.shareFile(context, path)
+            }
+            // Demande explicite utilisateur : que les logs soient récupérables DIRECTEMENT,
+            // sans étape manuelle côté téléphone. JARVIS n'a aucun accès réseau entrant vers
+            // le téléphone (impossible d'ouvrir une connexion distante), mais peut POUSSER le
+            // journal complet vers un Gist GitHub privé (réutilise le jeton déjà configuré
+            // dans ⚙ → Clés API → Codage GitHub) — envoyé automatiquement à chaque erreur
+            // système réelle (voir DiagnosticsLog.logError), et ici sur demande explicite pour
+            // forcer un envoi immédiat sans attendre une prochaine erreur.
+            "upload_logs_to_github" -> GitHubController.uploadLogs(context, DiagnosticsLog.readAll(context))
             "token_usage" -> Prefs.getTokenUsageReport(context)
             "clear_token_usage" -> { Prefs.clearTokenUsage(context); "✅ Compteur de tokens réinitialisé." }
             // Limite d'historique envoyé à l'IA (voir Prefs.getMaxHistoryMessages/ApiClient.trimHistory,
@@ -521,7 +607,27 @@ object JarvisCommandParser {
                         "automatiquement dès qu'ils sont configurés, comme avant."
                 }
             }
-            "get_compact_mode" -> if (Prefs.isCompactPromptMode(context)) "📊 Mode compact : activé." else "📊 Mode compact : désactivé (réglage par défaut)."
+            "get_compact_mode" -> if (Prefs.isCompactPromptMode(context)) "📊 Mode compact : activé (réglage par défaut)." else "📊 Mode compact : désactivé."
+            // "IA locale d'abord" (voir Prefs.isLocalFirstMode/ApiClient.readyLocalProviderForFirstTry,
+            // demande utilisateur : "passer par IA locale et cloud" pour réduire la consommation
+            // de tokens). Désactivé par défaut : quand actif, chaque message est d'abord tenté
+            // GRATUITEMENT sur le modèle embarqué (Gemini Nano/Qwen local) si prêt ; en cas
+            // d'échec ou si le modèle local ne peut pas répondre (message <<ESCALATE_CLOUD>>,
+            // jamais montré tel quel), bascule silencieuse et automatique sur le cloud habituel.
+            "set_local_first_mode" -> {
+                val enabled = json.optBoolean("enabled", true)
+                Prefs.setLocalFirstMode(context, enabled)
+                if (enabled) {
+                    "✅ IA locale d'abord activée : chaque message est d'abord tenté gratuitement sur le " +
+                        "modèle embarqué (Gemini Nano ou modèle Qwen local, selon ce qui est prêt sur cet " +
+                        "appareil) — le cloud n'est sollicité que si le modèle local ne peut pas répondre. " +
+                        "Nécessite un modèle local déjà prêt (⚙ Réglages → Local) pour avoir un effet réel."
+                } else {
+                    "✅ IA locale d'abord désactivée : chaque message repart directement sur le fournisseur " +
+                        "cloud configuré, comme avant."
+                }
+            }
+            "get_local_first_mode" -> if (Prefs.isLocalFirstMode(context)) "📊 IA locale d'abord : activée." else "📊 IA locale d'abord : désactivée (réglage par défaut)."
             // Taille de la note "Mémoire JARVIS" injectée à CHAQUE message (voir
             // Prefs.getMaxMemoryChars/ObsidianController.trimMemoryIfNeeded).
             "set_memory_limit" -> {
@@ -577,7 +683,7 @@ object JarvisCommandParser {
             }
             "search_event" -> {
                 val query = json.optString("query", "")
-                withCalendarPresentationStyleNote(context, CalendarController.searchEvents(context, query, json.optString("calendar", "").ifBlank { null }))
+                withCalendarPresentationStyleNote(context, CalendarController.searchEvents(context, query, cleanOptionalField(json.optString("calendar", ""))))
             }
 
             "create_client_from_event" -> {

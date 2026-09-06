@@ -24,13 +24,26 @@ object Prefs {
     private const val KEY_API_KEY           = "api_key"            // rétrocompat
     private const val KEY_LOCAL_MODEL_PATH  = "local_model_path"
     private const val KEY_LOCAL_MODEL_FORMAT= "local_model_format"
+    private const val KEY_LOCAL_LLM_MODEL_ID = "local_llm_model_id"
+    private const val KEY_LOCAL_GGUF_MODEL_ID = "local_gguf_model_id"
     private const val KEY_ACCENT_COLOR      = "accent_color"
     private const val KEY_HF_TOKEN          = "hf_token"
     private const val KEY_ORB_STYLE         = "orb_style"
     private const val KEY_EMAIL_ACCOUNTS    = "email_accounts"     // JSON array
     private const val KEY_GITHUB_ACCOUNTS   = "github_accounts"    // JSON array
+    private const val KEY_LOGS_GIST_ID      = "logs_github_gist_id"
+    private const val KEY_LOGS_AUTO_UPLOAD  = "logs_auto_upload_github_enabled"
     private const val KEY_ROTATION_STRATEGY = "rotation_strategy"  // "ROUNDROBIN"|"FALLBACK"|"RANDOM"
     private const val KEY_OBSIDIAN_VAULT_PATH = "obsidian_vault_path"
+    // OAuth Google (Agenda/Mail) -- porte depuis l'appli reecrite (avant la restauration de l'ancienne base, voir taches #247-249), a la
+    // demande explicite de l'utilisateur de garder l'integration OAuth Google actuelle en
+    // plus (pas a la place) du systeme IMAP/SMTP existant de cette base.
+    private const val KEY_GOOGLE_WEB_CLIENT_ID = "google_web_client_id"
+    private const val KEY_GOOGLE_ACCOUNTS = "google_linked_accounts_json"
+    private const val KEY_GOOGLE_ACCESS_TOKEN = "google_oauth_access_token"
+    private const val KEY_GOOGLE_ACCESS_TOKEN_EXPIRY = "google_oauth_access_token_expiry_millis"
+    private const val KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL = "google_active_account_email"
+    private const val KEY_GOOGLE_ACCOUNT_TOKENS = "google_account_tokens_json"
 
     const val DEFAULT_ACCENT_COLOR = -1525685 // #FFE8B84B (or — thème Apex Studio)
 
@@ -307,6 +320,27 @@ object Prefs {
 
     fun getLocalModelPath(context: Context): String =
         prefs(context).getString(KEY_LOCAL_MODEL_PATH, "") ?: ""
+
+    // Identifiant du modele Qwen local actif (voir LocalLlmController.AVAILABLE_MODELS) --
+    // remplace KEY_LOCAL_MODEL_PATH/KEY_LOCAL_MODEL_FORMAT (ancien systeme GGUF/ONNX/MediaPipe
+    // multi-format par chemin de fichier libre) pour les taches #247/#248 : LocalLlmController
+    // gere lui-meme le chemin du fichier a partir de l'ID (voir modelFile()), donc seul l'ID
+    // a besoin d'etre persiste ici.
+    fun getLocalLlmModelId(context: Context): String =
+        prefs(context).getString(KEY_LOCAL_LLM_MODEL_ID, "") ?: ""
+
+    fun setLocalLlmModelId(context: Context, modelId: String) {
+        prefs(context).edit().putString(KEY_LOCAL_LLM_MODEL_ID, modelId).apply()
+    }
+
+    // Identifiant du modele GGUF (Llamatik/llama.cpp) actif -- voir GgufLlmController,
+    // greffe du moteur IA le plus recent de Jarvis2 (demande explicite de l'utilisateur).
+    fun getLocalGgufModelId(context: Context): String =
+        prefs(context).getString(KEY_LOCAL_GGUF_MODEL_ID, "") ?: ""
+
+    fun setLocalGgufModelId(context: Context, modelId: String) {
+        prefs(context).edit().putString(KEY_LOCAL_GGUF_MODEL_ID, modelId).apply()
+    }
 
     fun saveLocalModelPath(context: Context, path: String) {
         prefs(context).edit().putString(KEY_LOCAL_MODEL_PATH, path).apply()
@@ -599,6 +633,26 @@ object Prefs {
     fun setDefaultGithubAccount(context: Context, id: String) {
         val list = getGithubAccounts(context).map { it.copy(isDefault = it.id == id) }
         saveGithubAccounts(context, list)
+    }
+
+    // ─── Pipeline logs -> GitHub Gist (demande utilisateur : que Claude puisse recuperer les
+    //     logs "directement" sans etape manuelle) : un Gist PRIVE unique est cree puis mis a
+    //     jour a chaque envoi (au lieu d'un nouveau Gist a chaque fois), son id est retenu ici.
+    //     Actif par defaut (choix explicite : envoi auto a chaque erreur + sur commande),
+    //     mais reste desactivable dans Reglages pour la confidentialite.
+
+    fun getLogsGistId(context: Context): String? =
+        prefs(context).getString(KEY_LOGS_GIST_ID, null)?.ifBlank { null }
+
+    fun setLogsGistId(context: Context, gistId: String) {
+        prefs(context).edit().putString(KEY_LOGS_GIST_ID, gistId).apply()
+    }
+
+    fun isLogsAutoUploadEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_LOGS_AUTO_UPLOAD, true)
+
+    fun setLogsAutoUploadEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_LOGS_AUTO_UPLOAD, enabled).apply()
     }
 
     // ─── Écoute permanente (mot-clé d'activation) ───────────────────────────────
@@ -1285,12 +1339,17 @@ object Prefs {
         val total = prefs(context).getLong("token_usage_total", 0L)
         if (requests == 0L) return "📊 Aucun appel IA enregistré pour l'instant."
         val avg = if (requests > 0) total / requests else 0L
+        val localHits = prefs(context).getLong("token_usage_local_hits", 0L)
+        val localLine = if (localHits > 0) {
+            val pct = (localHits * 100 / requests)
+            "\n• Répondu en local (gratuit, sans cloud) : $localHits/$requests appel(s) (~$pct%)"
+        } else ""
         return "📊 Estimation de tokens (≈4 caractères = 1 token, approximatif — pas de compteur " +
             "officiel côté téléphone) :\n" +
             "• Dernière requête : ~$lastPrompt tokens envoyés (prompt système + mémoire + contexte " +
             "vault + historique), ~$lastResponse tokens reçus\n" +
             "• Depuis l'installation : $requests appel(s) IA, ~$total tokens au total (~$avg/appel " +
-            "en moyenne)"
+            "en moyenne)$localLine"
     }
 
     fun clearTokenUsage(context: Context) {
@@ -1299,7 +1358,32 @@ object Prefs {
             .remove("token_usage_last_response")
             .remove("token_usage_requests")
             .remove("token_usage_total")
+            .remove("token_usage_local_hits")
             .apply()
+    }
+
+    // ─── Mode "IA locale d'abord" (économie de tokens) ─────────────────────────────────────
+    // Demande utilisateur : "faire des prompts plus courts ou une consommation de token
+    // beaucoup moins importante, passer par IA locale et cloud ?" -- quand actif, ApiClient
+    // tente D'ABORD le modèle embarqué (Gemini Nano/Qwen local, gratuit, ~200 tokens de prompt
+    // système au lieu de ~1400-6800) pour chaque message ; si le modèle local s'estime incapable
+    // de répondre (données réelles du téléphone nécessaires) ou échoue, on repasse
+    // automatiquement et silencieusement sur le fournisseur cloud habituel -- l'utilisateur ne
+    // voit jamais la tentative locale ratée, seulement la réponse finale. Désactivé par défaut
+    // (comportement inchangé tant que l'utilisateur ne l'active pas) car un petit modèle local
+    // peut se tromper sur des demandes ambiguës qu'un modèle cloud aurait mieux gérées.
+    fun isLocalFirstMode(context: Context): Boolean =
+        prefs(context).getBoolean("local_first_mode", false)
+
+    fun setLocalFirstMode(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("local_first_mode", enabled).apply()
+    }
+
+    /** Compte un message répondu localement (sans passer par le cloud) -- voir
+     *  ApiClient.sendChat. Affiché dans getTokenUsageReport pour rendre l'économie visible. */
+    fun recordLocalFirstHit(context: Context) {
+        val hits = prefs(context).getLong("token_usage_local_hits", 0L) + 1
+        prefs(context).edit().putLong("token_usage_local_hits", hits).apply()
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1374,6 +1458,131 @@ object Prefs {
         val clamped = value.coerceIn(MIN_MEMORY_CHARS, MAX_MEMORY_CHARS_CAP)
         prefs(context).edit().putInt("max_memory_chars", clamped).apply()
         return clamped
+    }
+
+    // ─── OAuth Google (Agenda/Mail) ──────────────────────────────────────────
+    // Porte depuis l'appli reecrite (voir GoogleAccountController/GoogleCalendarApiController/
+    // GmailApiController) -- coexiste avec le systeme IMAP/SMTP existant de cette base : cette
+    // base essaie d'abord le calendrier LOCAL (CalendarController, deja synchronise par Android)
+    // et l'IMAP existant, puis se rabat sur l'API Google OAuth si l'utilisateur a lie un compte.
+
+    /** ID client OAuth "Web application" (Google Cloud Console -- voir GoogleAccountController),
+     *  requis comme serverClientId par Credential Manager. Ce n'est PAS un secret (contrairement
+     *  au client secret, jamais utilise ici) -- Google le documente explicitement comme un
+     *  identifiant public sans risque a embarquer dans une appli -- donc une valeur par defaut
+     *  est acceptable ici. Reste modifiable dans Reglages si l'utilisateur cree son propre
+     *  projet Cloud Console. */
+    private const val DEFAULT_GOOGLE_WEB_CLIENT_ID =
+        "253880913410-74a517f8fdmouu01hkojh01durm80236.apps.googleusercontent.com"
+
+    fun getGoogleWebClientId(context: Context): String? {
+        val saved = prefs(context).getString(KEY_GOOGLE_WEB_CLIENT_ID, null)
+        return if (saved.isNullOrBlank()) DEFAULT_GOOGLE_WEB_CLIENT_ID else saved
+    }
+
+    fun setGoogleWebClientId(context: Context, id: String) {
+        prefs(context).edit().putString(KEY_GOOGLE_WEB_CLIENT_ID, id).apply()
+    }
+
+    /** Jeton d'acces OAuth Google (Gmail/Agenda), voir GoogleAccountController.requestAuthorization
+     *  -- de courte duree de vie (~1h), on retient l'echeance pour savoir quand le redemander en
+     *  silencieux plutot que de le reutiliser expire (l'API Google renverrait alors 401). */
+    fun getGoogleAccessToken(context: Context): String? {
+        val expiry = prefs(context).getLong(KEY_GOOGLE_ACCESS_TOKEN_EXPIRY, 0L)
+        if (System.currentTimeMillis() >= expiry) return null
+        return prefs(context).getString(KEY_GOOGLE_ACCESS_TOKEN, null)
+    }
+
+    fun setGoogleAccessToken(context: Context, token: String, expiresInSeconds: Long = 3300) {
+        prefs(context).edit()
+            .putString(KEY_GOOGLE_ACCESS_TOKEN, token)
+            .putLong(KEY_GOOGLE_ACCESS_TOKEN_EXPIRY, System.currentTimeMillis() + expiresInSeconds * 1000)
+            .apply()
+    }
+
+    /** Comptes Google lies (email + nom affiche) -- voir GoogleAccountController.LinkedAccount. */
+    fun loadGoogleAccounts(context: Context): MutableList<GoogleAccountController.LinkedAccount> {
+        val raw = prefs(context).getString(KEY_GOOGLE_ACCOUNTS, null) ?: return mutableListOf()
+        return try {
+            val array = JSONArray(raw)
+            val result = mutableListOf<GoogleAccountController.LinkedAccount>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                result.add(
+                    GoogleAccountController.LinkedAccount(
+                        obj.getString("email"),
+                        obj.optString("displayName", "")
+                    )
+                )
+            }
+            result
+        } catch (_: Exception) {
+            mutableListOf()
+        }
+    }
+
+    fun saveGoogleAccounts(context: Context, accounts: List<GoogleAccountController.LinkedAccount>) {
+        val array = JSONArray()
+        accounts.forEach { acc ->
+            val obj = JSONObject()
+            obj.put("email", acc.email)
+            obj.put("displayName", acc.displayName)
+            array.put(obj)
+        }
+        prefs(context).edit().putString(KEY_GOOGLE_ACCOUNTS, array.toString()).apply()
+    }
+
+    /**
+     * Email du compte Google dont le jeton est actuellement en cache (voir
+     * getGoogleAccessToken/setGoogleAccessToken -- UN SEUL jeton a la fois, pas un par compte
+     * lie). Sert uniquement a AFFICHER clairement a l'utilisateur quel compte parmi ceux lies
+     * est actif pour Agenda/Mail.
+     */
+    fun getActiveGoogleAccountEmail(context: Context): String? =
+        prefs(context).getString(KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL, null)
+
+    fun setActiveGoogleAccountEmail(context: Context, email: String) {
+        prefs(context).edit().putString(KEY_GOOGLE_ACTIVE_ACCOUNT_EMAIL, email).apply()
+    }
+
+    // --- Jetons OAuth PAR compte (email -> {token, expiry}) --------------------------------
+    // Permet de LIRE (agenda, mails) simultanement sur tous les comptes dont le jeton est
+    // encore valide, sans repasser par le selecteur systeme a chaque fois -- contourne la
+    // limite "un seul compte par defaut a la fois" de l'API Google puisqu'on ne redemande
+    // jamais un jeton pour un AUTRE compte que celui qui vient d'etre autorise.
+    fun setGoogleAccessTokenForAccount(context: Context, email: String, token: String, expiresInSeconds: Long = 3300) {
+        if (email.isBlank()) return
+        val map = loadGoogleAccountTokensRaw(context)
+        val entry = JSONObject()
+        entry.put("token", token)
+        entry.put("expiry", System.currentTimeMillis() + expiresInSeconds * 1000)
+        map.put(email, entry)
+        prefs(context).edit().putString(KEY_GOOGLE_ACCOUNT_TOKENS, map.toString()).apply()
+    }
+
+    /** Tous les jetons de compte encore valides (non expires), email -> jeton. */
+    fun getAllValidGoogleAccountTokens(context: Context): Map<String, String> {
+        val map = loadGoogleAccountTokensRaw(context)
+        val now = System.currentTimeMillis()
+        val result = mutableMapOf<String, String>()
+        val keys = map.keys()
+        while (keys.hasNext()) {
+            val email = keys.next()
+            val entry = map.optJSONObject(email) ?: continue
+            val expiry = entry.optLong("expiry", 0L)
+            val token = entry.optString("token", "")
+            if (token.isNotBlank() && now < expiry) result[email] = token
+        }
+        return result
+    }
+
+    private fun loadGoogleAccountTokensRaw(context: Context): JSONObject {
+        val raw = prefs(context).getString(KEY_GOOGLE_ACCOUNT_TOKENS, null) ?: return JSONObject()
+        return try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            JSONObject()
+        }
     }
 
     // ─── Interne ──────────────────────────────────────────────────────────────
