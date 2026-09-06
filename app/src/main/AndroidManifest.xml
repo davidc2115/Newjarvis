@@ -76,67 +76,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <!-- Exemption d'optimisation batterie : indispensable sur beaucoup de telephones (Xiaomi/MIUI
-         en tete) pour que l'ecoute permanente (WakeWordService) ne soit pas tuee par le systeme
-         apres quelques minutes en arriere-plan (voir requestBatteryExemptionButton). -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.SET_ALARM" />
-    <!-- BUG RÉEL CORRIGÉ : sur certains ROM/OEM, com.android.deskclock.HandleSetAlarmActivity
-         exige EN PLUS cette permission custom (distincte de la permission standard ci-dessus)
-         pour accepter l'intent ACTION_SET_ALARM — sans elle, l'appel échouait avec
-         "Permission Denial: ... requires com.android.alarm.permission.SET_ALARM" alors même
-         que la permission standard était bien déclarée. -->
-    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <!-- ── Intégration Stable Diffusion WebUI via Termux (opt-in, voir TermuxController) ──
-         Permission dédiée exigée par Termux lui-même (com.termux.permission.RUN_COMMAND) pour
-         qu'une app tierce puisse lui envoyer des commandes — SANS ELLE, Termux refuse
-         silencieusement toute commande venant de JARVIS. Accordée par l'utilisateur via
-         Réglages système Android (pas une simple pop-up runtime, Termux l'exige via la page
-         "Autorisations" de l'app dans les paramètres Android), EN PLUS d'un réglage manuel
-         obligatoire à faire une seule fois DANS Termux (allow-external-apps=true dans
-         ~/.termux/termux.properties) que JARVIS ne peut pas modifier lui-même (sandbox
-         Android : chaque app a son propre répertoire privé, JARVIS n'a pas accès à celui de
-         Termux). Termux doit être installé par l'utilisateur lui-même (F-Droid recommandé,
-         la version Play Store ne supporte plus RUN_COMMAND). -->
-    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
-
-    <!-- targetSdkVersion >= 30 (Android 11+) : sans cette déclaration, JARVIS ne peut même
-         pas VÉRIFIER si Termux est installé ni lui envoyer d'intent (restriction de visibilité
-         des paquets) — l'appairage échouerait silencieusement, exactement le genre de bug
-         invisible que ce projet évite systématiquement ailleurs (voir FreeboxController). -->
-    <queries>
-        <package android:name="com.termux" />
-
-        <!-- Même restriction de visibilité (Android 11+) pour l'appli Horloge/Réveil par
-             défaut : sans ces déclarations, intent.resolveActivity() renvoie TOUJOURS null
-             même quand une vraie appli Horloge est installée, et JARVIS répond à tort
-             "aucune application horloge n'est installée" (bug réel signalé par l'utilisateur,
-             alors que le téléphone en a bien une) — startActivity() aurait fonctionné sans
-             cette vérification, mais pas la vérification préalable elle-même. -->
-        <intent>
-            <action android:name="android.intent.action.SET_ALARM" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.SHOW_ALARMS" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.SET_TIMER" />
-        </intent>
-
-        <!-- Visibilité du service de reconnaissance vocale système (Android 11+) : requis pour
-             que SpeechRecognizer.createSpeechRecognizer() trouve le moteur par défaut du
-             téléphone : voir WakeWordService.startKeywordSpotting() (mode-clé libre, ex:
-             "Jarvis" seul ou tout autre mot personnalisé non couvert par un modèle openWakeWord
-             pré-entraîné). Sans cette déclaration, le service de reconnaissance reste invisible
-             et l'écoute échouerait silencieusement, comme pour Termux/Horloge ci-dessus. -->
-        <intent>
-            <action android:name="android.speech.RecognitionService" />
-        </intent>
-    </queries>
 
     <application
         android:name=".JarvisApplication"
@@ -152,8 +95,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize">
+            android:theme="@style/Theme.Jarvis">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -164,85 +106,75 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="Paramètres"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".VoiceModeActivity"
             android:exported="false"
             android:label="Mode vocal"
             android:theme="@style/Theme.Jarvis"
-            android:screenOrientation="portrait"
-            android:windowSoftInputMode="adjustResize" />
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".PhoneControlActivity"
             android:exported="false"
             android:label="Contrôle téléphone"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".GitHubActivity"
             android:exported="false"
             android:label="GitHub"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".EmailConfigActivity"
             android:exported="false"
             android:label="Configuration Email IMAP/SMTP"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".ObsidianActivity"
             android:exported="false"
             android:label="🧠 Second Brain — Obsidian"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
-
-        <activity
-            android:name=".VaultGraphActivity"
-            android:exported="false"
-            android:label="🌌 Toile Obsidian — exploration"
             android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".SmartHomeActivity"
             android:exported="false"
-            android:label="☰ Menu JARVIS"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:label="🏠 Maison connectée"
+            android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".HomeAssistantActivity"
             android:exported="false"
             android:label="Home Assistant"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".NetworkActivity"
             android:exported="false"
             android:label="Réseau local"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".MusicActivity"
             android:exported="false"
             android:label="Musique"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.Jarvis" />
 
         <activity
             android:name=".GenerationActivity"
             android:exported="false"
             android:label="Génération IA"
-            android:theme="@style/Theme.Jarvis"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.Jarvis" />
+
+        <activity
+            android:name=".FreeboxActivity"
+            android:exported="false"
+            android:label="Freebox Server"
+            android:theme="@style/Theme.Jarvis" />
+
 
         <!-- ── Receiver SMS (Validation des permissions SMS sur Android 10+) ── -->
         <receiver
@@ -274,12 +206,6 @@
         <!-- ── Service de génération IA en arrière-plan (image/vidéo/site) ────── -->
         <service
             android:name=".GenerationService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
-        <!-- ── Serveur web local (hebergement d'un site JARVIS depuis le telephone) ── -->
-        <service
-            android:name=".LocalWebServerService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 

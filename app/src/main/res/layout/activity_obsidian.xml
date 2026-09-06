@@ -75,57 +75,6 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- Réinitialisation : deux actions distinctes et clairement séparées,
-             l'une anodine (chemin), l'autre destructive (contenu). -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="16dp">
-
-            <TextView
-                android:id="@+id/btnResetVaultPath"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_input"
-                android:gravity="center"
-                android:text="↩️ Chemin par défaut"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:layout_marginEnd="6dp" />
-
-            <TextView
-                android:id="@+id/btnWipeVault"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_input"
-                android:gravity="center"
-                android:text="🗑️ Vider le vault"
-                android:textColor="#FF6B6B"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/btnResetCalendarNicknames"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:background="@drawable/bg_input"
-            android:gravity="center"
-            android:text="📅 Effacer les surnoms de calendrier"
-            android:textColor="@color/text_secondary"
-            android:textSize="11sp"
-            android:layout_marginBottom="16dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="ℹ️ Les surnoms de calendrier (name_calendar) sont stockés séparément du vault Obsidian — vider le vault ci-dessus ne les efface pas, utilise ce bouton pour ça."
-            android:textColor="@color/text_secondary"
-            android:textSize="10sp"
-            android:layout_marginBottom="20dp" />
-
         <!-- ══════════════════════════════════════════════════════════════════ -->
         <!-- SECTION : Créer une note                                          -->
         <!-- ══════════════════════════════════════════════════════════════════ -->
@@ -268,21 +217,6 @@
             android:text="📋 Voir toutes mes notes"
             android:textColor="@color/text_secondary"
             android:textSize="13sp"
-            android:layout_marginBottom="20dp" />
-
-        <!-- Exploration interactive du graphe reel du vault (pan/zoom, tap sur un point) :
-             demande explicitement par l'utilisateur en plus du petit orb en arriere-plan
-             du chat, voir VaultGraphActivity. -->
-        <TextView
-            android:id="@+id/btnVaultGraph"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:background="@drawable/bg_input"
-            android:gravity="center"
-            android:text="🌌 Explorer la Toile Obsidian"
-            android:textColor="@color/cyan_accent"
-            android:textSize="13sp"
-            android:textStyle="bold"
             android:layout_marginBottom="20dp" />
 
         <!-- ══════════════════════════════════════════════════════════════════ -->

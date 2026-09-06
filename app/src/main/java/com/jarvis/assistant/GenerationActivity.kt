@@ -1,17 +1,13 @@
 package com.jarvis.assistant
 
-import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -27,13 +23,10 @@ class GenerationActivity : AppCompatActivity() {
     private lateinit var imageView: ImageView
     private lateinit var videoOutput: TextView
     private lateinit var websiteOutput: TextView
-    private lateinit var historyContainer: LinearLayout
-    private lateinit var historyEmptyText: TextView
+    private lateinit var historyText: TextView
     private lateinit var activeGenCard: View
     private lateinit var activeGenLabel: TextView
     private var lastWebsiteFile: File? = null
-    // "carre" (défaut) | "portrait" | "paysage" — voir la sélection formatCarreBtn/... dans onCreate.
-    private var selectedImageFormat: String = "carre"
 
     // Rafraîchit l'historique (et donc la barre de progression) toutes les 1,5s
     // pendant que cet écran est visible — indispensable pour voir en direct une
@@ -56,38 +49,13 @@ class GenerationActivity : AppCompatActivity() {
         imageOutput = findViewById(R.id.imageOutputText)
         imageView = findViewById(R.id.generatedImageView)
 
-        val formatCarreBtn = findViewById<TextView>(R.id.formatCarreBtn)
-        val formatPortraitBtn = findViewById<TextView>(R.id.formatPortraitBtn)
-        val formatPaysageBtn = findViewById<TextView>(R.id.formatPaysageBtn)
-        val formatButtons = mapOf("carre" to formatCarreBtn, "portrait" to formatPortraitBtn, "paysage" to formatPaysageBtn)
-
-        // Met en évidence le format actuellement sélectionné (fond doré + texte foncé) et
-        // grise les deux autres — même logique de bascule que toggleWakeWordButton ailleurs
-        // dans l'app, réutilisée ici pour rester cohérent visuellement.
-        fun refreshFormatButtons() {
-            formatButtons.forEach { (fmt, btn) ->
-                val active = fmt == selectedImageFormat
-                btn.setBackgroundResource(if (active) R.drawable.bg_mic_button else R.drawable.bg_input)
-                btn.setTextColor(getColor(if (active) R.color.background_dark else R.color.text_secondary))
-                btn.setTypeface(null, if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
-            }
-        }
-        refreshFormatButtons()
-        formatButtons.forEach { (fmt, btn) ->
-            btn.setOnClickListener {
-                selectedImageFormat = fmt
-                refreshFormatButtons()
-            }
-        }
-
         val replicateTokenInput = findViewById<EditText>(R.id.replicateTokenInput)
         val videoPrompt = findViewById<EditText>(R.id.videoPromptInput)
         videoOutput = findViewById(R.id.videoOutputText)
 
         val websitePrompt = findViewById<EditText>(R.id.websitePromptInput)
         websiteOutput = findViewById(R.id.websiteOutputText)
-        historyContainer = findViewById(R.id.historyContainer)
-        historyEmptyText = findViewById(R.id.historyEmptyText)
+        historyText = findViewById(R.id.historyText)
         activeGenCard = findViewById(R.id.activeGenCard)
         activeGenLabel = findViewById(R.id.activeGenLabel)
 
@@ -100,8 +68,8 @@ class GenerationActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.btnGenImage).setOnClickListener {
             val prompt = imagePrompt.text.toString()
             if (prompt.isBlank()) { Toast.makeText(this, "Décris l'image souhaitée.", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            imageView.visibility = View.GONE
-            GenerationService.enqueue(this, "image", prompt, format = selectedImageFormat)
+            imageView.visibility = android.view.View.GONE
+            GenerationService.enqueue(this, "image", prompt)
             imageOutput.text = "🎨 Génération lancée en arrière-plan — une notification t'avertira dès que c'est prêt."
             refreshHistory()
         }
@@ -131,22 +99,20 @@ class GenerationActivity : AppCompatActivity() {
                 Toast.makeText(this, "Aucun site généré pour l'instant.", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            openWebsiteFile(file)
+            try {
+                val uri = WebsiteGenController.getShareableUri(this, file)
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "text/html")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this, "Impossible d'ouvrir le site : ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
 
         findViewById<TextView>(R.id.btnRefreshHistory).setOnClickListener { refreshHistory() }
-
-        findViewById<TextView>(R.id.btnClearHistory).setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Vider l'historique des générations ?")
-                .setMessage("La liste des générations (images, vidéos, sites) sera vidée définitivement. Les fichiers déjà créés restent sur le disque, seul l'historique est réinitialisé.")
-                .setPositiveButton("Vider") { _, _ ->
-                    Prefs.clearGenerationHistory(this)
-                    refreshHistory()
-                }
-                .setNegativeButton("Annuler", null)
-                .show()
-        }
 
         findViewById<TextView>(R.id.btnViewLastImage).setOnClickListener {
             val path = lastSuccessfulRecordPath("image")
@@ -154,7 +120,13 @@ class GenerationActivity : AppCompatActivity() {
                 Toast.makeText(this, "Aucune image générée pour l'instant.", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            viewImage(path)
+            try {
+                val bitmap = BitmapFactory.decodeFile(path)
+                imageView.setImageBitmap(bitmap)
+                imageView.visibility = android.view.View.VISIBLE
+            } catch (e: Exception) {
+                Toast.makeText(this, "Impossible de charger l'image : ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
 
         findViewById<TextView>(R.id.btnViewLastVideo).setOnClickListener {
@@ -163,7 +135,17 @@ class GenerationActivity : AppCompatActivity() {
                 Toast.makeText(this, "Aucune vidéo générée pour l'instant.", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            playVideo(path)
+            try {
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", File(path))
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "video/mp4")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this, "Impossible d'ouvrir la vidéo : ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
 
         refreshHistory()
@@ -196,7 +178,6 @@ class GenerationActivity : AppCompatActivity() {
                 "image" -> "🖼️ Image"
                 "video" -> "🎬 Vidéo"
                 "website" -> "🌐 Site web"
-                "website_edit" -> "✏️ Modification de site"
                 else -> record.type
             }
             "⏳ $typeLabel en cours — ${record.prompt.take(50)}"
@@ -209,204 +190,32 @@ class GenerationActivity : AppCompatActivity() {
             .firstOrNull { it.type == type && it.status == "success" && !it.resultPath.isNullOrBlank() }
             ?.resultPath
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    /**
-     * Reconstruit la galerie de générations : une carte cliquable par génération
-     * (image/vidéo/site), la plus récente en premier. Toucher une carte affiche le
-     * résultat (image/vidéo/site) et, pour un site, propose aussi de le modifier.
-     */
     private fun refreshHistory() {
-        // Corrige les générations restées bloquées sur "pending" parce que le service a
-        // été tué par le système avant de pouvoir écrire un résultat (sinon elles restent
-        // affichées "en cours" indéfiniment, sans jamais aboutir ni échouer explicitement).
-        Prefs.reconcileStaleGenerations(this)
         val history = Prefs.getGenerationHistory(this)
         updateActiveGenCard(history)
-        historyContainer.removeAllViews()
-
         if (history.isEmpty()) {
-            historyEmptyText.visibility = View.VISIBLE
+            historyText.text = "Aucune génération pour l'instant."
             return
         }
-        historyEmptyText.visibility = View.GONE
-
         val fmt = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
-        history.take(30).forEach { record ->
+        historyText.text = history.take(30).joinToString("\n\n") { record ->
             val icon = when (record.status) {
                 "success" -> "✅"
                 "failed" -> "❌"
                 else -> "⏳"
             }
             val typeLabel = when (record.type) {
-                "image" -> "🖼️ Image"
-                "video" -> "🎬 Vidéo"
-                "website" -> "🌐 Site web"
-                "website_edit" -> "✏️ Site modifié"
-                "chart" -> "📊 Graphique"
-                "file_zip" -> "🗜️ Archive ZIP"
-                "file_pdf" -> "📄 PDF"
-                "file_docx" -> "📝 Document Word"
-                "file_xlsx" -> "📊 Tableur Excel"
+                "image" -> "Image"
+                "video" -> "Vidéo"
+                "website" -> "Site web"
                 else -> record.type
             }
             val date = fmt.format(Date(record.timestamp))
             val promptShort = record.prompt.take(60)
-            val detail = when {
-                record.status == "failed" && !record.errorMessage.isNullOrBlank() -> "\n${record.errorMessage.take(120)}"
-                record.status == "success" -> "\n👉 Toucher pour afficher / modifier"
-                record.status == "pending" -> "\n⏳ En cours..."
-                else -> ""
-            }
-
-            val row = TextView(this).apply {
-                text = "$icon [$date] $typeLabel\n$promptShort$detail"
-                setTextColor(Color.parseColor("#E6EAF2"))
-                textSize = 11f
-                setLineSpacing(dp(2).toFloat(), 1f)
-                setBackgroundResource(R.drawable.bg_input)
-                setPadding(dp(12), dp(12), dp(12), dp(12))
-                isClickable = record.status != "pending"
-                isFocusable = record.status != "pending"
-                val lp = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                lp.bottomMargin = dp(8)
-                layoutParams = lp
-                setOnClickListener { handleHistoryItemClick(record) }
-            }
-            historyContainer.addView(row)
+            val detail = if (record.status == "failed" && !record.errorMessage.isNullOrBlank()) {
+                "\n   ${record.errorMessage.take(100)}"
+            } else ""
+            "$icon [$date] $typeLabel — $promptShort$detail"
         }
-    }
-
-    private fun handleHistoryItemClick(record: Prefs.GenerationRecord) {
-        when (record.status) {
-            "pending" -> Toast.makeText(this, "⏳ Génération en cours...", Toast.LENGTH_SHORT).show()
-            "failed" -> AlertDialog.Builder(this)
-                .setTitle("❌ Échec de la génération")
-                .setMessage(record.errorMessage?.ifBlank { "Erreur inconnue." } ?: "Erreur inconnue.")
-                .setPositiveButton("OK", null)
-                .show()
-            "success" -> {
-                val path = record.resultPath
-                if (path.isNullOrBlank() || !File(path).exists()) {
-                    Toast.makeText(this, "❌ Fichier introuvable (peut-être supprimé ou déplacé).", Toast.LENGTH_LONG).show()
-                    return
-                }
-                when (record.type) {
-                    "image", "chart" -> viewImage(path)
-                    "video" -> playVideo(path)
-                    "website", "website_edit" -> showWebsiteOptions(record, File(path))
-                    "file_zip", "file_pdf", "file_docx", "file_xlsx" -> openGeneratedFile(path)
-                    else -> Toast.makeText(this, "Type de génération inconnu.", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    private fun viewImage(path: String) {
-        try {
-            val bitmap = BitmapFactory.decodeFile(path)
-            if (bitmap == null) {
-                Toast.makeText(this, "❌ Impossible de décoder l'image.", Toast.LENGTH_LONG).show()
-                return
-            }
-            imageView.setImageBitmap(bitmap)
-            imageView.visibility = View.VISIBLE
-            imageView.requestFocus()
-        } catch (e: Exception) {
-            Toast.makeText(this, "Impossible de charger l'image : ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun playVideo(path: String) {
-        try {
-            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", File(path))
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "video/mp4")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Impossible d'ouvrir la vidéo : ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    /** Ouvre un fichier généré (zip/pdf/docx/xlsx) avec l'appli du téléphone associée à son type, via FileProvider. */
-    private fun openGeneratedFile(path: String) {
-        try {
-            val file = File(path)
-            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, FileGenController.mimeTypeFor(path))
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "❌ Impossible d'ouvrir le fichier (aucune app compatible installée, ou : ${e.message}).", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun openWebsiteFile(file: File) {
-        // BUG RÉEL CORRIGÉ : ACTION_VIEW sur index.html seul via FileProvider ne donne accès
-        // qu'à CE fichier — styles.css/script.js/images/autres pages restent inaccessibles au
-        // navigateur (site qui semblait "sans image, à une seule page"). Sert maintenant le
-        // dossier entier via le serveur web local (voir WebsiteGenController pour le détail).
-        lastWebsiteFile = file
-        Thread {
-            val siteDir = file.parentFile ?: file
-            val result = WebsiteGenController.openInBrowserViaLocalServer(this, siteDir)
-            if (result.startsWith("❌")) {
-                runOnUiThread { Toast.makeText(this, result, Toast.LENGTH_LONG).show() }
-            }
-        }.start()
-    }
-
-    /** Propose "Ouvrir" ou "Modifier" pour un site déjà généré (galerie ou bouton rapide). */
-    private fun showWebsiteOptions(record: Prefs.GenerationRecord, file: File) {
-        AlertDialog.Builder(this)
-            .setTitle("🌐 ${record.prompt.take(60)}")
-            .setItems(arrayOf("🌐 Ouvrir dans le navigateur", "✏️ Modifier ce site", "Annuler")) { dialog, which ->
-                when (which) {
-                    0 -> openWebsiteFile(file)
-                    1 -> promptEditWebsite(file.absolutePath)
-                }
-                dialog.dismiss()
-            }
-            .show()
-    }
-
-    /** Demande les instructions de modification puis relance une génération d'édition en arrière-plan. */
-    private fun promptEditWebsite(existingPath: String) {
-        val input = EditText(this).apply {
-            hint = "Ex : change la couleur principale en bleu, ajoute une section avis clients..."
-            setTextColor(Color.parseColor("#E6EAF2"))
-            setHintTextColor(Color.parseColor("#8A93A6"))
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-        }
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            addView(input)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("✏️ Modifier le site")
-            .setView(container)
-            .setPositiveButton("Lancer la modification") { dialog, _ ->
-                val instructions = input.text.toString()
-                if (instructions.isBlank()) {
-                    Toast.makeText(this, "Précise la modification souhaitée.", Toast.LENGTH_SHORT).show()
-                } else {
-                    GenerationService.enqueue(this, "website_edit", instructions, existingPath = existingPath)
-                    Toast.makeText(this, "✏️ Modification lancée en arrière-plan.", Toast.LENGTH_SHORT).show()
-                    refreshHistory()
-                }
-                dialog.dismiss()
-            }
-            .setNegativeButton("Annuler") { dialog, _ -> dialog.dismiss() }
-            .show()
     }
 }

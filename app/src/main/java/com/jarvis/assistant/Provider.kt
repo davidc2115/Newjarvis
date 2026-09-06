@@ -4,7 +4,7 @@ package com.jarvis.assistant
  * Liste des fournisseurs IA disponibles.
  * isLocal = true signifie : aucun réseau, modèle exécuté directement sur le téléphone.
  * isAuto = true signifie : essaie plusieurs fournisseurs configurés jusqu'à ce que l'un réponde.
- * needsApiKey = false signifie : pas de clé API requise (Custom sans auth, Pollinations…).
+ * needsApiKey = false signifie : pas de clé API requise (Ollama local, Custom sans auth…).
  */
 enum class Provider(
     val displayName: String,
@@ -23,16 +23,10 @@ enum class Provider(
     ),
 
     // ── Fournisseurs Cloud ────────────────────────────────────────────────────
-    // llama-3.3-70b-versatile déprécié par Groq le 16/08/2026 (avec llama-3.1-8b-instant) —
-    // requêtes en erreur "model does not exist" depuis cette date, confirmé par l'utilisateur.
-    // Remplacement officiellement recommandé par Groq (console.groq.com/docs/deprecations) :
-    // openai/gpt-oss-120b (l'autre option suggérée, qwen/qwen3.6-27b, est plus petite/rapide
-    // mais moins capable — gpt-oss-120b reste le choix par défaut le plus proche en capacité
-    // de l'ancien 70B, y compris pour le tool use dont JARVIS dépend pour JARVIS_CMD).
     GROQ(
         "Groq (gratuit, très rapide)",
         "https://api.groq.com/openai/v1/chat/completions",
-        "openai/gpt-oss-120b"
+        "llama-3.3-70b-versatile"
     ),
     OPENAI(
         "ChatGPT (OpenAI)",
@@ -44,18 +38,10 @@ enum class Provider(
         "https://api.anthropic.com/v1/messages",
         "claude-sonnet-4-5"
     ),
-    // gemini-3.1-pro-preview (essayé d'abord) renvoyait systématiquement HTTP 429 sur TOUTES
-    // les clés de l'utilisateur (confirmé en usage réel) : les modèles "Preview" ont des quotas
-    // gratuits nettement plus restrictifs que les modèles "Stable", indépendamment d'un
-    // abonnement Gemini (l'abonnement consommateur gemini.google.com/l'app et les quotas de
-    // clé API AI Studio sont deux systèmes distincts). gemini-3.7-flash est le modèle STABLE
-    // le plus récent et le plus capable de la gamme (coding/agentique/multi-étapes), avec un
-    // quota gratuit bien plus généreux qu'un modèle Preview — priorité à la fiabilité réelle
-    // plutôt qu'au label "Pro" d'un modèle Preview qui échoue en pratique.
     GEMINI(
         "Google Gemini",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
-        "gemini-3.7-flash"
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent",
+        "gemini-2.0-flash-lite"
     ),
     MISTRAL(
         "Mistral AI",
@@ -88,19 +74,14 @@ enum class Provider(
         "",
         needsApiKey = true
     ),
-    // Pollinations.ai (text.pollinations.ai/openai, endpoint compatible OpenAI) : IA de secours
-    // GRATUITE et SANS AUCUNE CLÉ (accès anonyme officiel, cf. https://github.com/pollinations/pollinations/blob/master/APIDOCS.md),
-    // placée en tout dernier recours dans AUTO_FALLBACK_ORDER ci-dessous — même logique que AI Horde
-    // pour les images (voir ImageGenController) : ça garantit que le mode Automatique répond TOUJOURS,
-    // même si l'utilisateur n'a configuré aucune clé API. Contrepartie honnête : service communautaire
-    // tiers, limité à 1 requête/15s en anonyme et moins fiable qu'un fournisseur avec clé dédiée.
-    POLLINATIONS(
-        "Pollinations (gratuit, sans clé, dernier recours)",
-        "https://text.pollinations.ai/openai",
-        "openai",
+
+    // ── IA sur réseau local (PC) ──────────────────────────────────────────────
+    OLLAMA(
+        "IA locale sur PC (Ollama)",
+        "http://192.168.1.50:11434/v1/chat/completions",
+        "llama3.1",
         needsApiKey = false
     ),
-
     CUSTOM(
         "Autre / URL personnalisée",
         "",
@@ -109,31 +90,22 @@ enum class Provider(
     ),
 
     // ── Modèles embarqués sur le téléphone (hors-ligne) ───────────────────────
-    // Remplace ON_DEVICE/LOCAL_GGUF/LOCAL_ONNX (moteurs natifs llama.cpp/MediaPipe/ONNX Runtime
-    // GenAI, retirés tâches #247/#248 -- demande explicite utilisateur de garder l'IA on-device
-    // ACTUELLE de l'appli réécrite plutôt que l'ancien système natif) par les deux backends
-    // actuels : GeminiNanoController (AICore) et LocalLlmController (LiteRT-LM, sans NDK).
-    GEMINI_NANO(
-        "Gemini Nano (Google AICore, sur l'appareil)",
+    ON_DEVICE(
+        "Modèle sur téléphone (.task MediaPipe)",
         "",
         "",
         isLocal = true,
         needsApiKey = false
     ),
-    LOCAL_LITERT(
-        "Modèle local Qwen (LiteRT-LM, sur l'appareil)",
-        "",
-        "",
-        isLocal = true,
-        needsApiKey = false
-    ),
-
-    // Greffe du moteur IA le plus recent de Jarvis2 (voir GgufLlmController) : llama.cpp natif
-    // via Llamatik, plus rapide/capable que LiteRT-LM a taille egale, et seul chemin possible
-    // vers un backend GPU (Vulkan) une fois l'AAR custom integree. Coexiste avec LOCAL_LITERT
-    // plutot que de le remplacer (voir doc GgufLlmController).
     LOCAL_GGUF(
-        "Modèle local GGUF (llama.cpp, sur l'appareil)",
+        "Modèle GGUF sur téléphone (llama.cpp)",
+        "",
+        "",
+        isLocal = true,
+        needsApiKey = false
+    ),
+    LOCAL_ONNX(
+        "Modèle ONNX sur téléphone",
         "",
         "",
         isLocal = true,
@@ -143,7 +115,7 @@ enum class Provider(
     /** Fournisseurs cloud éligibles au mode Automatique, par ordre de préférence. */
     companion object {
         val AUTO_FALLBACK_ORDER = listOf(
-            GROQ, GEMINI, CLAUDE, OPENAI, MISTRAL, DEEPSEEK, PERPLEXITY, TOGETHER, OPENROUTER, POLLINATIONS
+            GROQ, CLAUDE, OPENAI, GEMINI, MISTRAL, DEEPSEEK, PERPLEXITY, TOGETHER, OPENROUTER
         )
 
         /** Tous les providers cloud qui acceptent une clé API individuelle. */

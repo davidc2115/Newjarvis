@@ -4,30 +4,13 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- ── Contenu principal (chat), avec la Toile Obsidian en arriere-plan ────
-         FrameLayout : l'orb "Toile Obsidian" (nœuds/liens du vault reel) occupe
-         tout l'ecran en fond, en dessous du LinearLayout de chat (transparent),
-         demande explicitement par l'utilisateur pour qu'elle soit visible aussi
-         dans le chat texte, pas seulement en mode vocal. Alpha reduit pour ne
-         pas nuire a la lisibilite des messages. Voir MainActivity.refreshChatOrbGraph(). -->
-    <FrameLayout
+    <!-- ── Contenu principal (chat) ─────────────────────────────────────────── -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@color/background_dark">
-
-        <com.jarvis.assistant.OrbView
-            android:id="@+id/chatBackgroundOrb"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:alpha="0.22" />
-
-        <!-- ── Contenu principal (chat) ─────────────────────────────────────────── -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="vertical"
-            android:background="@android:color/transparent"
-            android:padding="12dp">
+        android:orientation="vertical"
+        android:background="@color/background_dark"
+        android:padding="12dp">
 
         <LinearLayout
             android:id="@+id/headerRow"
@@ -45,7 +28,7 @@
                 android:textSize="20sp"
                 android:textColor="@color/cyan_accent"
                 android:gravity="center"
-                android:background="@drawable/bg_icon_button" />
+                android:background="@color/surface_dark" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -70,35 +53,39 @@
                     android:layout_height="wrap_content"
                     android:text="● en veille"
                     android:textColor="@color/text_secondary"
-                    android:textSize="12sp"
-                    android:fontFamily="monospace" />
-
-                <!-- Compteur RAM utilisée (demande utilisateur), voir RamMonitor.kt et
-                     MainActivity.refreshRamUsage(), rafraîchi périodiquement pendant que
-                     l'écran de chat est au premier plan. -->
-                <TextView
-                    android:id="@+id/ramUsageText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="RAM : —"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="10sp"
-                    android:fontFamily="monospace" />
+                    android:textSize="12sp" />
 
             </LinearLayout>
 
-            <!-- Un seul bouton vers le menu complet (domotique, création IA, Obsidian,
-                 contrôle téléphone, GitHub, réglages...) — remplace les 3 icônes séparées
-                 et peu explicites d'avant pour un header plus propre et plus lisible. -->
             <TextView
-                android:id="@+id/hubButton"
+                android:id="@+id/controlButton"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
                 android:layout_marginEnd="8dp"
-                android:text="▤"
+                android:text="📱"
                 android:textSize="20sp"
                 android:gravity="center"
-                android:background="@drawable/bg_icon_button" />
+                android:background="@color/surface_dark" />
+
+            <TextView
+                android:id="@+id/obsidianButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:text="🧠"
+                android:textSize="20sp"
+                android:gravity="center"
+                android:background="@color/surface_dark" />
+
+            <TextView
+                android:id="@+id/smartHomeButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:text="🏠"
+                android:textSize="22sp"
+                android:gravity="center"
+                android:background="@color/surface_dark" />
 
             <TextView
                 android:id="@+id/settingsButton"
@@ -108,7 +95,7 @@
                 android:textSize="22sp"
                 android:textColor="@color/cyan_accent"
                 android:gravity="center"
-                android:background="@drawable/bg_icon_button" />
+                android:background="@color/surface_dark" />
 
         </LinearLayout>
 
@@ -134,18 +121,16 @@
                 android:id="@+id/pendingImageThumbnail"
                 android:layout_width="56dp"
                 android:layout_height="56dp"
-                android:scaleType="fitCenter" />
+                android:scaleType="centerCrop" />
 
             <TextView
                 android:id="@+id/removePendingImageButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
-                android:padding="8dp"
                 android:text="✕ retirer la photo"
                 android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:background="?attr/selectableItemBackground" />
+                android:textSize="12sp" />
 
         </LinearLayout>
 
@@ -211,19 +196,10 @@
             android:layout_marginBottom="-12dp"
             android:layout_marginTop="8dp" />
 
-        </LinearLayout>
-
-    </FrameLayout>
+    </LinearLayout>
 
     <!-- ── Tiroir latéral rétractable : historique des conversations ──────────── -->
-    <!-- BUG RÉEL CORRIGÉ (signalement utilisateur : bouton "supprimer toutes les
-         conversations" masqué par la barre/gestes de navigation Android) : contrairement à
-         headerRow/bottomNavRoot dans le contenu principal, ce tiroir n'avait jamais reçu
-         d'inset bas (voir EdgeToEdgeHelper.applyBottomInset dans MainActivity.onCreate) :
-         en bord à bord (Android 15+), son dernier élément se retrouvait donc littéralement
-         sous la barre système. -->
     <LinearLayout
-        android:id="@+id/conversationDrawer"
         android:layout_width="280dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
@@ -264,17 +240,6 @@
                 android:orientation="vertical" />
 
         </ScrollView>
-
-        <TextView
-            android:id="@+id/deleteAllConversationsButton"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:text="🗑️ Supprimer toutes les conversations"
-            android:textColor="@color/text_secondary"
-            android:textSize="11sp"
-            android:gravity="center"
-            android:background="@drawable/bg_input"
-            android:layout_marginTop="12dp" />
 
     </LinearLayout>
 

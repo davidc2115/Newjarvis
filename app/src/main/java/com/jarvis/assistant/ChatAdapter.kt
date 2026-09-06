@@ -1,8 +1,6 @@
 package com.jarvis.assistant
 
 import android.graphics.BitmapFactory
-import android.graphics.PorterDuff
-import android.text.method.LinkMovementMethod
 import android.util.Base64
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -32,13 +30,7 @@ class ChatAdapter(private val messages: MutableList<Message>) :
 
     override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
         val message = messages[position]
-        val context = holder.root.context
-        // Les liens cliquables (tel:/mailto:/adresse) DANS le texte ne sont posés que si
-        // l'utilisateur a explicitement demandé à JARVIS de les activer (Prefs.isContactLinksEnabled)
-        // — plus d'activation automatique, et plus de rangée de boutons séparée sous la bulle,
-        // retirées à la demande explicite de l'utilisateur.
-        holder.messageText.text = MarkdownUtils.toSpannable(message.text, context)
-        holder.messageText.movementMethod = LinkMovementMethod.getInstance()
+        holder.messageText.text = MarkdownUtils.toSpannable(message.text)
 
         if (message.imageBase64 != null) {
             try {
@@ -56,25 +48,12 @@ class ChatAdapter(private val messages: MutableList<Message>) :
         if (message.isUser) {
             holder.senderLabel.text = "VOUS"
             holder.bubbleContainer.setBackgroundResource(R.drawable.bg_bubble_user)
-            applyBubbleColorOverride(holder.bubbleContainer, Prefs.getChatBubbleUserColor(context))
             holder.root.gravity = Gravity.END
         } else {
             holder.senderLabel.text = "JARVIS"
             holder.bubbleContainer.setBackgroundResource(R.drawable.bg_bubble_ai)
-            applyBubbleColorOverride(holder.bubbleContainer, Prefs.getChatBubbleAiColor(context))
             holder.root.gravity = Gravity.START
         }
-    }
-
-    /**
-     * Applique une couleur de bulle personnalisée (via set_chat_theme depuis le chat/vocal)
-     * par-dessus le dégradé par défaut du thème — 0 = pas de surcharge, on garde le dégradé
-     * d'origine intact. setTint sur un GradientDrawable remplace le dégradé par une teinte
-     * plate : c'est le compromis attendu d'une personnalisation de couleur simple.
-     */
-    private fun applyBubbleColorOverride(view: LinearLayout, color: Int) {
-        if (color == 0) return
-        view.background?.mutate()?.setColorFilter(color, PorterDuff.Mode.SRC_IN)
     }
 
     override fun getItemCount(): Int = messages.size

@@ -39,22 +39,6 @@ class ObsidianActivity : AppCompatActivity() {
                 return@registerForActivityResult
             }
             val target = File(path)
-            // Refuse la racine ENTIÈRE du stockage interne comme "dossier vault" : un
-            // utilisateur qui confirme le sélecteur sans naviguer dans un sous-dossier
-            // précis pointe par erreur vers TOUT le stockage du téléphone — JARVIS créerait
-            // alors ses dossiers (Notes Rapides, Modèles...) directement à la racine visible,
-            // mélangés avec le reste des fichiers de l'utilisateur (bug déjà signalé).
-            val storageRootPath = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
-            if (path.trimEnd('/').equals(storageRootPath, ignoreCase = true)) {
-                Toast.makeText(
-                    this,
-                    "❌ Ce dossier est la racine ENTIÈRE du stockage du téléphone, pas un vault précis. " +
-                        "Choisis (ou crée) un sous-dossier dédié, par exemple ton vault Obsidian existant " +
-                        "ou un nouveau dossier « JARVIS-Vault ». Vault inchangé.",
-                    Toast.LENGTH_LONG
-                ).show()
-                return@registerForActivityResult
-            }
             // Vérification concrète avant d'adopter ce chemin : on doit pouvoir au
             // moins créer/lister le dossier. Sans ce contrôle, un chemin mal calculé
             // (ex: carte SD) serait accepté silencieusement et JARVIS écrirait dans
@@ -173,11 +157,6 @@ class ObsidianActivity : AppCompatActivity() {
             runAsync { ObsidianController.listNotes(this) }
         }
 
-        // ── Exploration interactive de la Toile Obsidian (pan/zoom, tap sur un point) ───────
-        findViewById<TextView>(R.id.btnVaultGraph).setOnClickListener {
-            startActivity(Intent(this, VaultGraphActivity::class.java))
-        }
-
         // ── Ouvrir dans Obsidian ────────────────────────────────────────────
         findViewById<TextView>(R.id.btnOpenObsidian).setOnClickListener {
             runAsync { ObsidianController.openInObsidian(this, "") }
@@ -196,33 +175,6 @@ class ObsidianActivity : AppCompatActivity() {
         // ── Changer dossier vault ───────────────────────────────────────────
         findViewById<TextView>(R.id.btnChangeVaultPath).setOnClickListener {
             folderPickerLauncher.launch(null)
-        }
-
-        // ── Réinitialiser le chemin (garde le contenu de l'ancien dossier) ──
-        findViewById<TextView>(R.id.btnResetVaultPath).setOnClickListener {
-            runAsync { ObsidianController.resetVaultPath(this) }
-            vaultPathText.text = "📂 Vault : ${ObsidianController.getVaultRoot(this).absolutePath}"
-        }
-
-        // ── Vider le vault actuel (destructif) ──────────────────────────────
-        findViewById<TextView>(R.id.btnWipeVault).setOnClickListener {
-            val root = ObsidianController.getVaultRoot(this).absolutePath
-            android.app.AlertDialog.Builder(this)
-                .setTitle("Vider le vault ?")
-                .setMessage("Toutes les notes dans « $root » seront supprimées définitivement. Cette action est irréversible.")
-                .setPositiveButton("Vider") { _, _ ->
-                    runAsync { ObsidianController.wipeVault(this) }
-                }
-                .setNegativeButton("Annuler", null)
-                .show()
-        }
-
-        // ── Effacer les surnoms de calendrier (stockés hors du vault) ───────
-        // Ne fait volontairement PAS partie de "Vider le vault" : les surnoms
-        // (name_calendar) vivent dans les préférences de l'app, pas dans les
-        // fichiers Obsidian — vider le vault ne les touche jamais.
-        findViewById<TextView>(R.id.btnResetCalendarNicknames).setOnClickListener {
-            runAsync { CalendarController.resetCalendarNicknames(this) }
         }
     }
 
