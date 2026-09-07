@@ -419,24 +419,46 @@ object ApiClient {
 
         val maxAttempts = maxOf(1, keys.size)
         var lastErr = ""
+        // Estimation grossière (1 token ~ 4 caracteres) du cout de CETTE requete, utilisee pour
+        // la prevention proactive ci-dessous -- l'usage REEL renvoye par l'API (voir plus bas)
+        // remplace cette estimation des qu'on l'a, pour un suivi de plus en plus precis.
+        val estimatedTokens = estimateTokens(systemPrompt) + history.sumOf { estimateTokens(textWithAttachments(it)) }
 
         for (attempt in 0 until maxAttempts) {
             val apiKey = if (keys.isNotEmpty()) Prefs.getNextApiKey(context, provider) else ""
+
+            // PREVENTION PROACTIVE DU 429 : si cette clé a deja consomme assez de tokens sur
+            // les 60 dernieres secondes pour que CETTE requete depasse son budget connu (Groq :
+            // 6000 tokens/min par clé), on ne l'envoie meme pas -- on passe direct a la clé
+            // suivante. Avant ce correctif, il fallait subir le 429 pour le savoir.
+            if (apiKey.isNotBlank() && Prefs.wouldExceedTpmBudget(context, provider, apiKey, estimatedTokens)) {
+                lastErr = "Erreur API (429) : quota ${provider.displayName} anticipé pour cette clé (prévention proactive, pas encore essayé)."
+                continue
+            }
+
             val result = sendOpenAiCompatible(baseUrl, model, apiKey, history, provider, systemPrompt)
 
-            if (!result.startsWith("Erreur API (429)") && !result.startsWith("Erreur API (401)")) {
-                return result
+            if (!result.text.startsWith("Erreur API (429)") && !result.text.startsWith("Erreur API (401)")) {
+                if (apiKey.isNotBlank()) {
+                    Prefs.recordProviderTokens(context, provider, apiKey, result.usageTokens ?: estimatedTokens)
+                }
+                return result.text
             }
 
             if (apiKey.isNotBlank()) {
-                val duration = if (result.startsWith("Erreur API (429)")) Prefs.KEY_BLACKLIST_RATE_LIMIT_MS else Prefs.KEY_BLACKLIST_DEFAULT_MS
+                val duration = if (result.text.startsWith("Erreur API (429)")) Prefs.KEY_BLACKLIST_RATE_LIMIT_MS else Prefs.KEY_BLACKLIST_DEFAULT_MS
                 Prefs.markKeyFailed(context, provider, apiKey, duration)
             }
-            lastErr = result
+            lastErr = result.text
         }
 
         return lastErr
     }
+
+    /** Estimation grossière du nombre de tokens d'un texte (~4 caractères/token), utilisée
+     *  uniquement pour la prévention proactive de quota -- remplacée par l'usage réel de
+     *  l'API dès qu'il est disponible (voir OpenAiCompatibleResult). */
+    private fun estimateTokens(text: String): Int = (text.length / 4).coerceAtLeast(1)
 
     // ─── Pièces jointes multiples : helpers partagés par tous les fournisseurs ─────────────
     // entry.attachments (voir Attachment.kt) est la source de vérité pour les messages RÉCENTS
@@ -458,6 +480,10 @@ object ApiClient {
         return entry.text + "\n\n" + texts.joinToString("\n\n") { "[Contenu d'un fichier joint]\n$it" }
     }
 
+    /** usageTokens = tokens réellement consommés selon l'API (champ "usage.total_tokens",
+     *  courant sur les endpoints compatibles OpenAI) -- null si absent de la réponse. */
+    private data class OpenAiCompatibleResult(val text: String, val usageTokens: Int?)
+
     private fun sendOpenAiCompatible(
         baseUrl: String,
         model: String,
@@ -465,7 +491,7 @@ object ApiClient {
         history: List<HistoryEntry>,
         provider: Provider,
         systemPrompt: String = SYSTEM_PROMPT
-    ): String {
+    ): OpenAiCompatibleResult {
         val messagesArray = JSONArray()
         messagesArray.put(JSONObject().put("role", "system").put("content", systemPrompt))
         for (entry in history) {
@@ -507,14 +533,15 @@ object ApiClient {
 
         client.newCall(requestBuilder.build()).execute().use { response ->
             val bodyStr = response.body?.string() ?: ""
-            if (!response.isSuccessful) return "Erreur API (${response.code}) : $bodyStr"
+            if (!response.isSuccessful) return OpenAiCompatibleResult("Erreur API (${response.code}) : $bodyStr", null)
             val json = JSONObject(bodyStr)
+            val usageTokens = json.optJSONObject("usage")?.optInt("total_tokens", -1)?.takeIf { it >= 0 }
             val choices = json.optJSONArray("choices")
             if (choices != null && choices.length() > 0) {
                 val message = choices.getJSONObject(0).optJSONObject("message")
-                return message?.optString("content") ?: "Réponse vide reçue du serveur."
+                return OpenAiCompatibleResult(message?.optString("content") ?: "Réponse vide reçue du serveur.", usageTokens)
             }
-            return "Format de réponse inattendu : $bodyStr"
+            return OpenAiCompatibleResult("Format de réponse inattendu : $bodyStr", usageTokens)
         }
     }
 
