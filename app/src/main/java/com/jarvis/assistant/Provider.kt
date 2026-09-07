@@ -23,10 +23,15 @@ enum class Provider(
     ),
 
     // ── Fournisseurs Cloud ────────────────────────────────────────────────────
+    // llama-3.3-70b-versatile retiré par Groq le 16/08/2026 (voir
+    // https://console.groq.com/docs/deprecations) -- toute requête avec cet ID renvoyait
+    // une erreur "model decommissioned" au lieu d'une vraie réponse, ce qui faisait
+    // systématiquement échouer Groq (normalement le tout premier essayé) et rejaillissait sur
+    // le reste de la cascade. Remplacement recommandé par Groq : openai/gpt-oss-120b.
     GROQ(
         "Groq (gratuit, très rapide)",
         "https://api.groq.com/openai/v1/chat/completions",
-        "llama-3.3-70b-versatile"
+        "openai/gpt-oss-120b"
     ),
     OPENAI(
         "ChatGPT (OpenAI)",
