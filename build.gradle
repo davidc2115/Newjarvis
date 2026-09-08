@@ -1,6 +1,12 @@
 plugins {
     id 'com.android.application' version '8.5.2' apply false
-    id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+    // 2.2.0 requis par com.google.mlkit:genai-prompt (AiCoreManager.kt, IA locale) : ses .jar
+    // sont compiles avec les metadonnees Kotlin 2.2.0, illisibles par un compilateur 1.9.x
+    // ("Module was compiled with an incompatible version of Kotlin" -- erreur reelle observee
+    // en CI). Kotlin garde une tres bonne compatibilite ascendante du langage, ce bump ne
+    // devrait rien casser dans le reste du code existant (aucune fonctionnalite 1.9-only
+    // utilisee ici).
+    id 'org.jetbrains.kotlin.android' version '2.2.0' apply false
 }
 
 task clean(type: Delete) {
