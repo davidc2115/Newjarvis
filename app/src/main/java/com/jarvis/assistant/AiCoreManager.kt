@@ -1,9 +1,9 @@
 package com.jarvis.assistant
 
 import android.util.Log
-import com.google.mlkit.genai.prompt.FeatureStatus
+import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.prompt.Generation
-import com.google.mlkit.genai.prompt.DownloadStatus
+import com.google.mlkit.genai.common.DownloadStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
