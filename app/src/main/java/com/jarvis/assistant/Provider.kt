@@ -113,7 +113,7 @@ enum class Provider(
     // Remplace les anciens moteurs embarqués maison (MediaPipe .task, llama.cpp GGUF, ONNX
     // Runtime) : Android gère lui-même le téléchargement/mise à jour du modèle, plus besoin
     // que l'utilisateur trouve/télécharge/importe un fichier de modèle à la main. Nécessite un
-    // appareil compatible (Pixel 8+ ou équivalent récent, Android 14+) — voir ⚙ → Local.
+    // appareil de la liste officielle Google AICore (Pixel, Samsung, Xiaomi/POCO récents...) et Android 14+ — voir ⚙ → Local.
     AICORE(
         "Gemini Nano sur téléphone (AICore)",
         "",

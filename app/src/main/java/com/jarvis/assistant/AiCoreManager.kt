@@ -27,7 +27,10 @@ import kotlinx.coroutines.withContext
  * système, volontairement très court, plutôt que celui reçu en paramètre par
  * dispatchToProvider (voir buildLocalPrompt ci-dessous).
  *
- * Disponibilité réelle (appareil + Android 14+, ex: Pixel 8 ou plus récent) — voir
+ * Disponibilité réelle (Android 14+ ET appareil sur la liste officielle Google AICore --
+ * Pixel 8+, Samsung Galaxy S24+, mais aussi des flagships MediaTek Dimensity comme le
+ * Xiaomi 14T Pro/15/17 ou les POCO F7/X7 Pro, entre autres -- ce n'est PAS réservé aux
+ * puces Snapdragon) — voir
  * checkStatus(). Nécessite : implementation("com.google.mlkit:genai-prompt:...") dans
  * app/build.gradle.
  */
@@ -167,8 +170,9 @@ object AiCoreManager {
                         "Vérifie que l'application système AICore est à jour sur cet appareil."
                 else ->
                     "❌ L'IA locale (Gemini Nano / AICore) n'est pas disponible sur cet appareil. " +
-                        "Elle nécessite un téléphone compatible (Pixel 8 ou plus récent, ou équivalent " +
-                        "Samsung/Snapdragon récent) et Android 14 ou plus récent."
+                        "Elle nécessite un appareil de la liste officielle Google AICore " +
+                        "(Pixel 8+, Samsung Galaxy S24+, ou un flagship récent Xiaomi/POCO type " +
+                        "Dimensity 9400+, entre autres) et Android 14 ou plus récent."
             }
         }
 

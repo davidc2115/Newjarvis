@@ -879,7 +879,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Gemini Nano tourne directement sur ce téléphone via AICore, le service système Android de Google : aucune connexion Internet requise, aucune donnée envoyée hors de l'appareil. Android gère lui-même le téléchargement et les mises à jour du modèle — rien à récupérer manuellement. Nécessite un appareil compatible (Pixel 8 ou plus récent, ou équivalent Samsung/Snapdragon récent) et Android 14 ou plus récent. Capacités réduites par rapport aux IA en ligne (conversation générale surtout, pas d'accès aux données du téléphone)."
+                    android:text="Gemini Nano tourne directement sur ce téléphone via AICore, le service système Android de Google : aucune connexion Internet requise, aucune donnée envoyée hors de l'appareil. Android gère lui-même le téléchargement et les mises à jour du modèle — rien à récupérer manuellement. Nécessite un appareil de la liste officielle Google AICore (Pixel 8+, Samsung Galaxy S24+, ou un flagship récent Xiaomi/POCO type Dimensity 9400+, entre autres — pas réservé à Snapdragon) et Android 14 ou plus récent. Capacités réduites par rapport aux IA en ligne : conversation générale, avec accès à tes notes Obsidian pertinentes, mais pas au reste des données du téléphone (agenda, SMS, contacts...)."
                     android:textColor="@color/text_secondary"
                     android:textSize="11sp"
                     android:lineSpacingExtra="3dp" />

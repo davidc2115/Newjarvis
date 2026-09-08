@@ -832,7 +832,7 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 AiCoreManager.Status.UNAVAILABLE -> {
                     tintAiCoreStatusDot("#F87171")
-                    aiCoreStatusText.text = "❌ Gemini Nano n'est pas disponible sur cet appareil (modèle ou version Android non compatible — nécessite Android 14+ et un appareil récent, ex : Pixel 8+)"
+                    aiCoreStatusText.text = "❌ Gemini Nano n'est pas disponible sur cet appareil (nécessite Android 14+ et un appareil de la liste officielle Google AICore — Pixel, Samsung Galaxy S24+, ou un flagship récent Xiaomi/POCO, entre autres)"
                     aiCoreProgressText.text = ""
                     aiCoreActionButton.text = "🔄 REVÉRIFIER"
                     aiCoreActionButton.isEnabled = true
