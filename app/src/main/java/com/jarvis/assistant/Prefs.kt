@@ -22,8 +22,6 @@ object Prefs {
     private const val KEY_BASE_URL          = "base_url"
     private const val KEY_MODEL             = "model"
     private const val KEY_API_KEY           = "api_key"            // rétrocompat
-    private const val KEY_LOCAL_MODEL_PATH  = "local_model_path"
-    private const val KEY_LOCAL_MODEL_FORMAT= "local_model_format"
     private const val KEY_ACCENT_COLOR      = "accent_color"
     private const val KEY_HF_TOKEN          = "hf_token"
     private const val KEY_ORB_STYLE         = "orb_style"
@@ -406,29 +404,16 @@ object Prefs {
     fun getApiKey(context: Context): String =
         prefs(context).getString(KEY_API_KEY, "") ?: ""
 
-    // ─── Modèle local ─────────────────────────────────────────────────────────
-
-    fun getLocalModelPath(context: Context): String =
-        prefs(context).getString(KEY_LOCAL_MODEL_PATH, "") ?: ""
-
-    fun saveLocalModelPath(context: Context, path: String) {
-        prefs(context).edit().putString(KEY_LOCAL_MODEL_PATH, path).apply()
-    }
-
     // ─── Modèle Stable Diffusion local (génération d'image embarquée) ──────────
+    // (l'IA locale conversationnelle utilise désormais AICore/Gemini Nano, géré par
+    // Android lui-même — plus de chemin de fichier de modèle à stocker côté appli, voir
+    // AiCoreManager.kt)
 
     fun getLocalSdModelPath(context: Context): String =
         prefs(context).getString("local_sd_model_path", "") ?: ""
 
     fun saveLocalSdModelPath(context: Context, path: String) {
         prefs(context).edit().putString("local_sd_model_path", path).apply()
-    }
-
-    fun getLocalModelFormat(context: Context): String =
-        prefs(context).getString(KEY_LOCAL_MODEL_FORMAT, "TASK") ?: "TASK"
-
-    fun saveLocalModelFormat(context: Context, format: String) {
-        prefs(context).edit().putString(KEY_LOCAL_MODEL_FORMAT, format).apply()
     }
 
     // ─── UI / Style ───────────────────────────────────────────────────────────

@@ -346,27 +346,25 @@ object ApiClient {
             lastError = "[${provider.displayName}] $result"
         }
 
-        // DERNIER RECOURS avant d'abandonner : un modèle embarqué (GGUF/ONNX/.task) déjà
-        // téléchargé sur l'appareil ne consomme AUCUN quota réseau -- utile en particulier
-        // pour un utilisateur n'ayant configuré qu'UN SEUL fournisseur cloud (ex: Groq seul) :
-        // dans ce cas candidates ne contient qu'un élément et le mode Automatique n'avait
-        // jusqu'ici littéralement aucun repli réel, revenant exactement à la même erreur de
-        // quota que le fournisseur explicite qu'il était censé compenser (signalement réel :
-        // "Toutes les IA configurées ont échoué" + "Groq 429" dès la 2e question). On ne tente
-        // ce repli QUE si un modèle local est réellement configuré, pour ne pas remplacer un
-        // message d'erreur clair par un autre ("Aucun modèle local configuré") qui n'aide pas
-        // plus l'utilisateur.
-        if (Prefs.getLocalModelPath(context).isNotBlank()) {
-            val localResult = try {
-                sendLocal(context, history, systemPrompt)
-            } catch (e: Exception) {
-                "Erreur : ${e.message}"
-            }
-            if (!localResult.startsWith("Erreur") && !localResult.startsWith("Aucun modèle local")) {
-                return localResult
-            }
-            lastError = "[Modèle local] $localResult"
+        // DERNIER RECOURS avant d'abandonner : l'IA locale (Gemini Nano via AICore, voir
+        // AiCoreManager.kt) ne consomme AUCUN quota réseau -- utile en particulier pour un
+        // utilisateur n'ayant configuré qu'UN SEUL fournisseur cloud (ex: Groq seul) : dans ce
+        // cas candidates ne contient qu'un élément et le mode Automatique n'avait jusqu'ici
+        // littéralement aucun repli réel, revenant exactement à la même erreur de quota que le
+        // fournisseur explicite qu'il était censé compenser (signalement réel : "Toutes les IA
+        // configurées ont échoué" + "Groq 429" dès la 2e question). sendLocal()/AiCoreManager
+        // vérifient déjà eux-mêmes la disponibilité réelle et renvoient un message clair
+        // (préfixé ❌ ou ⏳) si l'IA locale n'est pas utilisable pour l'instant -- pas besoin de
+        // le revérifier ici avant d'essayer.
+        val localResult = try {
+            sendLocal(context, history, systemPrompt)
+        } catch (e: Exception) {
+            "❌ Erreur : ${e.message}"
         }
+        if (!localResult.startsWith("❌") && !localResult.startsWith("⏳")) {
+            return localResult
+        }
+        lastError = "[IA locale] $localResult"
 
         return "Toutes les IA configurées ont échoué. Dernière erreur : $lastError"
     }
@@ -418,30 +416,14 @@ object ApiClient {
         return preferred + candidates.filterNot { it in preferred }
     }
 
-    // ─── Modèle local sur l'appareil ──────────────────────────────────────────
-
+    // ─── IA locale sur l'appareil (Gemini Nano / AICore) ──────────────────────
+    // [systemPrompt] est ignoré ici volontairement : AiCoreManager utilise son propre
+    // prompt système, très court, adapté au budget strict d'AICore (~4000 tokens pour
+    // l'ensemble de la requête) — voir la note en tête d'AiCoreManager.kt pour le détail.
+    // Le paramètre est conservé uniquement pour garder une signature uniforme avec les
+    // autres branches de dispatchToProvider/sendAuto.
     private suspend fun sendLocal(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
-        val modelPath = Prefs.getLocalModelPath(context)
-        if (modelPath.isBlank()) {
-            return "Aucun modèle local configuré. Ouvre ⚙ Paramètres → onglet « Local » et télécharge un modèle."
-        }
-        val prompt = buildPromptFromHistory(history, systemPrompt)
-        return LocalLlmManager.generate(context, modelPath, prompt)
-    }
-
-    private fun buildPromptFromHistory(history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
-        val recent = history.takeLast(8)
-        val sb = StringBuilder(systemPrompt).append("\n\n")
-        for (entry in recent) {
-            val label = if (entry.role == "user") "Utilisateur" else "JARVIS"
-            // Le modèle local n'a pas de vision : une image jointe est juste signalée en texte,
-            // mais le texte extrait d'un document (DOCX/TXT/ZIP...) fonctionne, lui, sans vision.
-            val hasImage = entry.imageBase64 != null || entry.attachments.any { it.imageBase64 != null }
-            val suffix = if (hasImage) " [photo jointe — non visible par ce modèle local, pas de vision]" else ""
-            sb.append(label).append(": ").append(textWithAttachments(entry)).append(suffix).append("\n")
-        }
-        sb.append("JARVIS: ")
-        return sb.toString()
+        return AiCoreManager.generate(history)
     }
 
     // ─── OpenAI-compatible avec rotation de clés ──────────────────────────────

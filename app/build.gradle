@@ -16,24 +16,11 @@ android {
         versionName "5.0"
 
         ndk {
-            // 32 bits (armeabi-v7a) retiré : llama.cpp utilise des instructions
-            // NEON fp16 (vld1q_f16) qui n'existent que sur 64 bits. Les téléphones
-            // modernes (2019+) sont quasiment tous en 64 bits de toute façon.
+            // 32 bits (armeabi-v7a) retiré : le module natif Stable Diffusion (:sdcpp,
+            // voir generation d'image embarquee) utilise des instructions NEON fp16 qui
+            // n'existent que sur 64 bits. Les telephones modernes (2019+) sont quasiment
+            // tous en 64 bits de toute facon.
             abiFilters 'arm64-v8a'
-        }
-
-        externalNativeBuild {
-            cmake {
-                cppFlags "-std=c++17"
-                arguments "-DANDROID_STL=c++_shared"
-            }
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-            version "3.22.1"
         }
     }
 
@@ -62,7 +49,7 @@ android {
 
     packaging {
         resources {
-            pickFirsts += ['**/libc++_shared.so', '**/libllama.so', 'META-INF/NOTICE.md', 'META-INF/LICENSE.md']
+            pickFirsts += ['**/libc++_shared.so', 'META-INF/NOTICE.md', 'META-INF/LICENSE.md']
             excludes += ['META-INF/DEPENDENCIES']
         }
     }
@@ -90,10 +77,11 @@ dependencies {
     // Bibliothèque Java pure, aucune dépendance native, aucune clé/API requise.
     implementation 'eu.agno3.jcifs:jcifs-ng:2.1.10'
 
-    // ── IA embarquée : MediaPipe LLM Inference (.task) ────────────────────────
-    implementation 'com.google.mediapipe:tasks-genai:0.10.14'
+    // ── IA locale embarquée : Gemini Nano via AICore (voir AiCoreManager.kt) ─────
+    implementation 'com.google.mlkit:genai-prompt:1.0.0-beta2'
 
-    // ── IA embarquée : ONNX Runtime GenAI (.onnx) ────────────────────────────
+    // ── ONNX Runtime : moteur d'inférence utilisé par openWakeWord (mot-clé d'activation
+    // basse consommation, voir plus bas) — pas de lien avec l'IA locale conversationnelle.
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.19.2'
 
     // ── Email IMAP / SMTP ─────────────────────────────────────────────────────

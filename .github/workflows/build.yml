@@ -26,10 +26,6 @@ jobs:
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
 
-      - name: Clone llama.cpp sources (pour l'IA locale GGUF)
-        run: |
-          git clone --depth 1 --branch b4753 https://github.com/ggerganov/llama.cpp.git app/src/main/cpp/llama.cpp
-
       - name: Clone stable-diffusion.cpp sources (pour la génération d'image embarquée)
         run: |
           git clone --depth 1 https://github.com/leejet/stable-diffusion.cpp.git sdcpp/src/main/cpp/stable-diffusion.cpp

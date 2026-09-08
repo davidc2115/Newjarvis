@@ -44,9 +44,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var apiKeysContainer: LinearLayout
 
     private lateinit var hfTokenInput: EditText
-    private lateinit var customModelUrlInput: EditText
-    private lateinit var localModelPathText: TextView
     private lateinit var downloadProgressText: TextView
+    private lateinit var aiCoreStatusText: TextView
+    private lateinit var aiCoreProgressText: TextView
+    private lateinit var aiCoreActionButton: TextView
 
 
     private lateinit var colorCarousel: RecyclerView
@@ -64,12 +65,6 @@ class SettingsActivity : AppCompatActivity() {
     private var isDownloading = false
 
     private val apiKeyFields = mutableMapOf<Provider, EditText>()
-
-    private val pickModelLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) importModelFile(uri)
-    }
 
     private val pickSdModelLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -136,9 +131,10 @@ class SettingsActivity : AppCompatActivity() {
         apiKeysContainer      = findViewById(R.id.apiKeysContainer)
 
         hfTokenInput          = findViewById(R.id.hfTokenInput)
-        customModelUrlInput   = findViewById(R.id.customModelUrlInput)
-        localModelPathText    = findViewById(R.id.localModelPathText)
         downloadProgressText  = findViewById(R.id.downloadProgressText)
+        aiCoreStatusText      = findViewById(R.id.aiCoreStatusText)
+        aiCoreProgressText    = findViewById(R.id.aiCoreProgressText)
+        aiCoreActionButton    = findViewById(R.id.aiCoreActionButton)
 
 
         colorCarousel         = findViewById(R.id.colorCarousel)
@@ -150,6 +146,7 @@ class SettingsActivity : AppCompatActivity() {
         buildApiKeyFields()
         loadSavedValues()
         setupButtons()
+        setupAiCoreSection()
     }
 
     private fun setupTabs() {
@@ -366,12 +363,9 @@ class SettingsActivity : AppCompatActivity() {
         modelInput.setText(Prefs.getModel(this))
         val initialProvider = Prefs.getProvider(this)
         apiKeyInput.setText(Prefs.getApiKeyFor(this, initialProvider).ifBlank { Prefs.getApiKey(this) })
-        updateLocalModelLabel()
     }
 
     private fun setupButtons() {
-        val pickModelButton      = findViewById<TextView>(R.id.pickModelButton)
-        val downloadCustomButton = findViewById<TextView>(R.id.downloadCustomButton)
         val saveButton           = findViewById<TextView>(R.id.saveButton)
         val saveApiKeysButton    = findViewById<TextView>(R.id.saveApiKeysButton)
         val modelCardsContainer  = findViewById<LinearLayout>(R.id.modelCardsContainer)
@@ -444,29 +438,12 @@ class SettingsActivity : AppCompatActivity() {
             buildModelCard(modelCardsContainer, entry, index)
         }
 
-        // ── Import fichier local ───────────────────────────────────────────────
-        pickModelButton.setOnClickListener { pickModelLauncher.launch(arrayOf("*/*")) }
+        // ── Import fichier Stable Diffusion local ───────────────────────────────
         findViewById<TextView>(R.id.pickSdModelButton).setOnClickListener {
             pickSdModelLauncher.launch(arrayOf("*/*"))
         }
         updateSdModelLabel()
-        findViewById<TextView>(R.id.deleteLocalModelButton).setOnClickListener { deleteLocalTextModel() }
         findViewById<TextView>(R.id.deleteSdModelButton).setOnClickListener { deleteLocalSdModel() }
-
-        // ── URL personnalisée ──────────────────────────────────────────────────
-        downloadCustomButton.setOnClickListener {
-            val url = customModelUrlInput.text.toString().trim()
-            if (url.isBlank()) {
-                Toast.makeText(this, "Entrez une URL de modèle", Toast.LENGTH_SHORT).show()
-            } else {
-                val format = when {
-                    url.endsWith(".task", ignoreCase = true) -> LocalLlmManager.LocalModelFormat.TASK
-                    url.endsWith(".onnx", ignoreCase = true) -> LocalLlmManager.LocalModelFormat.ONNX
-                    else -> LocalLlmManager.LocalModelFormat.TASK
-                }
-                startDownload(url, format, useToken = true)
-            }
-        }
 
         // ── Sauvegarde paramètres cloud ───────────────────────────────────────
         saveButton.setOnClickListener {
@@ -594,7 +571,7 @@ class SettingsActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             setOnClickListener {
-                startDownload(entry.url, entry.format, useToken = entry.needsHfToken)
+                startDownload(entry.url, useToken = entry.needsHfToken)
             }
         }
         card.addView(btnDownload)
@@ -640,7 +617,7 @@ class SettingsActivity : AppCompatActivity() {
         LinearSnapHelper().attachToRecyclerView(orbStyleCarousel)
     }
 
-    private fun startDownload(url: String, format: LocalLlmManager.LocalModelFormat, useToken: Boolean) {
+    private fun startDownload(url: String, useToken: Boolean) {
         if (isDownloading) {
             Toast.makeText(this, "Un téléchargement est déjà en cours…", Toast.LENGTH_SHORT).show()
             return
@@ -650,27 +627,15 @@ class SettingsActivity : AppCompatActivity() {
         downloadProgressText.text = "⬇ Démarrage du téléchargement…"
 
         CoroutineScope(Dispatchers.Main).launch {
-            ModelDownloader.download(this@SettingsActivity, url, hfToken, format) { progress ->
+            ModelDownloader.download(this@SettingsActivity, url, hfToken) { progress ->
                 runOnUiThread {
                     when (progress) {
                         is ModelDownloader.Progress.Percent -> downloadProgressText.text = "⬇ Téléchargement… ${progress.value}%"
                         is ModelDownloader.Progress.Done -> {
                             isDownloading = false
                             downloadProgressText.text = "✅ Modèle téléchargé et actif sur le téléphone !"
-
-                            if (format == LocalLlmManager.LocalModelFormat.STABLE_DIFFUSION) {
-                                updateSdModelLabel()
-                                Toast.makeText(this@SettingsActivity, "Modèle Stable Diffusion enregistré ✅", Toast.LENGTH_SHORT).show()
-                            } else {
-                                // Activer automatiquement le mode local
-                                val targetProvider = if (format == LocalLlmManager.LocalModelFormat.TASK) Provider.ON_DEVICE else Provider.LOCAL_GGUF
-                                selectedProvider = targetProvider
-                                providerSpinner.setSelection(Provider.entries.indexOf(targetProvider))
-                                Prefs.save(this@SettingsActivity, targetProvider, "", "", "")
-
-                                updateLocalModelLabel()
-                                Toast.makeText(this@SettingsActivity, "Modèle enregistré et activé ✅", Toast.LENGTH_SHORT).show()
-                            }
+                            updateSdModelLabel()
+                            Toast.makeText(this@SettingsActivity, "Modèle Stable Diffusion enregistré ✅", Toast.LENGTH_SHORT).show()
                         }
                         is ModelDownloader.Progress.Error -> {
                             isDownloading = false
@@ -678,40 +643,6 @@ class SettingsActivity : AppCompatActivity() {
                             Toast.makeText(this@SettingsActivity, progress.message, Toast.LENGTH_LONG).show()
                         }
                     }
-                }
-            }
-        }
-    }
-
-    private fun importModelFile(uri: Uri) {
-        Toast.makeText(this, "Import du modèle en cours…", Toast.LENGTH_LONG).show()
-        val format = LocalLlmManager.LocalModelFormat.GGUF
-        val ext = "gguf"
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val destFile = File(filesDir, "local_model.$ext")
-                contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(destFile).use { output ->
-                        input.copyTo(output, bufferSize = 1024 * 1024)
-                    }
-                }
-                Prefs.saveLocalModelPath(this@SettingsActivity, destFile.absolutePath)
-                Prefs.saveLocalModelFormat(this@SettingsActivity, format.name)
-                LocalLlmManager.unload()
-
-                runOnUiThread {
-                    // Activer automatiquement le mode local
-                    selectedProvider = Provider.LOCAL_GGUF
-                    providerSpinner.setSelection(Provider.entries.indexOf(Provider.LOCAL_GGUF))
-                    Prefs.save(this@SettingsActivity, Provider.LOCAL_GGUF, "", "", "")
-
-                    updateLocalModelLabel()
-                    Toast.makeText(this@SettingsActivity, "Modèle importé et activé ✅", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this@SettingsActivity, "Échec de l'import : ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -755,37 +686,6 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateLocalModelLabel() {
-        val path = Prefs.getLocalModelPath(this)
-        localModelPathText.text = if (path.isBlank()) {
-            "Modèle actif : Aucun"
-        } else {
-            val file = File(path)
-            val sizeMb = if (file.exists()) file.length() / (1024 * 1024) else 0
-            "Modèle actif sur l'appareil : ${file.name} (${selectedProvider.displayName}, ~${sizeMb} Mo)"
-        }
-    }
-
-    private fun deleteLocalTextModel() {
-        val path = Prefs.getLocalModelPath(this)
-        if (path.isBlank()) {
-            Toast.makeText(this, "Aucun modèle de texte local à supprimer.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Supprimer ce modèle ?")
-            .setMessage("${File(path).name} sera effacé du téléphone. Tu pourras le retélécharger plus tard si besoin.")
-            .setPositiveButton("Supprimer") { _, _ ->
-                LocalLlmManager.unload()
-                File(path).delete()
-                Prefs.saveLocalModelPath(this, "")
-                updateLocalModelLabel()
-                Toast.makeText(this, "🗑️ Modèle supprimé.", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Annuler", null)
-            .show()
-    }
-
     private fun deleteLocalSdModel() {
         val path = Prefs.getLocalSdModelPath(this)
         if (path.isBlank()) {
@@ -804,5 +704,84 @@ class SettingsActivity : AppCompatActivity() {
             }
             .setNegativeButton("Annuler", null)
             .show()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // IA locale (AICore / Gemini Nano) — voir AiCoreManager.kt. Contrairement aux
+    // anciens moteurs embarqués (MediaPipe/.gguf/.onnx), il n'y a plus de fichier de
+    // modèle à télécharger/importer manuellement : Android gère lui-même la
+    // distribution via AICore. Cette section se contente de vérifier la disponibilité
+    // et de déclencher le téléchargement système si besoin.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun setupAiCoreSection() {
+        aiCoreActionButton.setOnClickListener { refreshAiCoreStatus(triggerDownloadIfNeeded = true) }
+        refreshAiCoreStatus(triggerDownloadIfNeeded = false)
+    }
+
+    private fun refreshAiCoreStatus(triggerDownloadIfNeeded: Boolean) {
+        aiCoreStatusText.text = "Statut : vérification…"
+        aiCoreActionButton.isEnabled = false
+
+        CoroutineScope(Dispatchers.Main).launch {
+            when (val status = AiCoreManager.checkStatus()) {
+                AiCoreManager.Status.AVAILABLE -> {
+                    aiCoreStatusText.text = "✅ Disponible et prête à l'emploi sur cet appareil"
+                    aiCoreProgressText.text = ""
+                    aiCoreActionButton.text = "🔄 REVÉRIFIER"
+                    aiCoreActionButton.isEnabled = true
+                }
+                AiCoreManager.Status.DOWNLOADABLE -> {
+                    aiCoreStatusText.text = "⬇️ Téléchargeable — pas encore présente sur ce téléphone"
+                    aiCoreActionButton.text = "⬇ TÉLÉCHARGER GEMINI NANO"
+                    aiCoreActionButton.isEnabled = true
+                    if (triggerDownloadIfNeeded) downloadAiCore()
+                }
+                AiCoreManager.Status.DOWNLOADING -> {
+                    aiCoreStatusText.text = "⬇ Téléchargement déjà en cours sur cet appareil…"
+                    aiCoreActionButton.text = "🔄 REVÉRIFIER"
+                    aiCoreActionButton.isEnabled = true
+                }
+                AiCoreManager.Status.UNAVAILABLE -> {
+                    aiCoreStatusText.text = "❌ Non disponible sur cet appareil (modèle ou version Android non compatible — nécessite Android 14+ et un appareil récent, ex : Pixel 8+)"
+                    aiCoreProgressText.text = ""
+                    aiCoreActionButton.text = "🔄 REVÉRIFIER"
+                    aiCoreActionButton.isEnabled = true
+                }
+                AiCoreManager.Status.ERROR -> {
+                    aiCoreStatusText.text = "❌ Impossible de vérifier — l'application système AICore est peut-être manquante ou à mettre à jour"
+                    aiCoreProgressText.text = ""
+                    aiCoreActionButton.text = "🔄 REVÉRIFIER"
+                    aiCoreActionButton.isEnabled = true
+                }
+            }
+        }
+    }
+
+    private fun downloadAiCore() {
+        aiCoreActionButton.isEnabled = false
+        aiCoreProgressText.text = "⬇ Démarrage du téléchargement…"
+
+        CoroutineScope(Dispatchers.Main).launch {
+            AiCoreManager.download { event ->
+                runOnUiThread {
+                    when (event) {
+                        is AiCoreManager.DownloadEvent.Progress ->
+                            aiCoreProgressText.text = "⬇ Téléchargement… ${event.bytesDownloaded / (1024 * 1024)} Mo reçus"
+                        AiCoreManager.DownloadEvent.Completed -> {
+                            aiCoreProgressText.text = "✅ Téléchargement terminé"
+                            Toast.makeText(this@SettingsActivity, "✅ Gemini Nano téléchargé et prêt", Toast.LENGTH_SHORT).show()
+                            CoroutineScope(Dispatchers.Main).launch { AiCoreManager.warmup() }
+                            refreshAiCoreStatus(triggerDownloadIfNeeded = false)
+                        }
+                        is AiCoreManager.DownloadEvent.Failed -> {
+                            aiCoreProgressText.text = ""
+                            Toast.makeText(this@SettingsActivity, "❌ Échec du téléchargement : ${event.message}", Toast.LENGTH_LONG).show()
+                            refreshAiCoreStatus(triggerDownloadIfNeeded = false)
+                        }
+                    }
+                }
+            }
+        }
     }
 }

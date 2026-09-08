@@ -759,7 +759,7 @@
         </LinearLayout>
 
 
-        <!-- Onglet LOCAL (Modèles IA téléchargés sur le téléphone) -->
+        <!-- Onglet LOCAL (IA locale AICore/Gemini Nano + génération d'image Stable Diffusion) -->
         <LinearLayout
             android:id="@+id/panelLocal"
             android:layout_width="match_parent"
@@ -768,111 +768,54 @@
             android:visibility="gone">
 
             <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🧠 IA locale (AICore / Gemini Nano)"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Téléchargez un modèle IA directement sur le stockage de votre téléphone pour l'utiliser sans aucune connexion Internet."
+                android:text="Gemini Nano tourne directement sur ce téléphone via AICore, le service système Android de Google : aucune connexion Internet requise, aucune donnée envoyée hors de l'appareil. Contrairement aux anciens modèles embarqués, Android gère lui-même le téléchargement et les mises à jour — rien à récupérer manuellement. Nécessite un appareil compatible (Pixel 8 ou plus récent, ou équivalent Samsung/Snapdragon récent) et Android 14 ou plus récent. Capacités réduites par rapport aux IA en ligne (conversation générale surtout, pas d'accès aux données du téléphone)."
                 android:textColor="@color/text_secondary"
-                android:textSize="12sp"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
                 android:layout_marginBottom="12dp" />
 
             <TextView
-                android:id="@+id/localModelPathText"
+                android:id="@+id/aiCoreStatusText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_input"
                 android:padding="12dp"
-                android:text="Modèle actif : Aucun"
+                android:text="Statut : vérification…"
                 android:textColor="@color/cyan_accent"
                 android:textSize="13sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="8dp" />
 
             <TextView
-                android:id="@+id/deleteLocalModelButton"
-                android:layout_width="match_parent"
-                android:layout_height="40dp"
-                android:text="🗑️ Supprimer ce modèle du téléphone"
-                android:textColor="#FF6B6B"
-                android:textSize="11sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="16dp" />
-
-            <!-- Titre section modèles -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="📦 Modèles disponibles — cliquez pour télécharger directement sur le téléphone"
-                android:textColor="@color/cyan_accent"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="10dp" />
-
-            <!-- Cartes dynamiques générées par SettingsActivity.buildModelCard() -->
-            <LinearLayout
-                android:id="@+id/modelCardsContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginBottom="8dp" />
-
-            <!-- Barre de progression téléchargement -->
-            <TextView
-                android:id="@+id/downloadProgressText"
+                android:id="@+id/aiCoreProgressText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="@color/cyan_accent"
                 android:textSize="13sp"
                 android:textStyle="bold"
                 android:gravity="center"
-                android:layout_marginBottom="12dp" />
-
-            <!-- Jeton HF & Custom -->
-            <EditText
-                android:id="@+id/hfTokenInput"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="@drawable/bg_input"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:textColor="@color/text_primary"
-                android:hint="Jeton Hugging Face (optionnel)"
-                android:textColorHint="@color/text_secondary"
-                android:inputType="textPassword"
-                android:layout_marginBottom="12dp" />
-
-            <EditText
-                android:id="@+id/customModelUrlInput"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="@drawable/bg_input"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:textColor="@color/text_primary"
-                android:hint="URL personnalisée (https://...)"
-                android:textColorHint="@color/text_secondary"
-                android:inputType="textUri"
                 android:layout_marginBottom="8dp" />
 
             <TextView
-                android:id="@+id/downloadCustomButton"
+                android:id="@+id/aiCoreActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:text="⬇ TÉLÉCHARGER CETTE URL"
-                android:textColor="@color/cyan_accent"
+                android:text="🔎 VÉRIFIER LA DISPONIBILITÉ"
+                android:textColor="@color/background_dark"
+                android:textStyle="bold"
                 android:gravity="center"
-                android:background="@drawable/bg_input"
-                android:layout_marginBottom="12dp" />
-
-            <TextView
-                android:id="@+id/pickModelButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="📁 CHOISIR UN FICHIER FICHIER SUR LE TÉLÉPHONE"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:gravity="center"
-                android:background="@drawable/bg_input"
+                android:background="@drawable/bg_mic_button"
                 android:layout_marginBottom="16dp" />
 
             <View
@@ -894,7 +837,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Génère de vraies images directement sur le téléphone, sans réseau. ⚠️ Sans GPU dédié, compte plusieurs minutes par image sur CPU mobile — c'est la réalité du calcul de diffusion, pas un défaut. Importe un modèle Stable Diffusion (.safetensors, .ckpt ou .gguf, souvent 2 à 4 Go) téléchargé depuis Hugging Face ou Civitai."
+                android:text="Génère de vraies images directement sur le téléphone, sans réseau. ⚠️ Sans GPU dédié, compte plusieurs minutes par image sur CPU mobile — c'est la réalité du calcul de diffusion, pas un défaut. Télécharge un modèle ci-dessous, ou importe le tien (.safetensors, .ckpt ou .gguf, souvent 2 à 4 Go) depuis Hugging Face ou Civitai."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:lineSpacingExtra="3dp"
@@ -931,6 +874,64 @@
                 android:textSize="12sp"
                 android:gravity="center"
                 android:background="@drawable/bg_input"
+                android:layout_marginBottom="12dp" />
+
+            <!-- Titre section modèles -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="📦 Modèles Stable Diffusion disponibles — cliquez pour télécharger directement sur le téléphone"
+                android:textColor="@color/cyan_accent"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="10dp" />
+
+            <!-- Cartes dynamiques générées par SettingsActivity.buildModelCard() -->
+            <LinearLayout
+                android:id="@+id/modelCardsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Barre de progression téléchargement (modèles Stable Diffusion) -->
+            <TextView
+                android:id="@+id/downloadProgressText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/cyan_accent"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Jeton Hugging Face (optionnel)"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Non requis pour les modèles Stable Diffusion ci-dessus. Utilisé ailleurs dans l'appli : génération d'image via l'API cloud Hugging Face (repli de generate_image) et le diagnostic test_api_keys."
+                android:textColor="@color/text_secondary"
+                android:textSize="10.5sp"
+                android:lineSpacingExtra="2dp"
+                android:layout_marginBottom="4dp" />
+
+            <EditText
+                android:id="@+id/hfTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_input"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:textColor="@color/text_primary"
+                android:hint="Jeton Hugging Face (optionnel)"
+                android:textColorHint="@color/text_secondary"
+                android:inputType="textPassword"
                 android:layout_marginBottom="16dp" />
 
         </LinearLayout>

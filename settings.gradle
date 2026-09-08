@@ -10,8 +10,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // JitPack — requis pour la lib llama-android (binding llama.cpp)
-        maven { url 'https://jitpack.io' }
     }
 }
 rootProject.name = "JarvisAssistant"

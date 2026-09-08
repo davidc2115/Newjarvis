@@ -108,23 +108,14 @@ enum class Provider(
         needsApiKey = false
     ),
 
-    // ── Modèles embarqués sur le téléphone (hors-ligne) ───────────────────────
-    ON_DEVICE(
-        "Modèle sur téléphone (.task MediaPipe)",
-        "",
-        "",
-        isLocal = true,
-        needsApiKey = false
-    ),
-    LOCAL_GGUF(
-        "Modèle GGUF sur téléphone (llama.cpp)",
-        "",
-        "",
-        isLocal = true,
-        needsApiKey = false
-    ),
-    LOCAL_ONNX(
-        "Modèle ONNX sur téléphone",
+    // ── IA embarquée sur le téléphone (hors-ligne) ─────────────────────────────
+    // Gemini Nano via AICore, le service système Android de Google (voir AiCoreManager.kt).
+    // Remplace les anciens moteurs embarqués maison (MediaPipe .task, llama.cpp GGUF, ONNX
+    // Runtime) : Android gère lui-même le téléchargement/mise à jour du modèle, plus besoin
+    // que l'utilisateur trouve/télécharge/importe un fichier de modèle à la main. Nécessite un
+    // appareil compatible (Pixel 8+ ou équivalent récent, Android 14+) — voir ⚙ → Local.
+    AICORE(
+        "Gemini Nano sur téléphone (AICore)",
         "",
         "",
         isLocal = true,
