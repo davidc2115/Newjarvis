@@ -293,7 +293,7 @@ object ApiClient {
 
     // ─── Mode Automatique avec multi-clés + sélection intelligente ────────────
 
-    private fun sendAuto(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
+    private suspend fun sendAuto(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         // Un fournisseur est candidat s'il a au moins une clé configurée, OU s'il ne nécessite
         // aucune clé (aucun fournisseur de AUTO_FALLBACK_ORDER n'est dans ce cas actuellement,
         // Pollinations ayant été retiré — cette vérification reste utile si un futur fournisseur
@@ -344,6 +344,28 @@ object ApiClient {
                 return result
             }
             lastError = "[${provider.displayName}] $result"
+        }
+
+        // DERNIER RECOURS avant d'abandonner : un modèle embarqué (GGUF/ONNX/.task) déjà
+        // téléchargé sur l'appareil ne consomme AUCUN quota réseau -- utile en particulier
+        // pour un utilisateur n'ayant configuré qu'UN SEUL fournisseur cloud (ex: Groq seul) :
+        // dans ce cas candidates ne contient qu'un élément et le mode Automatique n'avait
+        // jusqu'ici littéralement aucun repli réel, revenant exactement à la même erreur de
+        // quota que le fournisseur explicite qu'il était censé compenser (signalement réel :
+        // "Toutes les IA configurées ont échoué" + "Groq 429" dès la 2e question). On ne tente
+        // ce repli QUE si un modèle local est réellement configuré, pour ne pas remplacer un
+        // message d'erreur clair par un autre ("Aucun modèle local configuré") qui n'aide pas
+        // plus l'utilisateur.
+        if (Prefs.getLocalModelPath(context).isNotBlank()) {
+            val localResult = try {
+                sendLocal(context, history, systemPrompt)
+            } catch (e: Exception) {
+                "Erreur : ${e.message}"
+            }
+            if (!localResult.startsWith("Erreur") && !localResult.startsWith("Aucun modèle local")) {
+                return localResult
+            }
+            lastError = "[Modèle local] $localResult"
         }
 
         return "Toutes les IA configurées ont échoué. Dernière erreur : $lastError"
@@ -478,10 +500,13 @@ object ApiClient {
         return lastErr
     }
 
-    /** Estimation grossière du nombre de tokens d'un texte (~4 caractères/token), utilisée
-     *  uniquement pour la prévention proactive de quota -- remplacée par l'usage réel de
-     *  l'API dès qu'il est disponible (voir OpenAiCompatibleResult). */
-    private fun estimateTokens(text: String): Int = (text.length / 4).coerceAtLeast(1)
+    /** Estimation grossière du nombre de tokens d'un texte, utilisée uniquement pour la
+     *  prévention proactive de quota -- remplacée par l'usage réel de l'API dès qu'il est
+     *  disponible (voir OpenAiCompatibleResult). ~3 caractères/token (et non 4) : le texte
+     *  envoyé est majoritairement en français avec accents/emojis, qui tokenisent en pratique
+     *  plus densément que de l'anglais simple -- une estimation trop optimiste laissait passer
+     *  des requêtes qui dépassaient réellement le budget Groq (429 malgré la prévention). */
+    private fun estimateTokens(text: String): Int = (text.length / 3).coerceAtLeast(1)
 
     // ─── Pièces jointes multiples : helpers partagés par tous les fournisseurs ─────────────
     // entry.attachments (voir Attachment.kt) est la source de vérité pour les messages RÉCENTS

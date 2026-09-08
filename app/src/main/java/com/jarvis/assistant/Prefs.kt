@@ -233,11 +233,17 @@ object Prefs {
 
     /** true si envoyer ~estimatedTokens OU une requête de plus dépasserait le budget
      *  TPM/RPM connu de ce provider pour cette clé (marge de sécurité 10%). */
+    // Marge de sécurité TPM abaissée de 0.9 à 0.7 : l'estimation de coût (estimateTokens,
+    // ApiClient.kt) reste une approximation caractères/token qui peut sous-évaluer l'usage réel
+    // -- surtout en français, où les accents/mots composés tokenisent souvent plus densément
+    // qu'en anglais. Avec une marge trop juste (0.9), un dépassement réel de Groq (8000 tok/min)
+    // pouvait ne pas être anticipé et provoquer quand même un vrai 429 réseau au lieu d'être
+    // évité en amont -- cause réelle observée : 429 dès la 2e question malgré la prévention.
     fun wouldExceedTpmBudget(context: Context, provider: Provider, apiKey: String, estimatedTokens: Int): Boolean {
         val tpmLimit = KNOWN_TPM_LIMITS[provider]
         if (tpmLimit != null) {
             val used = tokensUsedLastMinute(context, provider, apiKey)
-            if (used + estimatedTokens > tpmLimit * 0.9) return true
+            if (used + estimatedTokens > tpmLimit * 0.7) return true
         }
         val rpmLimit = KNOWN_RPM_LIMITS[provider]
         if (rpmLimit != null) {
