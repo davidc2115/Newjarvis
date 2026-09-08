@@ -41,36 +41,6 @@
     </LinearLayout>
 
     <LinearLayout
-        android:id="@+id/navGithub"
-        android:layout_width="0dp"
-        android:layout_height="50dp"
-        android:layout_weight="1"
-        android:layout_marginEnd="6dp"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:background="@drawable/bg_nav_ripple">
-
-        <TextView
-            android:id="@+id/navGithubIcon"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="💻"
-            android:textSize="18sp"
-            android:alpha="0.5" />
-
-        <TextView
-            android:id="@+id/navGithubLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="GitHub"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_secondary"
-            android:layout_marginTop="2dp" />
-
-    </LinearLayout>
-
-    <LinearLayout
         android:id="@+id/navSettings"
         android:layout_width="0dp"
         android:layout_height="50dp"

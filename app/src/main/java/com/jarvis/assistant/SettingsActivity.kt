@@ -225,18 +225,103 @@ class SettingsActivity : AppCompatActivity() {
         apiKeyInput.isEnabled  = showCloud && provider.needsApiKey
     }
 
+    // Courte description + domaine où obtenir une clé, affichés sous chaque fournisseur pour
+    // que l'onglet Clés API soit compréhensible sans devoir deviner lequel choisir. Ordre
+    // volontairement identique à Provider.CLOUD_KEY_PROVIDERS (= l'ordre de repli du mode
+    // Automatique) : le premier configuré et joignable répond en premier.
+    private data class ApiKeyInfo(val description: String, val getKeyDomain: String)
+
+    private val apiKeyInfo: Map<Provider, ApiKeyInfo> = mapOf(
+        Provider.GROQ to ApiKeyInfo(
+            "Gratuit, très rapide. Quota limité (8 000 tokens/min, 30 requêtes/min) — idéal en premier essai, moins pour de longues conversations.",
+            "console.groq.com"
+        ),
+        Provider.OPENAI to ApiKeyInfo(
+            "ChatGPT (GPT-4o mini). Payant après le petit crédit d'essai offert à l'inscription.",
+            "platform.openai.com"
+        ),
+        Provider.CLAUDE to ApiKeyInfo(
+            "Anthropic Claude. Payant après le petit crédit d'essai offert à l'inscription — très fiable pour le code et les tâches complexes.",
+            "console.anthropic.com"
+        ),
+        Provider.GEMINI to ApiKeyInfo(
+            "Google Gemini. Gratuit avec un quota nettement plus généreux que Groq (~250 000 tokens/min) — recommandé comme repli principal.",
+            "aistudio.google.com"
+        ),
+        Provider.MISTRAL to ApiKeyInfo(
+            "IA française. Offre gratuite disponible, quota limité.",
+            "console.mistral.ai"
+        ),
+        Provider.DEEPSEEK to ApiKeyInfo(
+            "Très économique. Petit quota gratuit à l'inscription.",
+            "platform.deepseek.com"
+        ),
+        Provider.PERPLEXITY to ApiKeyInfo(
+            "Orienté recherche web à jour. Payant.",
+            "perplexity.ai"
+        ),
+        Provider.TOGETHER to ApiKeyInfo(
+            "Quelques dollars de crédit gratuit offerts à l'inscription.",
+            "api.together.ai"
+        ),
+        Provider.OPENROUTER to ApiKeyInfo(
+            "Accès à de nombreux modèles (dont certains gratuits) via une seule clé.",
+            "openrouter.ai"
+        ),
+        Provider.SERPAPI to ApiKeyInfo(
+            "Recherche Google en direct — sert à web_search, pas au chat. Payant après l'essai gratuit.",
+            "serpapi.com"
+        )
+    )
+
     private fun buildApiKeyFields() {
         apiKeysContainer.removeAllViews()
         apiKeyFields.clear()
 
         for (provider in Provider.CLOUD_KEY_PROVIDERS) {
+            // SerpAPI a un rôle différent (recherche web, pas génération de réponse) : on le
+            // sépare visuellement du reste pour éviter la confusion "pourquoi cette clé-là ne
+            // répond jamais dans le chat ?".
+            if (provider == Provider.SERPAPI) {
+                val divider = View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).also {
+                        it.topMargin = 12; it.bottomMargin = 12
+                    }
+                    setBackgroundColor(getColor(R.color.text_secondary))
+                    alpha = 0.2f
+                }
+                apiKeysContainer.addView(divider)
+
+                val sectionLabel = TextView(this).apply {
+                    text = "🔍 Recherche Web (fonction différente du chat)"
+                    setTextColor(getColor(R.color.cyan_accent))
+                    textSize = 13f
+                    setPadding(0, 0, 0, 4)
+                }
+                apiKeysContainer.addView(sectionLabel)
+            }
+
+            val info = apiKeyInfo[provider]
+            val hasKey = Prefs.getApiKeyFor(this, provider).isNotBlank()
+
             val label = TextView(this).apply {
-                text = "🔑 ${provider.displayName}"
-                setTextColor(getColor(R.color.text_secondary))
+                text = "🔑 ${provider.displayName}" + if (hasKey) "   ✓ configurée" else ""
+                setTextColor(getColor(if (hasKey) R.color.success_glow else R.color.text_secondary))
                 textSize = 12f
-                setPadding(0, 16, 0, 4)
+                setPadding(0, 16, 0, 2)
             }
             apiKeysContainer.addView(label)
+
+            if (info != null) {
+                val description = TextView(this).apply {
+                    text = info.description
+                    setTextColor(getColor(R.color.text_secondary))
+                    textSize = 10.5f
+                    setLineSpacing(2f, 1f)
+                    setPadding(0, 0, 0, 4)
+                }
+                apiKeysContainer.addView(description)
+            }
 
             val field = EditText(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -250,9 +335,28 @@ class SettingsActivity : AppCompatActivity() {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
                 hint = "Clé API ${provider.displayName}..."
                 setText(Prefs.getApiKeyFor(this@SettingsActivity, provider))
+                // Le badge "✓ configurée" ne se met à jour qu'au prochain rebuild de la liste
+                // (après ENREGISTRER) — pas besoin de watcher ici, juste une info au chargement.
             }
             apiKeysContainer.addView(field)
             apiKeyFields[provider] = field
+
+            if (info != null) {
+                val getKeyLink = TextView(this).apply {
+                    text = "Obtenir une clé sur ${info.getKeyDomain} →"
+                    setTextColor(getColor(R.color.cyan_accent))
+                    textSize = 10.5f
+                    setPadding(0, 0, 0, 12)
+                    setOnClickListener {
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://${info.getKeyDomain}")))
+                        } catch (_: Exception) {
+                            Toast.makeText(this@SettingsActivity, "Impossible d'ouvrir le lien.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+                apiKeysContainer.addView(getKeyLink)
+            }
         }
     }
 
@@ -383,6 +487,10 @@ class SettingsActivity : AppCompatActivity() {
             val keys = apiKeyFields.mapValues { (_, field) -> field.text.toString().trim() }
             Prefs.saveApiKeys(this, keys)
             Toast.makeText(this, "✅ Toutes les clés API enregistrées", Toast.LENGTH_SHORT).show()
+            // Reconstruit la liste pour rafraîchir les badges "✓ configurée" (les champs
+            // gardent le texte déjà saisi car buildApiKeyFields relit Prefs, qui vient d'être
+            // mis à jour ci-dessus).
+            buildApiKeyFields()
         }
 
         toggleWakeWordButton.setOnClickListener {

@@ -59,7 +59,7 @@
             </LinearLayout>
 
             <!-- Un seul bouton vers le menu complet (domotique, création IA, Obsidian,
-                 contrôle téléphone, GitHub, réglages...) — remplace les 3 icônes séparées
+                 contrôle téléphone, réglages...) — remplace les 3 icônes séparées
                  et peu explicites d'avant pour un header plus propre et plus lisible. -->
             <TextView
                 android:id="@+id/hubButton"

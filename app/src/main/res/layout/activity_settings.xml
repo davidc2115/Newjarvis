@@ -317,6 +317,25 @@
             android:orientation="vertical"
             android:visibility="gone">
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔑 Clés API"
+                android:textColor="@color/cyan_accent"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Configure au moins une clé pour que JARVIS puisse te répondre. En mode « 🤖 Automatique » (onglet Config), JARVIS essaie tes fournisseurs configurés dans l'ordre ci-dessous jusqu'à ce que l'un réponde — plus tu en configures, plus le repli est fiable si l'un d'eux est à quota. Chaque clé reste stockée uniquement sur ce téléphone."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="16dp" />
+
             <LinearLayout
                 android:id="@+id/apiKeysContainer"
                 android:layout_width="match_parent"
@@ -338,7 +357,7 @@
 
         </LinearLayout>
 
-        <!-- Onglet SYSTÈME (Codage GitHub + Écoute permanente) -->
+        <!-- Onglet SYSTÈME (Écoute permanente + Réseau/Domotique) -->
         <LinearLayout
             android:id="@+id/panelSystem"
             android:layout_width="match_parent"

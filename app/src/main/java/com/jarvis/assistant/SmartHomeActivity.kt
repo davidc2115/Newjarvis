@@ -34,9 +34,6 @@ class SmartHomeActivity : AppCompatActivity() {
         findViewById<LinearLayout>(R.id.btnOpenPhoneControl).setOnClickListener {
             startActivity(Intent(this, PhoneControlActivity::class.java))
         }
-        findViewById<LinearLayout>(R.id.btnOpenGitHub).setOnClickListener {
-            startActivity(Intent(this, GitHubActivity::class.java))
-        }
         findViewById<LinearLayout>(R.id.btnOpenSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }

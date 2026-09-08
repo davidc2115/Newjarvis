@@ -175,7 +175,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         // Un seul bouton vers le menu complet — domotique, création IA, Second Brain
-        // Obsidian, contrôle téléphone, GitHub, réglages... tout est regroupé et
+        // Obsidian, contrôle téléphone, réglages... tout est regroupé et
         // organisé par sections dans SmartHomeActivity (voir son layout dédié).
         hubButton.setOnClickListener {
             startActivity(Intent(this, SmartHomeActivity::class.java))
