@@ -94,17 +94,27 @@ object AiCoreManager {
     // conversationnel hors-ligne, pas d'assistant domotique complet comme les fournisseurs
     // cloud. S'il émet malgré tout un JARVIS_CMD reconnu par coïncidence, JarvisCommandParser
     // l'exécutera quand même (le parsing ne dépend pas du fournisseur d'origine).
+    //
+    // Exception notable au "sans accès aux données du téléphone" : les notes Obsidian. Comme
+    // pour les fournisseurs cloud (voir le commentaire dans ApiClient.sendChat), une recherche
+    // automatique dans le vault est faite AVANT l'appel IA (ObsidianController.quickContextSearch,
+    // limitée à 3 courts extraits) et injectée directement dans le prompt par buildLocalPrompt
+    // ci-dessous — Gemini Nano n'a donc jamais besoin de "décider" d'appeler une action pour
+    // voir ces extraits, ce qui serait de toute façon impossible sans connaître JARVIS_CMD.
     private const val LOCAL_SYSTEM_PROMPT =
         "Tu es JARVIS, assistant IA vocal. Tu fonctionnes ici en mode local hors-ligne " +
             "(Gemini Nano sur l'appareil), sans accès à Internet ni aux données du " +
-            "téléphone (fichiers, agenda, SMS, contacts...). Réponds en français, phrases " +
-            "courtes, sans markdown. Si on te demande une action nécessitant ces données ou " +
-            "une connexion Internet, dis clairement que tu es en mode local et que ça " +
+            "téléphone (fichiers, agenda, SMS, contacts...), À L'EXCEPTION d'éventuels extraits " +
+            "de notes Obsidian fournis ci-dessous sous \"CONTEXTE OBSIDIAN\" : s'ils sont présents " +
+            "et pertinents, base ta réponse dessus en priorité (une note fait toujours autorité) ; " +
+            "s'ils sont absents ou hors sujet, réponds normalement. Réponds en français, phrases " +
+            "courtes, sans markdown. Si on te demande une autre action nécessitant des données du " +
+            "téléphone ou une connexion Internet, dis clairement que tu es en mode local et que ça " +
             "nécessite de repasser sur un fournisseur en ligne (⚙ Paramètres → Config)."
 
     // Nombre de tours d'historique conservés pour le mode local — volontairement bien plus
     // bas que MAX_HISTORY_MESSAGES (16, pour les fournisseurs cloud) vu le budget d'environ
-    // 4000 tokens partagé entre prompt système + historique + message.
+    // 4000 tokens partagé entre prompt système + contexte Obsidian éventuel + historique + message.
     private const val MAX_HISTORY_MESSAGES_LOCAL = 4
 
     // Garde-fou supplémentaire en caractères (~3 caractères/token, marge sous les 4000
@@ -112,9 +122,24 @@ object AiCoreManager {
     // est anormalement long, plutôt que de laisser l'appel échouer sans explication claire.
     private const val MAX_PROMPT_CHARS = 9000
 
-    private fun buildLocalPrompt(history: List<HistoryEntry>): String {
+    // Coupe large pour le contexte Obsidian injecté ici : quickContextSearch (côté appelant)
+    // est déjà plafonné à 3 courts extraits (~400 caractères chacun au pire, donc ~1200-1500
+    // caractères au total en pratique), mais cette limite reste une seconde ceinture de
+    // sécurité dédiée avant l'historique — pour ne jamais laisser le contexte Obsidian, à lui
+    // seul, dévorer tout le budget prévu pour la conversation elle-même.
+    private const val MAX_VAULT_CONTEXT_CHARS = 2500
+
+    private fun buildLocalPrompt(history: List<HistoryEntry>, vaultContext: String?): String {
         val recent = history.takeLast(MAX_HISTORY_MESSAGES_LOCAL)
-        val sb = StringBuilder(LOCAL_SYSTEM_PROMPT).append("\n\n")
+        val sb = StringBuilder(LOCAL_SYSTEM_PROMPT)
+
+        if (!vaultContext.isNullOrBlank()) {
+            sb.append("\n\nCONTEXTE OBSIDIAN (extraits réels du vault de l'utilisateur, trouvés " +
+                "automatiquement à partir de son dernier message) :\n")
+                .append(vaultContext.take(MAX_VAULT_CONTEXT_CHARS))
+        }
+        sb.append("\n\n")
+
         for (entry in recent) {
             val label = if (entry.role == "user") "Utilisateur" else "JARVIS"
             // Mode texte uniquement : les pièces jointes (images, documents) ne sont pas
@@ -127,7 +152,7 @@ object AiCoreManager {
         return if (full.length > MAX_PROMPT_CHARS) full.takeLast(MAX_PROMPT_CHARS) else full
     }
 
-    suspend fun generate(history: List<HistoryEntry>): String = withContext(Dispatchers.IO) {
+    suspend fun generate(history: List<HistoryEntry>, vaultContext: String? = null): String = withContext(Dispatchers.IO) {
         val status = checkStatus()
         if (status != Status.AVAILABLE) {
             return@withContext when (status) {
@@ -148,7 +173,7 @@ object AiCoreManager {
         }
 
         try {
-            val response = generativeModel.generateContent(buildLocalPrompt(history))
+            val response = generativeModel.generateContent(buildLocalPrompt(history, vaultContext))
             response.candidates.firstOrNull()?.text?.trim()?.takeIf { it.isNotBlank() }
                 ?: "JARVIS n'a rien à répondre pour l'instant — reformule ta question."
         } catch (e: Exception) {

@@ -78,7 +78,7 @@ object ApiClient {
             }
 
             val rawResponse = try {
-                dispatchToProvider(context, provider, history, effectiveSystemPrompt)
+                dispatchToProvider(context, provider, history, effectiveSystemPrompt, vaultContext)
             } catch (e: Exception) {
                 "Connexion impossible. Vérifiez les paramètres dans ⚙. Détail : ${e.message}"
             }
@@ -235,10 +235,16 @@ object ApiClient {
         }
     }
 
-    private suspend fun dispatchToProvider(context: Context, provider: Provider, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
+    private suspend fun dispatchToProvider(
+        context: Context,
+        provider: Provider,
+        history: List<HistoryEntry>,
+        systemPrompt: String = SYSTEM_PROMPT,
+        vaultContext: String? = null
+    ): String {
         val grounded = withCurrentDateTime(systemPrompt)
-        if (provider.isAuto) return sendAuto(context, history, grounded)
-        if (provider.isLocal) return sendLocal(context, history, grounded)
+        if (provider.isAuto) return sendAuto(context, history, grounded, vaultContext)
+        if (provider.isLocal) return sendLocal(context, history, grounded, vaultContext)
         if (provider == Provider.SERPAPI) return sendSerpApiWithRotation(context, history)
 
         val result = when (provider) {
@@ -260,7 +266,7 @@ object ApiClient {
             result.startsWith("Erreur API Gemini (429)") || result.startsWith("Erreur API Gemini (401)") ||
             result.startsWith("Toutes les clés") || result.startsWith("Aucune clé API")
         if (isQuotaOrAuthFailure) {
-            val fallback = sendAuto(context, history, grounded)
+            val fallback = sendAuto(context, history, grounded, vaultContext)
             val fallbackAlsoFailed = fallback.startsWith("Toutes les IA configurées ont échoué") ||
                 fallback.startsWith("Aucune IA configurée")
             if (!fallbackAlsoFailed) return fallback
@@ -293,7 +299,12 @@ object ApiClient {
 
     // ─── Mode Automatique avec multi-clés + sélection intelligente ────────────
 
-    private suspend fun sendAuto(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
+    private suspend fun sendAuto(
+        context: Context,
+        history: List<HistoryEntry>,
+        systemPrompt: String = SYSTEM_PROMPT,
+        vaultContext: String? = null
+    ): String {
         // Un fournisseur est candidat s'il a au moins une clé configurée, OU s'il ne nécessite
         // aucune clé (aucun fournisseur de AUTO_FALLBACK_ORDER n'est dans ce cas actuellement,
         // Pollinations ayant été retiré — cette vérification reste utile si un futur fournisseur
@@ -357,7 +368,7 @@ object ApiClient {
         // (préfixé ❌ ou ⏳) si l'IA locale n'est pas utilisable pour l'instant -- pas besoin de
         // le revérifier ici avant d'essayer.
         val localResult = try {
-            sendLocal(context, history, systemPrompt)
+            sendLocal(context, history, systemPrompt, vaultContext)
         } catch (e: Exception) {
             "❌ Erreur : ${e.message}"
         }
@@ -417,13 +428,27 @@ object ApiClient {
     }
 
     // ─── IA locale sur l'appareil (Gemini Nano / AICore) ──────────────────────
-    // [systemPrompt] est ignoré ici volontairement : AiCoreManager utilise son propre
+    // [systemPrompt] (le catalogue complet JARVIS_CMD pensé pour les fournisseurs cloud,
+    // ~17 000 caractères) reste ignoré ici volontairement : AiCoreManager utilise son propre
     // prompt système, très court, adapté au budget strict d'AICore (~4000 tokens pour
     // l'ensemble de la requête) — voir la note en tête d'AiCoreManager.kt pour le détail.
     // Le paramètre est conservé uniquement pour garder une signature uniforme avec les
     // autres branches de dispatchToProvider/sendAuto.
-    private suspend fun sendLocal(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
-        return AiCoreManager.generate(history)
+    //
+    // [vaultContext] en revanche EST transmis : ce sont les extraits de notes Obsidian déjà
+    // trouvés par sendChat() (ObsidianController.quickContextSearch, plafonné à 3 notes
+    // courtes) avant même l'appel IA — cette recherche automatique existe justement pour ne
+    // pas dépendre d'un modèle capable d'appeler lui-même obsidian_search (voir le commentaire
+    // dans sendChat), ce qui est encore plus vrai pour Gemini Nano qui n'a pas connaissance du
+    // catalogue JARVIS_CMD du tout. Sans ce fil, Gemini Nano n'avait strictement aucun moyen de
+    // savoir qu'un vault Obsidian existe, quel qu'ait été le contenu de la question posée.
+    private suspend fun sendLocal(
+        context: Context,
+        history: List<HistoryEntry>,
+        systemPrompt: String = SYSTEM_PROMPT,
+        vaultContext: String? = null
+    ): String {
+        return AiCoreManager.generate(history, vaultContext)
     }
 
     // ─── OpenAI-compatible avec rotation de clés ──────────────────────────────
