@@ -237,14 +237,35 @@ object ApiClient {
 
     private suspend fun dispatchToProvider(context: Context, provider: Provider, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
         val grounded = withCurrentDateTime(systemPrompt)
-        return when {
-            provider.isAuto -> sendAuto(context, history, grounded)
-            provider.isLocal -> sendLocal(context, history, grounded)
-            provider == Provider.CLAUDE -> sendClaudeWithRotation(context, history, grounded)
-            provider == Provider.GEMINI -> sendGeminiWithRotation(context, history, grounded)
-            provider == Provider.SERPAPI -> sendSerpApiWithRotation(context, history)
+        if (provider.isAuto) return sendAuto(context, history, grounded)
+        if (provider.isLocal) return sendLocal(context, history, grounded)
+        if (provider == Provider.SERPAPI) return sendSerpApiWithRotation(context, history)
+
+        val result = when (provider) {
+            Provider.CLAUDE -> sendClaudeWithRotation(context, history, grounded)
+            Provider.GEMINI -> sendGeminiWithRotation(context, history, grounded)
             else -> sendOpenAiWithRotation(context, history, provider, grounded)
         }
+
+        // BUG RÉEL CORRIGÉ : quand l'utilisateur a choisi un fournisseur PRÉCIS (pas
+        // "Automatique") et que celui-ci échoue pour quota dépassé ou clé invalide, l'appli
+        // affichait jusqu'ici le message d'erreur technique BRUT ("Erreur API (429) : ...")
+        // comme réponse de JARVIS -- signalement utilisateur récurrent "ERREUR GROQ 429".
+        // Un fournisseur choisi pour sa rapidité/gratuité (typiquement Groq) ne devrait
+        // jamais faire échouer TOUTE la conversation juste parce que SON quota à lui est
+        // dépassé : on retente maintenant silencieusement via la cascade Automatique (les
+        // autres fournisseurs configurés) avant d'abandonner et de renvoyer l'erreur brute.
+        val isQuotaOrAuthFailure = result.startsWith("Erreur API (429)") || result.startsWith("Erreur API (401)") ||
+            result.startsWith("Erreur API Claude (429)") || result.startsWith("Erreur API Claude (401)") ||
+            result.startsWith("Erreur API Gemini (429)") || result.startsWith("Erreur API Gemini (401)") ||
+            result.startsWith("Toutes les clés") || result.startsWith("Aucune clé API")
+        if (isQuotaOrAuthFailure) {
+            val fallback = sendAuto(context, history, grounded)
+            val fallbackAlsoFailed = fallback.startsWith("Toutes les IA configurées ont échoué") ||
+                fallback.startsWith("Aucune IA configurée")
+            if (!fallbackAlsoFailed) return fallback
+        }
+        return result
     }
 
     /**
@@ -427,15 +448,17 @@ object ApiClient {
         for (attempt in 0 until maxAttempts) {
             val apiKey = if (keys.isNotEmpty()) Prefs.getNextApiKey(context, provider) else ""
 
-            // PREVENTION PROACTIVE DU 429 : si cette clé a deja consomme assez de tokens sur
-            // les 60 dernieres secondes pour que CETTE requete depasse son budget connu (Groq :
-            // 6000 tokens/min par clé), on ne l'envoie meme pas -- on passe direct a la clé
+            // PREVENTION PROACTIVE DU 429 : si cette clé a deja consomme assez de tokens OU
+            // de requetes sur les 60 dernieres secondes pour que CETTE requete depasse son
+            // budget connu (Groq : 8000 tokens/min ET 30 requetes/min par clé, les deux
+            // limites sont independantes), on ne l'envoie meme pas -- on passe direct a la clé
             // suivante. Avant ce correctif, il fallait subir le 429 pour le savoir.
             if (apiKey.isNotBlank() && Prefs.wouldExceedTpmBudget(context, provider, apiKey, estimatedTokens)) {
                 lastErr = "Erreur API (429) : quota ${provider.displayName} anticipé pour cette clé (prévention proactive, pas encore essayé)."
                 continue
             }
 
+            if (apiKey.isNotBlank()) Prefs.recordProviderRequest(context, provider, apiKey)
             val result = sendOpenAiCompatible(baseUrl, model, apiKey, history, provider, systemPrompt)
 
             if (!result.text.startsWith("Erreur API (429)") && !result.text.startsWith("Erreur API (401)")) {

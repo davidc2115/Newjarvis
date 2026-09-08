@@ -162,56 +162,89 @@ object Prefs {
         prefs(context).edit().remove("api_keys_failed_${provider.name}").apply()
     }
 
-    // ─── Prevention proactive du 429 (quota TPM) ───────────────────────────────
+    // ─── Prevention proactive du 429 (quota TPM + RPM) ─────────────────────────
     // BUG RÉEL CORRIGÉ : jusqu'ici, un 429 Groq n'était JAMAIS anticipé -- il fallait le
     // subir (requête envoyée, refusée, clé blacklistée) avant de savoir que le quota était
-    // dépassé. Groq gratuit limite à 6000 tokens/minute PAR CLÉ (les clés de comptes
-    // différents ont chacune leur propre budget indépendant, confirmé par l'utilisateur).
-    // On suit maintenant la consommation glissante sur 60s par (provider, clé) et on
-    // vérifie AVANT d'envoyer si la requête risque de dépasser le budget restant -- si oui,
-    // on passe directement à la clé suivante au lieu d'essayer et d'échouer.
-    val KNOWN_TPM_LIMITS: Map<Provider, Int> = mapOf(Provider.GROQ to 6000)
+    // dépassé. Confirmé sur https://console.groq.com/docs/rate-limits (limites officielles,
+    // plan gratuit) pour openai/gpt-oss-120b : 8000 tokens/minute ET 30 requêtes/minute PAR
+    // CLÉ -- les deux limites sont indépendantes, on peut dépasser l'une sans dépasser
+    // l'autre (ex: beaucoup de petites requêtes rapprochées épuisent le RPM sans jamais
+    // approcher le TPM). L'appli fait 2 appels IA par question informationnelle (dispatch
+    // principal + reformulation naturelle), donc le RPM peut être atteint après seulement
+    // ~15 questions en une minute. Les clés de comptes Groq différents ont chacune leur
+    // propre budget indépendant (confirmé par l'utilisateur). On suit la consommation
+    // glissante sur 60s par (provider, clé) pour les deux métriques et on vérifie AVANT
+    // d'envoyer si la requête risque de dépasser le budget restant -- si oui, on passe
+    // directement à la clé suivante au lieu d'essayer et d'échouer.
+    val KNOWN_TPM_LIMITS: Map<Provider, Int> = mapOf(Provider.GROQ to 8000)
+    val KNOWN_RPM_LIMITS: Map<Provider, Int> = mapOf(Provider.GROQ to 30)
 
     private fun tokenWindowKey(provider: Provider, apiKey: String): String =
         "token_window_${provider.name}_${apiKey.hashCode()}"
 
-    /** Enregistre `tokens` consommés maintenant par cette clé (fenêtre glissante 60s). */
-    fun recordProviderTokens(context: Context, provider: Provider, apiKey: String, tokens: Int) {
-        if (tokens <= 0) return
-        val key = tokenWindowKey(provider, apiKey)
+    private fun requestWindowKey(provider: Provider, apiKey: String): String =
+        "request_window_${provider.name}_${apiKey.hashCode()}"
+
+    /** Ajoute `amount` à la fenêtre glissante 60s stockée sous `prefsKey`. */
+    private fun recordInWindow(context: Context, prefsKey: String, amount: Int) {
         val now = System.currentTimeMillis()
-        val json = prefs(context).getString(key, "[]") ?: "[]"
+        val json = prefs(context).getString(prefsKey, "[]") ?: "[]"
         val arr = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
-        // Ne garde que les entrées des 60 dernières secondes, ajoute la nouvelle.
         val kept = JSONArray()
         for (i in 0 until arr.length()) {
             val entry = arr.optJSONObject(i) ?: continue
             if (now - entry.optLong("ts") < 60_000L) kept.put(entry)
         }
-        kept.put(JSONObject().put("ts", now).put("tokens", tokens))
-        prefs(context).edit().putString(key, kept.toString()).apply()
+        kept.put(JSONObject().put("ts", now).put("amount", amount))
+        prefs(context).edit().putString(prefsKey, kept.toString()).apply()
     }
 
-    /** Tokens déjà consommés par cette clé sur les 60 dernières secondes. */
-    fun tokensUsedLastMinute(context: Context, provider: Provider, apiKey: String): Int {
-        val key = tokenWindowKey(provider, apiKey)
+    /** Somme des montants enregistrés dans la fenêtre glissante 60s sous `prefsKey`. */
+    private fun sumInWindow(context: Context, prefsKey: String): Int {
         val now = System.currentTimeMillis()
-        val json = prefs(context).getString(key, "[]") ?: "[]"
+        val json = prefs(context).getString(prefsKey, "[]") ?: "[]"
         val arr = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
         var total = 0
         for (i in 0 until arr.length()) {
             val entry = arr.optJSONObject(i) ?: continue
-            if (now - entry.optLong("ts") < 60_000L) total += entry.optInt("tokens")
+            if (now - entry.optLong("ts") < 60_000L) total += entry.optInt("amount")
         }
         return total
     }
 
-    /** true si envoyer ~estimatedTokens dépasserait le budget TPM connu de ce provider
-     *  (marge de sécurité 10% pour ne pas frôler la limite exacte). */
+    /** Enregistre `tokens` consommés maintenant par cette clé (fenêtre glissante 60s). */
+    fun recordProviderTokens(context: Context, provider: Provider, apiKey: String, tokens: Int) {
+        if (tokens <= 0) return
+        recordInWindow(context, tokenWindowKey(provider, apiKey), tokens)
+    }
+
+    /** Tokens déjà consommés par cette clé sur les 60 dernières secondes. */
+    fun tokensUsedLastMinute(context: Context, provider: Provider, apiKey: String): Int =
+        sumInWindow(context, tokenWindowKey(provider, apiKey))
+
+    /** Enregistre 1 requête faite maintenant par cette clé (fenêtre glissante 60s). */
+    fun recordProviderRequest(context: Context, provider: Provider, apiKey: String) {
+        recordInWindow(context, requestWindowKey(provider, apiKey), 1)
+    }
+
+    /** Requêtes déjà envoyées par cette clé sur les 60 dernières secondes. */
+    fun requestsLastMinute(context: Context, provider: Provider, apiKey: String): Int =
+        sumInWindow(context, requestWindowKey(provider, apiKey))
+
+    /** true si envoyer ~estimatedTokens OU une requête de plus dépasserait le budget
+     *  TPM/RPM connu de ce provider pour cette clé (marge de sécurité 10%). */
     fun wouldExceedTpmBudget(context: Context, provider: Provider, apiKey: String, estimatedTokens: Int): Boolean {
-        val limit = KNOWN_TPM_LIMITS[provider] ?: return false // pas de limite connue -> pas de garde-fou
-        val used = tokensUsedLastMinute(context, provider, apiKey)
-        return used + estimatedTokens > limit * 0.9
+        val tpmLimit = KNOWN_TPM_LIMITS[provider]
+        if (tpmLimit != null) {
+            val used = tokensUsedLastMinute(context, provider, apiKey)
+            if (used + estimatedTokens > tpmLimit * 0.9) return true
+        }
+        val rpmLimit = KNOWN_RPM_LIMITS[provider]
+        if (rpmLimit != null) {
+            val used = requestsLastMinute(context, provider, apiKey)
+            if (used + 1 > rpmLimit * 0.9) return true
+        }
+        return false
     }
 
     private fun getKeyIndex(context: Context, provider: Provider): Int =
