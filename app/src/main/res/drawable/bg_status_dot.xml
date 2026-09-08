@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Petit indicateur d'état rond (façon feu tricolore), coloré à l'exécution via
+     setTint() : vert = disponible, ambre = en cours/téléchargeable, rouge = indisponible,
+     gris = vérification en cours. Utilisé devant "GEMINI NANO" dans le panneau IA locale. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="@color/text_secondary" />
+</shape>

@@ -317,24 +317,75 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🔑 Clés API"
-                android:textColor="@color/cyan_accent"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
+            <!-- En-tête façon carte d'identité de la section (icône + titre + sous-titre),
+                 même langage visuel que les rangées de fonctionnalités (ex : Home Assistant
+                 dans activity_smart_home.xml) plutôt qu'un simple titre texte isolé. -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Configure au moins une clé pour que JARVIS puisse te répondre. En mode « 🤖 Automatique » (onglet Config), JARVIS essaie tes fournisseurs configurés dans l'ordre ci-dessous jusqu'à ce que l'un réponde — plus tu en configures, plus le repli est fiable si l'un d'eux est à quota. Chaque clé reste stockée uniquement sur ce téléphone."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:lineSpacingExtra="3dp"
-                android:layout_marginBottom="16dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="18dp">
+
+                <TextView
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:gravity="center"
+                    android:text="🔑"
+                    android:textSize="20sp"
+                    android:background="@drawable/bg_icon_chip" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginStart="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Clés API"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Configure au moins un fournisseur cloud pour que JARVIS puisse te répondre"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11.5sp"
+                        android:layout_marginTop="1dp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Encart explicatif sur le mode Automatique — même style "carte" que le reste
+                 de la section pour ne pas retomber sur du texte brut flottant. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/bg_settings_card"
+                android:padding="14dp"
+                android:layout_marginBottom="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="💡"
+                    android:textSize="15sp"
+                    android:layout_marginEnd="10dp" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="En mode « 🤖 Automatique » (onglet Config), JARVIS essaie tes fournisseurs configurés dans l'ordre ci-dessous jusqu'à ce que l'un réponde — plus tu en configures, plus le repli est fiable si l'un d'eux est à quota. Chaque clé reste stockée uniquement sur ce téléphone."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp"
+                    android:lineSpacingExtra="3dp" />
+            </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/apiKeysContainer"
@@ -346,12 +397,12 @@
                 android:id="@+id/saveApiKeysButton"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:text="ENREGISTRER TOUTES LES CLÉS"
+                android:text="✓ ENREGISTRER TOUTES LES CLÉS"
                 android:textColor="@color/background_dark"
                 android:textStyle="bold"
                 android:gravity="center"
                 android:background="@drawable/bg_mic_button"
-                android:layout_marginTop="20dp"
+                android:layout_marginTop="8dp"
                 android:layout_marginBottom="8dp" />
 
 
@@ -759,7 +810,7 @@
         </LinearLayout>
 
 
-        <!-- Onglet LOCAL (IA locale AICore/Gemini Nano + génération d'image Stable Diffusion) -->
+        <!-- Onglet LOCAL (Gemini Nano via AICore + génération d'image Stable Diffusion) -->
         <LinearLayout
             android:id="@+id/panelLocal"
             android:layout_width="match_parent"
@@ -767,92 +818,223 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🧠 IA locale (AICore / Gemini Nano)"
-                android:textColor="@color/cyan_accent"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
+            <!-- En-tête de section, même langage visuel que Clés API (icône + titre + sous-titre). -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Gemini Nano tourne directement sur ce téléphone via AICore, le service système Android de Google : aucune connexion Internet requise, aucune donnée envoyée hors de l'appareil. Contrairement aux anciens modèles embarqués, Android gère lui-même le téléchargement et les mises à jour — rien à récupérer manuellement. Nécessite un appareil compatible (Pixel 8 ou plus récent, ou équivalent Samsung/Snapdragon récent) et Android 14 ou plus récent. Capacités réduites par rapport aux IA en ligne (conversation générale surtout, pas d'accès aux données du téléphone)."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:lineSpacingExtra="3dp"
-                android:layout_marginBottom="12dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="18dp">
 
-            <TextView
-                android:id="@+id/aiCoreStatusText"
+                <TextView
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:gravity="center"
+                    android:text="🧠"
+                    android:textSize="20sp"
+                    android:background="@drawable/bg_icon_chip" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginStart="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Gemini Nano"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="IA locale sur ton téléphone, via AICore (Android)"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11.5sp"
+                        android:layout_marginTop="1dp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Encart explicatif -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:padding="12dp"
-                android:text="Statut : vérification…"
-                android:textColor="@color/cyan_accent"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp" />
+                android:orientation="horizontal"
+                android:background="@drawable/bg_settings_card"
+                android:padding="14dp"
+                android:layout_marginBottom="14dp">
 
-            <TextView
-                android:id="@+id/aiCoreProgressText"
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="💡"
+                    android:textSize="15sp"
+                    android:layout_marginEnd="10dp" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Gemini Nano tourne directement sur ce téléphone via AICore, le service système Android de Google : aucune connexion Internet requise, aucune donnée envoyée hors de l'appareil. Android gère lui-même le téléchargement et les mises à jour du modèle — rien à récupérer manuellement. Nécessite un appareil compatible (Pixel 8 ou plus récent, ou équivalent Samsung/Snapdragon récent) et Android 14 ou plus récent. Capacités réduites par rapport aux IA en ligne (conversation générale surtout, pas d'accès aux données du téléphone)."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp"
+                    android:lineSpacingExtra="3dp" />
+            </LinearLayout>
+
+            <!-- Carte de statut Gemini Nano -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/cyan_accent"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:gravity="center"
-                android:layout_marginBottom="8dp" />
+                android:orientation="vertical"
+                android:background="@drawable/bg_settings_card"
+                android:padding="16dp"
+                android:layout_marginBottom="20dp">
 
-            <TextView
-                android:id="@+id/aiCoreActionButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="🔎 VÉRIFIER LA DISPONIBILITÉ"
-                android:textColor="@color/background_dark"
-                android:textStyle="bold"
-                android:gravity="center"
-                android:background="@drawable/bg_mic_button"
-                android:layout_marginBottom="16dp" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <View
+                        android:id="@+id/aiCoreStatusDot"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:background="@drawable/bg_status_dot" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="GEMINI NANO"
+                        android:textColor="@color/violet_accent"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:fontFamily="monospace"
+                        android:letterSpacing="0.08"
+                        android:layout_marginStart="10dp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/aiCoreStatusText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Statut : vérification…"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:lineSpacingExtra="2dp" />
+
+                <TextView
+                    android:id="@+id/aiCoreProgressText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/cyan_accent"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginTop="8dp" />
+
+                <TextView
+                    android:id="@+id/aiCoreActionButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="🔎 VÉRIFIER LA DISPONIBILITÉ"
+                    android:textColor="@color/background_dark"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:background="@drawable/bg_mic_button"
+                    android:layout_marginTop="14dp" />
+            </LinearLayout>
 
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:background="@color/text_secondary"
-                android:alpha="0.2"
-                android:layout_marginBottom="16dp" />
+                android:alpha="0.15"
+                android:layout_marginBottom="18dp" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🎨 Génération d'image embarquée (Stable Diffusion)"
-                android:textColor="@color/cyan_accent"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp" />
-
-            <TextView
+            <!-- En-tête section Stable Diffusion, même style que Gemini Nano ci-dessus. -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Génère de vraies images directement sur le téléphone, sans réseau. ⚠️ Sans GPU dédié, compte plusieurs minutes par image sur CPU mobile — c'est la réalité du calcul de diffusion, pas un défaut. Télécharge un modèle ci-dessous, ou importe le tien (.safetensors, .ckpt ou .gguf, souvent 2 à 4 Go) depuis Hugging Face ou Civitai."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:lineSpacingExtra="3dp"
-                android:layout_marginBottom="12dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="18dp">
+
+                <TextView
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:gravity="center"
+                    android:text="🎨"
+                    android:textSize="20sp"
+                    android:background="@drawable/bg_icon_chip" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginStart="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Stable Diffusion"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Génération d'image embarquée, sans réseau"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11.5sp"
+                        android:layout_marginTop="1dp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/bg_settings_card"
+                android:padding="14dp"
+                android:layout_marginBottom="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="⚠️"
+                    android:textSize="15sp"
+                    android:layout_marginEnd="10dp" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Sans GPU dédié, compte plusieurs minutes par image sur CPU mobile — c'est la réalité du calcul de diffusion, pas un défaut. Télécharge un modèle ci-dessous, ou importe le tien (.safetensors, .ckpt ou .gguf, souvent 2 à 4 Go) depuis Hugging Face ou Civitai."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp"
+                    android:lineSpacingExtra="3dp" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/sdModelPathText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:padding="12dp"
+                android:background="@drawable/bg_settings_card"
+                android:padding="14dp"
                 android:text="Aucun modèle importé"
                 android:textColor="@color/text_primary"
                 android:textSize="12sp"
-                android:layout_marginBottom="8dp" />
+                android:layout_marginBottom="10dp" />
 
             <TextView
                 android:id="@+id/deleteSdModelButton"
@@ -874,16 +1056,18 @@
                 android:textSize="12sp"
                 android:gravity="center"
                 android:background="@drawable/bg_input"
-                android:layout_marginBottom="12dp" />
+                android:layout_marginBottom="20dp" />
 
             <!-- Titre section modèles -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="📦 Modèles Stable Diffusion disponibles — cliquez pour télécharger directement sur le téléphone"
-                android:textColor="@color/cyan_accent"
-                android:textSize="13sp"
+                android:text="📦 MODÈLES DISPONIBLES — TÉLÉCHARGEMENT DIRECT"
+                android:textColor="@color/violet_accent"
+                android:textSize="11sp"
                 android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.06"
                 android:layout_marginBottom="10dp" />
 
             <!-- Cartes dynamiques générées par SettingsActivity.buildModelCard() -->
@@ -935,6 +1119,7 @@
                 android:layout_marginBottom="16dp" />
 
         </LinearLayout>
+
 
     </LinearLayout>
 

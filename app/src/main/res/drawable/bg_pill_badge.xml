@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pastille de statut ("✓ Configurée", "Disponible", "Non compatible"...) : forme
+     pilule neutre, colorée à l'exécution via setBackgroundTintList (vert=succès,
+     ambre=en cours, rouge=erreur, gris=neutre) — un seul drawable pour tous les
+     badges de statut de l'appli plutôt qu'un fichier par couleur. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/text_secondary" />
+    <corners android:radius="20dp" />
+</shape>

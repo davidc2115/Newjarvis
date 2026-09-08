@@ -45,6 +45,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var hfTokenInput: EditText
     private lateinit var downloadProgressText: TextView
+    private lateinit var aiCoreStatusDot: View
     private lateinit var aiCoreStatusText: TextView
     private lateinit var aiCoreProgressText: TextView
     private lateinit var aiCoreActionButton: TextView
@@ -132,6 +133,7 @@ class SettingsActivity : AppCompatActivity() {
 
         hfTokenInput          = findViewById(R.id.hfTokenInput)
         downloadProgressText  = findViewById(R.id.downloadProgressText)
+        aiCoreStatusDot       = findViewById(R.id.aiCoreStatusDot)
         aiCoreStatusText      = findViewById(R.id.aiCoreStatusText)
         aiCoreProgressText    = findViewById(R.id.aiCoreProgressText)
         aiCoreActionButton    = findViewById(R.id.aiCoreActionButton)
@@ -271,29 +273,49 @@ class SettingsActivity : AppCompatActivity() {
         )
     )
 
+    // Petite icône distinctive par fournisseur, purement décorative (pas de vraie iconographie
+    // de marque disponible hors-ligne) — aide à repérer un fournisseur d'un coup d'œil dans la
+    // liste plutôt que de devoir lire chaque nom.
+    private val providerIcon: Map<Provider, String> = mapOf(
+        Provider.GROQ to "⚡",
+        Provider.OPENAI to "🟢",
+        Provider.CLAUDE to "🟣",
+        Provider.GEMINI to "✨",
+        Provider.MISTRAL to "🌀",
+        Provider.DEEPSEEK to "🐳",
+        Provider.PERPLEXITY to "🔎",
+        Provider.TOGETHER to "🤝",
+        Provider.OPENROUTER to "🌐",
+        Provider.SERPAPI to "🔍"
+    )
+
     private fun buildApiKeyFields() {
         apiKeysContainer.removeAllViews()
         apiKeyFields.clear()
+        val dp = resources.displayMetrics.density
 
         for (provider in Provider.CLOUD_KEY_PROVIDERS) {
             // SerpAPI a un rôle différent (recherche web, pas génération de réponse) : on le
-            // sépare visuellement du reste pour éviter la confusion "pourquoi cette clé-là ne
-            // répond jamais dans le chat ?".
+            // sépare visuellement du reste (même style d'étiquette de section que "🏠 DOMOTIQUE
+            // & RÉSEAU" dans activity_smart_home.xml) pour éviter la confusion "pourquoi cette
+            // clé-là ne répond jamais dans le chat ?".
             if (provider == Provider.SERPAPI) {
                 val divider = View(this).apply {
                     layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).also {
-                        it.topMargin = 12; it.bottomMargin = 12
+                        it.topMargin = (8 * dp).toInt(); it.bottomMargin = (16 * dp).toInt()
                     }
                     setBackgroundColor(getColor(R.color.text_secondary))
-                    alpha = 0.2f
+                    alpha = 0.15f
                 }
                 apiKeysContainer.addView(divider)
 
                 val sectionLabel = TextView(this).apply {
-                    text = "🔍 Recherche Web (fonction différente du chat)"
-                    setTextColor(getColor(R.color.cyan_accent))
-                    textSize = 13f
-                    setPadding(0, 0, 0, 4)
+                    text = "🔍 RECHERCHE WEB — FONCTION DIFFÉRENTE DU CHAT"
+                    setTextColor(getColor(R.color.violet_accent))
+                    textSize = 11f
+                    setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
+                    letterSpacing = 0.06f
+                    setPadding(2, 0, 0, (10 * dp).toInt())
                 }
                 apiKeysContainer.addView(sectionLabel)
             }
@@ -301,13 +323,56 @@ class SettingsActivity : AppCompatActivity() {
             val info = apiKeyInfo[provider]
             val hasKey = Prefs.getApiKeyFor(this, provider).isNotBlank()
 
-            val label = TextView(this).apply {
-                text = "🔑 ${provider.displayName}" + if (hasKey) "   ✓ configurée" else ""
-                setTextColor(getColor(if (hasKey) R.color.success_glow else R.color.text_secondary))
-                textSize = 12f
-                setPadding(0, 16, 0, 2)
+            // ── Carte fournisseur ────────────────────────────────────────────────
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = getDrawable(R.drawable.bg_settings_card)
+                setPadding((16 * dp).toInt(), (14 * dp).toInt(), (16 * dp).toInt(), (14 * dp).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.bottomMargin = (14 * dp).toInt() }
             }
-            apiKeysContainer.addView(label)
+
+            // Ligne d'en-tête : icône + nom + badge de statut
+            val headerRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.bottomMargin = (10 * dp).toInt() }
+            }
+            val iconChip = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams((36 * dp).toInt(), (36 * dp).toInt())
+                gravity = android.view.Gravity.CENTER
+                text = providerIcon[provider] ?: "🔑"
+                textSize = 15f
+                background = getDrawable(R.drawable.bg_icon_chip)
+            }
+            val nameText = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).also {
+                    it.marginStart = (12 * dp).toInt(); it.marginEnd = (8 * dp).toInt()
+                }
+                text = provider.displayName
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 13.5f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            }
+            val statusBadge = TextView(this).apply {
+                text = if (hasKey) "✓ Configurée" else "Non configurée"
+                textSize = 9.5f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding((9 * dp).toInt(), (4 * dp).toInt(), (9 * dp).toInt(), (4 * dp).toInt())
+                setTextColor(getColor(if (hasKey) R.color.success_glow else R.color.text_secondary))
+                background = getDrawable(R.drawable.bg_pill_badge)?.mutate()?.apply {
+                    setTint(if (hasKey) Color.parseColor("#334ADE80") else Color.parseColor("#268D8A82"))
+                }
+            }
+            headerRow.addView(iconChip)
+            headerRow.addView(nameText)
+            headerRow.addView(statusBadge)
+            card.addView(headerRow)
 
             if (info != null) {
                 val description = TextView(this).apply {
@@ -315,16 +380,16 @@ class SettingsActivity : AppCompatActivity() {
                     setTextColor(getColor(R.color.text_secondary))
                     textSize = 10.5f
                     setLineSpacing(2f, 1f)
-                    setPadding(0, 0, 0, 4)
+                    setPadding(0, 0, 0, (10 * dp).toInt())
                 }
-                apiKeysContainer.addView(description)
+                card.addView(description)
             }
 
             val field = EditText(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     resources.getDimensionPixelSize(R.dimen.input_height)
-                ).also { it.bottomMargin = 4 }
+                ).also { it.bottomMargin = (8 * dp).toInt() }
                 background = getDrawable(R.drawable.bg_input)
                 setPadding(40, 0, 40, 0)
                 setTextColor(getColor(R.color.text_primary))
@@ -332,18 +397,25 @@ class SettingsActivity : AppCompatActivity() {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
                 hint = "Clé API ${provider.displayName}..."
                 setText(Prefs.getApiKeyFor(this@SettingsActivity, provider))
-                // Le badge "✓ configurée" ne se met à jour qu'au prochain rebuild de la liste
+                // Le badge "✓ Configurée" ne se met à jour qu'au prochain rebuild de la liste
                 // (après ENREGISTRER) — pas besoin de watcher ici, juste une info au chargement.
             }
-            apiKeysContainer.addView(field)
+            card.addView(field)
             apiKeyFields[provider] = field
 
             if (info != null) {
                 val getKeyLink = TextView(this).apply {
-                    text = "Obtenir une clé sur ${info.getKeyDomain} →"
+                    text = "🔗 Obtenir une clé sur ${info.getKeyDomain}"
                     setTextColor(getColor(R.color.cyan_accent))
-                    textSize = 10.5f
-                    setPadding(0, 0, 0, 12)
+                    textSize = 11f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    gravity = android.view.Gravity.CENTER
+                    background = getDrawable(R.drawable.bg_quick_action_chip)
+                    setPadding((10 * dp).toInt(), (8 * dp).toInt(), (10 * dp).toInt(), (8 * dp).toInt())
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
                     setOnClickListener {
                         try {
                             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://${info.getKeyDomain}")))
@@ -352,10 +424,13 @@ class SettingsActivity : AppCompatActivity() {
                         }
                     }
                 }
-                apiKeysContainer.addView(getKeyLink)
+                card.addView(getKeyLink)
             }
+
+            apiKeysContainer.addView(card)
         }
     }
+
 
     private fun loadSavedValues() {
         hfTokenInput.setText(Prefs.getHfToken(this))
@@ -719,37 +794,52 @@ class SettingsActivity : AppCompatActivity() {
         refreshAiCoreStatus(triggerDownloadIfNeeded = false)
     }
 
+    // Couleur du point de statut devant "GEMINI NANO" — même code couleur que les badges
+    // "✓ Configurée" de l'onglet Clés API (vert=succès, ambre=action possible, rouge=erreur,
+    // gris=vérification en cours), pour un langage visuel cohérent entre les deux onglets.
+    private fun tintAiCoreStatusDot(colorHex: String) {
+        aiCoreStatusDot.background = getDrawable(R.drawable.bg_status_dot)?.mutate()?.apply {
+            setTint(Color.parseColor(colorHex))
+        }
+    }
+
     private fun refreshAiCoreStatus(triggerDownloadIfNeeded: Boolean) {
         aiCoreStatusText.text = "Statut : vérification…"
         aiCoreActionButton.isEnabled = false
+        tintAiCoreStatusDot("#8D8A82")
 
         CoroutineScope(Dispatchers.Main).launch {
             when (val status = AiCoreManager.checkStatus()) {
                 AiCoreManager.Status.AVAILABLE -> {
-                    aiCoreStatusText.text = "✅ Disponible et prête à l'emploi sur cet appareil"
+                    tintAiCoreStatusDot("#4ADE80")
+                    aiCoreStatusText.text = "✅ Gemini Nano est disponible et prête à l'emploi sur cet appareil"
                     aiCoreProgressText.text = ""
                     aiCoreActionButton.text = "🔄 REVÉRIFIER"
                     aiCoreActionButton.isEnabled = true
                 }
                 AiCoreManager.Status.DOWNLOADABLE -> {
-                    aiCoreStatusText.text = "⬇️ Téléchargeable — pas encore présente sur ce téléphone"
+                    tintAiCoreStatusDot("#E8B84B")
+                    aiCoreStatusText.text = "⬇️ Gemini Nano est téléchargeable — pas encore présente sur ce téléphone"
                     aiCoreActionButton.text = "⬇ TÉLÉCHARGER GEMINI NANO"
                     aiCoreActionButton.isEnabled = true
                     if (triggerDownloadIfNeeded) downloadAiCore()
                 }
                 AiCoreManager.Status.DOWNLOADING -> {
-                    aiCoreStatusText.text = "⬇ Téléchargement déjà en cours sur cet appareil…"
+                    tintAiCoreStatusDot("#E8B84B")
+                    aiCoreStatusText.text = "⬇ Téléchargement de Gemini Nano déjà en cours sur cet appareil…"
                     aiCoreActionButton.text = "🔄 REVÉRIFIER"
                     aiCoreActionButton.isEnabled = true
                 }
                 AiCoreManager.Status.UNAVAILABLE -> {
-                    aiCoreStatusText.text = "❌ Non disponible sur cet appareil (modèle ou version Android non compatible — nécessite Android 14+ et un appareil récent, ex : Pixel 8+)"
+                    tintAiCoreStatusDot("#F87171")
+                    aiCoreStatusText.text = "❌ Gemini Nano n'est pas disponible sur cet appareil (modèle ou version Android non compatible — nécessite Android 14+ et un appareil récent, ex : Pixel 8+)"
                     aiCoreProgressText.text = ""
                     aiCoreActionButton.text = "🔄 REVÉRIFIER"
                     aiCoreActionButton.isEnabled = true
                 }
                 AiCoreManager.Status.ERROR -> {
-                    aiCoreStatusText.text = "❌ Impossible de vérifier — l'application système AICore est peut-être manquante ou à mettre à jour"
+                    tintAiCoreStatusDot("#F87171")
+                    aiCoreStatusText.text = "❌ Impossible de vérifier Gemini Nano — l'application système AICore est peut-être manquante ou à mettre à jour"
                     aiCoreProgressText.text = ""
                     aiCoreActionButton.text = "🔄 REVÉRIFIER"
                     aiCoreActionButton.isEnabled = true
