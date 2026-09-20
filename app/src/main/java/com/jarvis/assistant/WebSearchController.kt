@@ -3,36 +3,118 @@ package com.jarvis.assistant
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Recherche web générique — utilisé pour les horaires, avis, infos pratiques,
- * ou toute question factuelle sur un lieu/sujet. À NE PAS confondre avec
- * LocationController.openMaps() qui sert uniquement à obtenir un itinéraire.
+ * Recherche web — priorité :
+ * 1. Gemini avec Google Search grounding (réponse directe dans le chat / vocal)
+ * 2. SerpAPI si clé configurée
+ * 3. Ouverture navigateur en dernier recours uniquement
  *
- * Si une clé SerpAPI est configurée (⚙ Paramètres → Clés API → SerpAPI),
- * les résultats réels sont récupérés et renvoyés en texte, pour que l'IA
- * puisse répondre directement avec l'info demandée (ex: horaires, adresse).
- * Sinon, on ouvre simplement le navigateur sur la recherche.
+ * Gemini Nano (AICore) ne peut PAS faire de recherche (hors-ligne).
  */
 object WebSearchController {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
         .build()
 
+    private val JSON = "application/json; charset=utf-8".toMediaType()
+
     fun search(context: Context, query: String): String {
-        val apiResult = tryFetchResults(context, query)
-        if (apiResult != null) return apiResult
+        if (query.isBlank()) return "❌ Aucune requête de recherche fournie."
+
+        // 1. Gemini grounding (meilleure qualité + réponse orale native)
+        val geminiResult = tryGeminiGroundedSearch(context, query)
+        if (geminiResult != null) return geminiResult
+
+        // 2. SerpAPI
+        val serpResult = tryFetchSerpResults(context, query)
+        if (serpResult != null) return serpResult
+
+        // 3. Dernier recours : navigateur (mais message clair)
         return openInBrowser(context, query)
     }
 
-    /** Retourne les extraits de résultats (texte brut à reformuler par l'IA), ou null si indisponible. */
-    private fun tryFetchResults(context: Context, query: String): String? {
+    /**
+     * Utilise l'API Gemini avec l'outil google_search (grounding).
+     * Le modèle décide de chercher et synthétise une réponse naturelle.
+     */
+    private fun tryGeminiGroundedSearch(context: Context, query: String): String? {
+        val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
+        if (keys.isEmpty()) return null
+
+        for (apiKey in keys) {
+            try {
+                val baseUrl = Provider.GEMINI.defaultBaseUrl
+                val separator = if (baseUrl.contains("?")) "&" else "?"
+                val url = "$baseUrl${separator}key=$apiKey"
+
+                val contents = JSONArray().put(
+                    JSONObject()
+                        .put("role", "user")
+                        .put("parts", JSONArray().put(JSONObject().put("text", query)))
+                )
+
+                val body = JSONObject()
+                    .put("contents", contents)
+                    .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+                    .put(
+                        "systemInstruction",
+                        JSONObject().put(
+                            "parts",
+                            JSONArray().put(
+                                JSONObject().put(
+                                    "text",
+                                    "Tu es JARVIS. Réponds en français, de façon concise et naturelle (phrases courtes, pas de markdown). " +
+                                        "Utilise la recherche Google pour donner une réponse factuelle à jour. " +
+                                        "Cite brièvement les sources si utile, sans listes à puces."
+                                )
+                            )
+                        )
+                    )
+                    .toString()
+                    .toRequestBody(JSON)
+
+                val request = Request.Builder()
+                    .url(url)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val bodyStr = response.body?.string() ?: return@use
+                    if (!response.isSuccessful) {
+                        if (response.code == 429 || response.code == 401) {
+                            Prefs.markKeyFailed(context, Provider.GEMINI, apiKey)
+                        }
+                        return@use
+                    }
+                    val json = JSONObject(bodyStr)
+                    val candidates = json.optJSONArray("candidates") ?: return@use
+                    if (candidates.length() == 0) return@use
+                    val content = candidates.getJSONObject(0).optJSONObject("content") ?: return@use
+                    val parts = content.optJSONArray("parts") ?: return@use
+                    val text = parts.getJSONObject(0).optString("text", "").trim()
+                    if (text.isNotBlank()) {
+                        return "🔍 $text"
+                    }
+                }
+            } catch (_: Exception) {
+                // essaie la clé suivante
+            }
+        }
+        return null
+    }
+
+    private fun tryFetchSerpResults(context: Context, query: String): String? {
         val keys = Prefs.getApiKeysFor(context, Provider.SERPAPI)
         if (keys.isEmpty()) return null
 
@@ -53,13 +135,12 @@ object WebSearchController {
                     val bodyStr = response.body?.string() ?: return@use
                     val json = JSONObject(bodyStr)
 
-                    // Réponse directe si Google la fournit (horaires, météo, définition...)
                     val answerBox = json.optJSONObject("answer_box")
                     if (answerBox != null) {
                         val direct = answerBox.optString("answer", "").ifBlank {
                             answerBox.optString("snippet", "")
                         }
-                        if (direct.isNotBlank()) return direct
+                        if (direct.isNotBlank()) return "🔍 $direct"
                     }
 
                     val localResults = json.optJSONArray("local_results")
@@ -67,10 +148,10 @@ object WebSearchController {
                         val place = localResults.getJSONObject(0)
                         val sb = StringBuilder()
                         sb.append(place.optString("title", query)).append(" — ")
-                        place.optJSONObject("hours")?.let { sb.append("horaires : ${it}. ") }
+                        place.optJSONObject("hours")?.let { sb.append("horaires : $it. ") }
                         place.optString("address", "").let { if (it.isNotBlank()) sb.append("Adresse : $it. ") }
                         place.optString("type", "").let { if (it.isNotBlank()) sb.append("($it) ") }
-                        return sb.toString()
+                        return "🔍 ${sb}"
                     }
 
                     val organic = json.optJSONArray("organic_results")
@@ -81,11 +162,11 @@ object WebSearchController {
                             sb.append(item.optString("title")).append(" : ")
                                 .append(item.optString("snippet")).append("\n")
                         }
-                        return sb.toString().trim()
+                        return "🔍 ${sb.toString().trim()}"
                     }
                 }
-            } catch (e: Exception) {
-                // essaie la clé suivante s'il y en a une
+            } catch (_: Exception) {
+                // clé suivante
             }
         }
         return null
@@ -98,8 +179,9 @@ object WebSearchController {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(intent)
-            "🔍 Recherche lancée pour « $query » (aucune clé SerpAPI configurée pour une réponse directe — " +
-                "ajoute-en une dans ⚙ Paramètres → Clés API pour que je puisse te répondre directement la prochaine fois)."
+            "🔍 J'ai ouvert Google pour « $query ». " +
+                "Pour que je te réponde directement dans le chat (et à la voix), configure une clé Gemini " +
+                "dans ⚙ → Clés API (recommandé) ou une clé SerpAPI."
         } catch (e: Exception) {
             "❌ Échec de la recherche : ${e.message}"
         }

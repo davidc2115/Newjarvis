@@ -109,6 +109,29 @@ object CalendarController {
         return getEventsTimeRange(context, startOfDay, endOfDay, title, calendarRef)
     }
 
+
+    /**
+     * Événements d'un jour précis (date en langage naturel FR ou JJ/MM ou AAAA-MM-JJ).
+     * Ex: "demain", "lundi", "15/03", "2026-09-22".
+     */
+    fun getEventsForDay(context: Context, dateStr: String, calendarRef: String? = null): String {
+        val day = resolveDate(dateStr)
+        day.set(Calendar.HOUR_OF_DAY, 0)
+        day.set(Calendar.MINUTE, 0)
+        day.set(Calendar.SECOND, 0)
+        day.set(Calendar.MILLISECOND, 0)
+        val start = day.timeInMillis
+        val endCal = day.clone() as Calendar
+        endCal.set(Calendar.HOUR_OF_DAY, 23)
+        endCal.set(Calendar.MINUTE, 59)
+        endCal.set(Calendar.SECOND, 59)
+        endCal.set(Calendar.MILLISECOND, 999)
+        val end = endCal.timeInMillis
+        val sdf = SimpleDateFormat("EEEE d MMMM yyyy", Locale.FRENCH)
+        val title = "📅 **Événements du ${sdf.format(Date(start))}**" + calendarLabelSuffix(context, calendarRef)
+        return getEventsTimeRange(context, start, end, title, calendarRef)
+    }
+
     fun getUpcomingEvents(context: Context, days: Int = 7, calendarRef: String? = null): String {
         val start = Calendar.getInstance().timeInMillis
         val end = Calendar.getInstance().apply {

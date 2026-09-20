@@ -40,7 +40,7 @@ object JarvisCommandParser {
     // sans risque de perte/altération de données par un appel IA superflu.
     private val INFORMATIONAL_ACTIONS = setOf(
         "list_files", "search_files", "read_file", "storage_info",
-        "today_events", "upcoming_events", "search_event", "list_calendars",
+        "today_events", "upcoming_events", "week_events", "day_events", "search_event", "list_calendars",
         "read_sms", "read_unread_sms", "search_sms", "recent_calls",
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
@@ -220,6 +220,11 @@ object JarvisCommandParser {
             }
 
             "today_events" -> CalendarController.getTodayEvents(context, json.optString("calendar", "").ifBlank { null })
+            "day_events" -> {
+                val dateStr = json.optString("date", "").ifBlank { json.optString("day", "") }
+                if (dateStr.isBlank()) "❌ Précise la date (ex: demain, lundi, 15/03, 2026-09-22)."
+                else CalendarController.getEventsForDay(context, dateStr, json.optString("calendar", "").ifBlank { null })
+            }
             "upcoming_events" -> CalendarController.getUpcomingEvents(context, json.optInt("days", 7), json.optString("calendar", "").ifBlank { null })
             "week_events" -> CalendarController.getEventsForWeek(context, json.optInt("offset", 0), json.optString("calendar", "").ifBlank { null })
             "create_event" -> {
