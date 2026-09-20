@@ -17,7 +17,7 @@ object SmsController {
 
     fun sendSms(context: Context, contactNameOrNumber: String, body: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
-            return "❌ Permission d'envoi de SMS non accordée. Utilisez le bouton '💬 Demander SMS' ou '⚙️ AUTORISATIONS MANUELLES'."
+            return "❌ Permission d'envoi de SMS non accordée. Ouvre ⚙ → Permissions et active SMS (ou Paramètres Android → Apps → JARVIS → Autorisations → SMS)."
         }
 
         var number = contactNameOrNumber.replace(" ", "").replace("-", "")
@@ -47,7 +47,7 @@ object SmsController {
 
     fun readInboxSms(context: Context, count: Int = 10): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-            return "❌ Permission de lecture des SMS non accordée. Cliquez sur '💬 Demander SMS' ou '⚙️ AUTORISATIONS MANUELLES'."
+            return "❌ Permission de lecture des SMS non accordée. Ouvre ⚙ → Permissions et active SMS."
         }
 
         val projection = arrayOf(
@@ -94,7 +94,7 @@ object SmsController {
     /** Recherche des SMS par mot-clé (dans le contenu ou le nom/numéro de l'expéditeur). */
     fun searchSms(context: Context, query: String, count: Int = 10): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-            return "❌ Permission de lecture des SMS non accordée. Cliquez sur '💬 Demander SMS' ou '⚙️ AUTORISATIONS MANUELLES'."
+            return "❌ Permission de lecture des SMS non accordée. Ouvre ⚙ → Permissions et active SMS."
         }
 
         val projection = arrayOf(

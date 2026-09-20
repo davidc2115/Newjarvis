@@ -17,13 +17,13 @@ object PhoneController {
 
     fun makeCall(context: Context, contactNameOrNumber: String): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
-            return "❌ Permission d'appel non accordée. Veuillez accorder la permission dans les paramètres."
+            return "❌ Permission d'appel non accordée. Ouvre ⚙ → Permissions (ou Paramètres Android → Apps → JARVIS → Autorisations) et active Téléphone / Appels."
         }
 
         var number = contactNameOrNumber.replace(" ", "").replace("-", "")
         if (!number.all { it.isDigit() || it == '+' }) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
-                return "❌ Permission d'accès aux contacts (READ_CONTACTS) non accordée. Elle est nécessaire pour trouver le numéro de « $contactNameOrNumber »."
+                return "❌ Permission Contacts manquante pour trouver le numéro de « $contactNameOrNumber ». Active Contacts dans ⚙ → Permissions."
             }
             val resolved = ContactsController.findPhoneNumber(context, contactNameOrNumber)
             if (resolved != null) {
