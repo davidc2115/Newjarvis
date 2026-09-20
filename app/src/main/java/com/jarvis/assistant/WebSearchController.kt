@@ -12,12 +12,11 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Recherche web — priorité :
- * 1. Gemini avec Google Search grounding (réponse directe dans le chat / vocal)
- * 2. SerpAPI si clé configurée
- * 3. Ouverture navigateur en dernier recours uniquement
+ * Recherche web — les résultats s'affichent TOUJOURS dans le chat / vocal.
+ * Le navigateur ne s'ouvre QUE via open_web_page (demande explicite de l'utilisateur).
  *
- * Gemini Nano (AICore) ne peut PAS faire de recherche (hors-ligne).
+ * Priorité : Gemini grounding → SerpAPI → message d'erreur clair (pas de navigateur auto).
+ * Gemini Nano (AICore) ne peut pas chercher (hors-ligne).
  */
 object WebSearchController {
 
@@ -31,22 +30,36 @@ object WebSearchController {
     fun search(context: Context, query: String): String {
         if (query.isBlank()) return "❌ Aucune requête de recherche fournie."
 
-        // 1. Gemini grounding (meilleure qualité + réponse orale native)
         val geminiResult = tryGeminiGroundedSearch(context, query)
         if (geminiResult != null) return geminiResult
 
-        // 2. SerpAPI
         val serpResult = tryFetchSerpResults(context, query)
         if (serpResult != null) return serpResult
 
-        // 3. Dernier recours : navigateur (mais message clair)
-        return openInBrowser(context, query)
+        return "❌ Impossible de rechercher « $query » pour le moment. " +
+            "Configure une clé Gemini dans ⚙ → Clés API (recommandé) pour que les résultats " +
+            "s'affichent directement ici. Dis « ouvre la page … » si tu veux le navigateur."
     }
 
-    /**
-     * Utilise l'API Gemini avec l'outil google_search (grounding).
-     * Le modèle décide de chercher et synthétise une réponse naturelle.
-     */
+    /** Ouvre une URL ou une recherche Google dans le navigateur — uniquement sur demande explicite. */
+    fun openPage(context: Context, urlOrQuery: String): String {
+        if (urlOrQuery.isBlank()) return "❌ Aucune adresse ou recherche fournie."
+        return try {
+            val uri = if (urlOrQuery.startsWith("http://") || urlOrQuery.startsWith("https://")) {
+                Uri.parse(urlOrQuery)
+            } else {
+                Uri.parse("https://www.google.com/search?q=" + Uri.encode(urlOrQuery))
+            }
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            "🌐 Page ouverte dans le navigateur."
+        } catch (e: Exception) {
+            "❌ Impossible d'ouvrir la page : ${e.message}"
+        }
+    }
+
     private fun tryGeminiGroundedSearch(context: Context, query: String): String? {
         val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
         if (keys.isEmpty()) return null
@@ -73,9 +86,10 @@ object WebSearchController {
                             JSONArray().put(
                                 JSONObject().put(
                                     "text",
-                                    "Tu es JARVIS. Réponds en français, de façon concise et naturelle (phrases courtes, pas de markdown). " +
-                                        "Utilise la recherche Google pour donner une réponse factuelle à jour. " +
-                                        "Cite brièvement les sources si utile, sans listes à puces."
+                                    "Tu es JARVIS. Réponds en français, de façon concise et naturelle " +
+                                        "(phrases courtes, pas de markdown, pas de listes à puces). " +
+                                        "Utilise la recherche Google pour une réponse factuelle à jour. " +
+                                        "Cite une source brièvement si utile."
                                 )
                             )
                         )
@@ -103,12 +117,10 @@ object WebSearchController {
                     val content = candidates.getJSONObject(0).optJSONObject("content") ?: return@use
                     val parts = content.optJSONArray("parts") ?: return@use
                     val text = parts.getJSONObject(0).optString("text", "").trim()
-                    if (text.isNotBlank()) {
-                        return "🔍 $text"
-                    }
+                    if (text.isNotBlank()) return "🔍 $text"
                 }
             } catch (_: Exception) {
-                // essaie la clé suivante
+                // clé suivante
             }
         }
         return null
@@ -150,7 +162,6 @@ object WebSearchController {
                         sb.append(place.optString("title", query)).append(" — ")
                         place.optJSONObject("hours")?.let { sb.append("horaires : $it. ") }
                         place.optString("address", "").let { if (it.isNotBlank()) sb.append("Adresse : $it. ") }
-                        place.optString("type", "").let { if (it.isNotBlank()) sb.append("($it) ") }
                         return "🔍 ${sb}"
                     }
 
@@ -170,20 +181,5 @@ object WebSearchController {
             }
         }
         return null
-    }
-
-    private fun openInBrowser(context: Context, query: String): String {
-        return try {
-            val searchUri = Uri.parse("https://www.google.com/search?q=" + Uri.encode(query))
-            val intent = Intent(Intent.ACTION_VIEW, searchUri).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            context.startActivity(intent)
-            "🔍 J'ai ouvert Google pour « $query ». " +
-                "Pour que je te réponde directement dans le chat (et à la voix), configure une clé Gemini " +
-                "dans ⚙ → Clés API (recommandé) ou une clé SerpAPI."
-        } catch (e: Exception) {
-            "❌ Échec de la recherche : ${e.message}"
-        }
     }
 }

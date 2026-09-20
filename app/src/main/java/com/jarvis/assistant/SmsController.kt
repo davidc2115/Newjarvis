@@ -196,6 +196,68 @@ object SmsController {
         return sb.toString().trimEnd()
     }
 
+
+    /** Dernier SMS reçu (boîte de réception). */
+    fun getLastSms(context: Context): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission de lecture des SMS non accordée. Ouvre ⚙ → Permissions et active SMS."
+        }
+        val projection = arrayOf(
+            Telephony.Sms.ADDRESS,
+            Telephony.Sms.BODY,
+            Telephony.Sms.DATE,
+            Telephony.Sms.READ
+        )
+        return try {
+            val cursor = context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                projection,
+                "${Telephony.Sms.TYPE} = 1",
+                null,
+                "${Telephony.Sms.DATE} DESC"
+            )
+            cursor?.use { c ->
+                if (!c.moveToFirst()) return "💬 Aucun SMS reçu."
+                val address = c.getString(0) ?: "Inconnu"
+                val body = c.getString(1) ?: ""
+                val date = c.getLong(2)
+                val sdf = SimpleDateFormat("dd/MM HH:mm", Locale.FRENCH)
+                "💬 **Dernier SMS** de **$address** (${sdf.format(Date(date))}) :\n« $body »"
+            } ?: "❌ Impossible d'accéder aux SMS."
+        } catch (e: Exception) {
+            "❌ Erreur lecture dernier SMS : ${e.message}"
+        }
+    }
+
+    /**
+     * Répond au dernier SMS reçu (même expéditeur).
+     * Si [to] est fourni, envoie à ce contact/numéro à la place.
+     */
+    fun replyToLastSms(context: Context, message: String, to: String = ""): String {
+        if (message.isBlank()) return "❌ Message de réponse vide."
+        if (to.isNotBlank()) return sendSms(context, to, message)
+
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            return "❌ Permission de lecture des SMS non accordée (nécessaire pour retrouver l'expéditeur)."
+        }
+        return try {
+            val cursor = context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms.ADDRESS),
+                "${Telephony.Sms.TYPE} = 1",
+                null,
+                "${Telephony.Sms.DATE} DESC"
+            )
+            val address = cursor?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+            if (address.isNullOrBlank()) return "❌ Aucun SMS reçu auquel répondre."
+            sendSms(context, address, message)
+        } catch (e: Exception) {
+            "❌ Erreur lors de la réponse : ${e.message}"
+        }
+    }
+
     fun markAllRead(context: Context): Boolean {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
             return false

@@ -44,7 +44,7 @@ object JarvisCommandParser {
         "read_sms", "read_unread_sms", "search_sms", "recent_calls",
         "read_emails", "read_unread_emails", "search_email", "read_email_content",
         "get_notifications", "bluetooth_info", "wifi_info",
-        "web_search", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
+        "web_search", "last_sms", "get_location", "search_contact", "list_contact_labels", "list_contacts_by_label",
         "list_generations"
     )
 
@@ -186,6 +186,13 @@ object JarvisCommandParser {
                 else SmsController.searchSms(context, query, json.optInt("count", 10))
             }
             "read_unread_sms" -> SmsController.readUnreadSms(context)
+            "last_sms" -> SmsController.getLastSms(context)
+            "reply_sms" -> {
+                val message = json.optString("message", "").ifBlank { json.optString("body", "") }
+                val to = json.optString("to", "").ifBlank { json.optString("contact", "") }
+                if (message.isBlank()) "❌ Message de réponse manquant."
+                else SmsController.replyToLastSms(context, message, to)
+            }
 
             "search_contact" -> {
                 val name = json.optString("name", "").ifBlank { json.optString("query", "") }
@@ -385,6 +392,12 @@ object JarvisCommandParser {
             "web_search" -> {
                 val query = json.optString("query", "")
                 WebSearchController.search(context, query)
+            }
+            "open_web_page" -> {
+                val url = json.optString("url", "").ifBlank {
+                    json.optString("query", "").ifBlank { json.optString("page", "") }
+                }
+                WebSearchController.openPage(context, url)
             }
 
             "delete_event" -> {
