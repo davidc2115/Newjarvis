@@ -182,7 +182,17 @@ object AiCoreManager {
                 ?: "JARVIS n'a rien à répondre pour l'instant — reformule ta question."
         } catch (e: Exception) {
             Log.e(TAG, "generateContent() a échoué", e)
-            "❌ Erreur de l'IA locale (AICore) : ${e.message}"
+            val msg = e.message ?: ""
+            when {
+                msg.contains("IPC", ignoreCase = true) || msg.contains("disconnected", ignoreCase = true) ||
+                    msg.contains("PREPARATION", ignoreCase = true) || msg.contains("ErrorCode 6") ->
+                    "❌ IA locale (Gemini Nano) indisponible : le service AICore est déconnecté. " +
+                        "Redémarre le téléphone, ou utilise une IA cloud (Groq/Gemini) dans ⚙ → Config."
+                msg.contains("NOT_AVAILABLE", ignoreCase = true) || msg.contains("UNAVAILABLE", ignoreCase = true) ->
+                    "❌ IA locale non disponible sur cet appareil (nécessite Pixel 8+, Samsung S24+ ou équivalent Android 14+)."
+                else ->
+                    "❌ Erreur de l'IA locale (AICore) : ${msg.take(120)}"
+            }
         }
     }
 

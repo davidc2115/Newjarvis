@@ -43,18 +43,13 @@ enum class Provider(
         "https://api.anthropic.com/v1/messages",
         "claude-sonnet-4-5"
     ),
-    // gemini-3.1-pro-preview (essayé d'abord) renvoyait systématiquement HTTP 429 sur TOUTES
-    // les clés de l'utilisateur (confirmé en usage réel) : les modèles "Preview" ont des quotas
-    // gratuits nettement plus restrictifs que les modèles "Stable", indépendamment d'un
-    // abonnement Gemini (l'abonnement consommateur gemini.google.com/l'app et les quotas de
-    // clé API AI Studio sont deux systèmes distincts). gemini-3.7-flash est le modèle STABLE
-    // le plus récent et le plus capable de la gamme (coding/agentique/multi-étapes), avec un
-    // quota gratuit bien plus généreux qu'un modèle Preview — priorité à la fiabilité réelle
-    // plutôt qu'au label "Pro" d'un modèle Preview qui échoue en pratique.
+    // gemini-3.7/3.8-flash renvoient souvent HTTP 503 "high demand" en période de charge.
+    // gemini-2.5-flash reste stable, supporte le grounding Google Search, et a un quota
+    // gratuit plus prévisible. L'utilisateur peut changer le modèle dans ⚙ si besoin.
     GEMINI(
         "Google Gemini",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
-        "gemini-3.7-flash"
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "gemini-2.5-flash"
     ),
     MISTRAL(
         "Mistral AI",

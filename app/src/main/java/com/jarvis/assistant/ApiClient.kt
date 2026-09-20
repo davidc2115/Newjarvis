@@ -264,6 +264,7 @@ object ApiClient {
         val isQuotaOrAuthFailure = result.startsWith("Erreur API (429)") || result.startsWith("Erreur API (401)") ||
             result.startsWith("Erreur API Claude (429)") || result.startsWith("Erreur API Claude (401)") ||
             result.startsWith("Erreur API Gemini (429)") || result.startsWith("Erreur API Gemini (401)") ||
+            result.startsWith("Erreur API Gemini (503)") || result.startsWith("Gemini temporairement") ||
             result.startsWith("Toutes les clés") || result.startsWith("Aucune clé API")
         if (isQuotaOrAuthFailure) {
             val fallback = sendAuto(context, history, grounded, vaultContext)
@@ -377,7 +378,16 @@ object ApiClient {
         }
         lastError = "[IA locale] $localResult"
 
-        return "Toutes les IA configurées ont échoué. Dernière erreur : $lastError"
+        val friendly = when {
+            lastError.contains("503") || lastError.contains("high demand") || lastError.contains("surchargé") ->
+                "Les serveurs Gemini sont temporairement saturés. Réessaie dans 30 secondes, ou configure aussi Groq (gratuit) dans ⚙ → Clés API."
+            lastError.contains("AICore") || lastError.contains("IPC") || lastError.contains("IA locale") ->
+                "Aucune IA cloud n'a répondu, et l'IA locale (Gemini Nano) n'est pas disponible sur cet appareil. Configure au moins une clé cloud dans ⚙ → Clés API (Groq recommandé, gratuit)."
+            lastError.contains("429") || lastError.contains("quota") ->
+                "Quota API dépassé sur toutes les clés configurées. Réessaie plus tard ou ajoute une autre clé dans ⚙."
+            else -> "Toutes les IA configurées ont échoué. Dernière erreur : ${lastError.take(180)}"
+        }
+        return friendly
     }
 
     /**
@@ -687,9 +697,11 @@ object ApiClient {
         var lastDetail = ""
         for (apiKey in keys) {
             val res = sendGemini(Provider.GEMINI.defaultBaseUrl, apiKey, history, systemPrompt)
-            if (!res.startsWith("Erreur API Gemini (429)") && !res.startsWith("Erreur API Gemini (401)")) return res
+            if (!res.startsWith("Erreur API Gemini (429)") && !res.startsWith("Erreur API Gemini (401)") &&
+                !res.startsWith("Erreur API Gemini (503)") && !res.startsWith("Gemini temporairement")) return res
             lastDetail = res
-            val duration = if (res.startsWith("Erreur API Gemini (429)")) Prefs.KEY_BLACKLIST_RATE_LIMIT_MS else Prefs.KEY_BLACKLIST_DEFAULT_MS
+            val duration = if (res.startsWith("Erreur API Gemini (429)") || res.startsWith("Erreur API Gemini (503)") ||
+                res.startsWith("Gemini temporairement")) Prefs.KEY_BLACKLIST_RATE_LIMIT_MS else Prefs.KEY_BLACKLIST_DEFAULT_MS
             Prefs.markKeyFailed(context, Provider.GEMINI, apiKey, duration)
         }
         return "Toutes les clés API Gemini ont échoué (${keys.size} clé(s) testée(s)) — dernière erreur : $lastDetail"
@@ -723,7 +735,17 @@ object ApiClient {
 
         client.newCall(request).execute().use { response ->
             val bodyStr = response.body?.string() ?: ""
-            if (!response.isSuccessful) return "Erreur API Gemini (${response.code}) : $bodyStr"
+            if (!response.isSuccessful) {
+                return when (response.code) {
+                    503 -> "Erreur API Gemini (503) : modèle surchargé (high demand). Réessaie dans quelques secondes ou change de fournisseur."
+                    429 -> "Erreur API Gemini (429) : quota dépassé pour cette clé."
+                    401, 403 -> "Erreur API Gemini (${response.code}) : clé API invalide ou non autorisée."
+                    else -> {
+                        val short = bodyStr.take(200).replace("\n", " ")
+                        "Erreur API Gemini (${response.code}) : $short"
+                    }
+                }
+            }
             val json = JSONObject(bodyStr)
             val candidates = json.optJSONArray("candidates")
             if (candidates != null && candidates.length() > 0) {
