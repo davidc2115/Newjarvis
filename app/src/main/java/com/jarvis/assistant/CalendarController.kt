@@ -716,8 +716,22 @@ object CalendarController {
      * autre calendrier, pour éviter d'afficher les événements du mauvais planning sans
      * prévenir.
      */
+    /**
+     * Normalise pour comparaison floue : minuscules, ponctuation → espaces, espaces multiples.
+     * Permet de matcher "Ent PV David Cortot" avec "Ent pv. DAVID CORTOT (clefdcortot@gmail.com)".
+     */
+    private fun normalizeCalRef(s: String): String =
+        s.lowercase()
+            .replace(Regex("[^\\p{L}\\p{N}@._+-]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
     private fun findCalendarId(context: Context, calendarRef: String): Long? {
-        calendarRef.toLongOrNull()?.let { id ->
+        val raw = calendarRef.trim()
+        if (raw.isBlank()) return null
+
+        // 1. ID numérique direct
+        raw.toLongOrNull()?.let { id ->
             context.contentResolver.query(
                 CalendarContract.Calendars.CONTENT_URI,
                 arrayOf(CalendarContract.Calendars._ID),
@@ -727,23 +741,57 @@ object CalendarController {
             )?.use { c -> if (c.moveToFirst()) return id }
         }
 
-        Prefs.findCalendarIdByNickname(context, calendarRef)?.let { return it }
+        // 2. Surnom exact ou partiel
+        Prefs.findCalendarIdByNickname(context, raw)?.let { return it }
+
+        val refNorm = normalizeCalRef(raw)
+        // Extraire un éventuel email entre parenthèses : "Nom (email@x.com)"
+        val emailInParens = Regex("\\(([^)]+@[^)]+)\\)").find(raw)?.groupValues?.getOrNull(1)?.lowercase()
+        val refWithoutEmail = normalizeCalRef(raw.replace(Regex("\\([^)]*@[^)]*\\)"), " "))
+        val refTokens = refWithoutEmail.split(" ").filter { it.length >= 3 }
 
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
             CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
             CalendarContract.Calendars.ACCOUNT_NAME
         )
+
+        var bestId: Long? = null
+        var bestScore = 0
+
         context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)?.use { c ->
             while (c.moveToNext()) {
+                val id = c.getLong(0)
                 val name = c.getString(1) ?: ""
                 val account = c.getString(2) ?: ""
-                if (name.contains(calendarRef, ignoreCase = true) || account.contains(calendarRef, ignoreCase = true)) {
-                    return c.getLong(0)
+                val nameNorm = normalizeCalRef(name)
+                val accountNorm = normalizeCalRef(account)
+                val nick = Prefs.getCalendarNickname(context, id)
+                val nickNorm = normalizeCalRef(nick)
+                val haystack = "$nameNorm $accountNorm $nickNorm"
+
+                var score = 0
+                // Contient l'un dans l'autre (cas "Nom complet (email)" vs "Nom")
+                if (nameNorm.isNotBlank() && (refNorm.contains(nameNorm) || nameNorm.contains(refNorm) ||
+                        refWithoutEmail.contains(nameNorm) || nameNorm.contains(refWithoutEmail))) score += 50
+                if (accountNorm.isNotBlank() && (refNorm.contains(accountNorm) || accountNorm.contains(refNorm))) score += 40
+                if (emailInParens != null && accountNorm.contains(emailInParens)) score += 60
+                if (nickNorm.isNotBlank() && (refNorm.contains(nickNorm) || nickNorm.contains(refNorm) ||
+                        refWithoutEmail.contains(nickNorm) || nickNorm.contains(refWithoutEmail))) score += 55
+                // Tous les mots significatifs de la requête présents
+                if (refTokens.isNotEmpty() && refTokens.all { haystack.contains(it) }) score += 30 + refTokens.size * 5
+                // Au moins un nom de famille / mot fort (>= 5 lettres)
+                val strong = refTokens.filter { it.length >= 5 }
+                if (strong.isNotEmpty() && strong.any { haystack.contains(it) }) score += 20
+
+                if (score > bestScore) {
+                    bestScore = score
+                    bestId = id
                 }
             }
         }
-        return null
+        // Seuil minimal pour éviter un faux positif sur un mot trop générique
+        return if (bestScore >= 30) bestId else null
     }
 
     /** Comme [findCalendarId], mais une référence vide/absente renvoie le calendrier par défaut de l'appareil. */

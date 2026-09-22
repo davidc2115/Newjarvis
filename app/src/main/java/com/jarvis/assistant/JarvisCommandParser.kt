@@ -388,6 +388,17 @@ object JarvisCommandParser {
                 else DeviceControlController.setAlarm(context, hour, minute, message, daysOfWeek)
             }
             "show_alarms" -> DeviceControlController.showAlarms(context)
+            "set_timer" -> {
+                // Accepte durationSeconds OU minutes/seconds séparés
+                val total = when {
+                    json.has("durationSeconds") -> json.optInt("durationSeconds", 0)
+                    json.has("seconds") && !json.has("minutes") -> json.optInt("seconds", 0)
+                    else -> json.optInt("minutes", 0) * 60 + json.optInt("seconds", 0)
+                }
+                val message = json.optString("message", "")
+                if (total <= 0) "❌ Précise la durée du minuteur (ex: minutes:1 ou durationSeconds:60)."
+                else DeviceControlController.setTimer(context, total, message)
+            }
 
             "web_search" -> {
                 val query = json.optString("query", "")

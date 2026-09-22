@@ -544,17 +544,24 @@ object Prefs {
         prefs(context).edit().putString("calendar_nickname_$calendarId", nickname).apply()
     }
 
-    /** Retrouve l'ID d'un calendrier à partir d'un surnom déjà enregistré. */
+    /** Retrouve l'ID d'un calendrier à partir d'un surnom (exact ou partiel, insensible à la casse). */
     fun findCalendarIdByNickname(context: Context, nickname: String): Long? {
+        val needle = nickname.trim().lowercase()
+        if (needle.isBlank()) return null
         val all = prefs(context).all
+        var exact: Long? = null
+        var partial: Long? = null
         for ((key, value) in all) {
-            if (key.startsWith("calendar_nickname_") && value is String &&
-                value.equals(nickname, ignoreCase = true)
-            ) {
-                return key.removePrefix("calendar_nickname_").toLongOrNull()
+            if (!key.startsWith("calendar_nickname_") || value !is String) continue
+            val v = value.trim().lowercase()
+            if (v.isBlank()) continue
+            if (v == needle) {
+                exact = key.removePrefix("calendar_nickname_").toLongOrNull()
+            } else if (partial == null && (v.contains(needle) || needle.contains(v))) {
+                partial = key.removePrefix("calendar_nickname_").toLongOrNull()
             }
         }
-        return null
+        return exact ?: partial
     }
 
     /**
