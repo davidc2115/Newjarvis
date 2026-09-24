@@ -666,6 +666,57 @@ ${if (content.isNotBlank()) content else "— Notes du jour —"}
     // Parse voice command and dispatch
     // ─────────────────────────────────────────────────────────────────────────
 
+
+    data class GraphNode(val id: String, val label: String, val folder: String, val path: String)
+    data class GraphEdge(val from: String, val to: String)
+    data class KnowledgeGraph(val nodes: List<GraphNode>, val edges: List<GraphEdge>)
+
+    /**
+     * Construit le graphe notes + [[wikilinks]] du vault pour l'orbe de connaissance.
+     * Les IDs sont les noms de fichier sans extension (compatibles wikilinks Obsidian).
+     */
+    fun buildKnowledgeGraph(context: Context, maxNodes: Int = 120): KnowledgeGraph {
+        if (!hasStorageAccess()) return KnowledgeGraph(emptyList(), emptyList())
+        val root = getVaultRoot(context)
+        if (!root.exists() || !root.isDirectory) return KnowledgeGraph(emptyList(), emptyList())
+
+        val files = root.walkTopDown()
+            .filter { it.isFile && it.extension.equals("md", true) && !it.path.contains(".obsidian") }
+            .sortedByDescending { it.lastModified() }
+            .take(maxNodes)
+            .toList()
+
+        val nodes = files.map { f ->
+            GraphNode(
+                id = f.nameWithoutExtension,
+                label = f.nameWithoutExtension,
+                folder = f.parentFile?.name ?: "",
+                path = f.absolutePath
+            )
+        }
+        val idSet = nodes.map { it.id.lowercase() }.toSet()
+        val edges = mutableListOf<GraphEdge>()
+        val edgeKeys = mutableSetOf<String>()
+        val linkRegex = Regex("""\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]""")
+
+        for (f in files) {
+            val from = f.nameWithoutExtension
+            val text = runCatching { f.readText() }.getOrDefault("")
+            linkRegex.findAll(text).forEach { m ->
+                val target = m.groupValues[1].trim().substringAfterLast("/")
+                if (target.isBlank()) return@forEach
+                // Lien si la note cible existe dans le graphe (match insensible à la casse)
+                val to = nodes.firstOrNull { it.id.equals(target, ignoreCase = true) }?.id
+                    ?: if (target.lowercase() in idSet) target else null
+                if (to != null && !from.equals(to, ignoreCase = true)) {
+                    val key = listOf(from.lowercase(), to.lowercase()).sorted().joinToString(">")
+                    if (edgeKeys.add(key)) edges.add(GraphEdge(from, to))
+                }
+            }
+        }
+        return KnowledgeGraph(nodes, edges)
+    }
+
     fun handleVoiceCommand(context: Context, input: String): String? {
         val text  = input.trim()
         val lower = text.lowercase()

@@ -686,25 +686,30 @@ object ApiClient {
     // ─── Google Gemini avec rotation ──────────────────────────────────────────
 
     private fun sendGeminiWithRotation(context: Context, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {
-        val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
-        if (keys.isEmpty()) return "Aucune clé API Gemini configurée."
+        val allKeys = Prefs.getApiKeysFor(context, Provider.GEMINI)
+        if (allKeys.isEmpty()) return "Aucune clé API Gemini configurée."
 
-        // Garde le détail RÉEL de la dernière erreur (ex: "429" quota dépassé) au lieu d'un
-        // message générique "toutes les clés ont échoué" qui masquait la vraie cause — corrigé
-        // suite à un cas réel où TOUTES les clés Gemini d'un utilisateur renvoyaient 429 à cause
-        // d'un modèle Preview au quota gratuit trop restrictif, sans qu'aucun message ne le
-        // dise explicitement.
+        // Rotation : on essaie chaque clé valide (non blacklistée), dans l'ordre round-robin
+        // via getNextApiKey, puis le reste, pour répartir la charge sur multi-clés.
+        val ordered = mutableListOf<String>()
+        val first = Prefs.getNextApiKey(context, Provider.GEMINI)
+        if (first.isNotBlank()) ordered.add(first)
+        allKeys.forEach { if (it !in ordered) ordered.add(it) }
+
         var lastDetail = ""
-        for (apiKey in keys) {
+        var tried = 0
+        for (apiKey in ordered) {
+            tried++
             val res = sendGemini(Provider.GEMINI.defaultBaseUrl, apiKey, history, systemPrompt)
             if (!res.startsWith("Erreur API Gemini (429)") && !res.startsWith("Erreur API Gemini (401)") &&
-                !res.startsWith("Erreur API Gemini (503)") && !res.startsWith("Gemini temporairement")) return res
+                !res.startsWith("Erreur API Gemini (503)") && !res.startsWith("Gemini temporairement") &&
+                !res.startsWith("Erreur API Gemini (403)")) return res
             lastDetail = res
             val duration = if (res.startsWith("Erreur API Gemini (429)") || res.startsWith("Erreur API Gemini (503)") ||
                 res.startsWith("Gemini temporairement")) Prefs.KEY_BLACKLIST_RATE_LIMIT_MS else Prefs.KEY_BLACKLIST_DEFAULT_MS
             Prefs.markKeyFailed(context, Provider.GEMINI, apiKey, duration)
         }
-        return "Toutes les clés API Gemini ont échoué (${keys.size} clé(s) testée(s)) — dernière erreur : $lastDetail"
+        return "Toutes les clés API Gemini ont échoué ($tried clé(s) testée(s)) — dernière erreur : $lastDetail"
     }
 
     private fun sendGemini(baseUrl: String, apiKey: String, history: List<HistoryEntry>, systemPrompt: String = SYSTEM_PROMPT): String {

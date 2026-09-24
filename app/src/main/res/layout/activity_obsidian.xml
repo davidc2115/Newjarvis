@@ -29,7 +29,35 @@
             android:text="Vault : /sdcard/Documents/JARVIS-Vault"
             android:textColor="@color/text_secondary"
             android:textSize="11sp"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginBottom="8dp" />
+
+        <!-- Orbe de connaissance : notes = nœuds, [[wikilinks]] = liens -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="✦ Mémoire — graphe du vault"
+            android:textColor="@color/cyan_accent"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <com.jarvis.assistant.KnowledgeGraphView
+            android:id="@+id/obsidianKnowledgeGraph"
+            android:layout_width="match_parent"
+            android:layout_height="280dp"
+            android:layout_marginBottom="6dp"
+            android:background="#0A0E16" />
+
+        <TextView
+            android:id="@+id/btnRefreshGraph"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_input"
+            android:gravity="center"
+            android:text="↻ Actualiser le graphe (nœuds + liens)"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
 
         <!-- Boutons rapides -->
         <LinearLayout

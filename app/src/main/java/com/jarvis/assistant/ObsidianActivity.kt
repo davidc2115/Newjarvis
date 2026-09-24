@@ -24,6 +24,7 @@ class ObsidianActivity : AppCompatActivity() {
     private lateinit var contentInput: EditText
     private lateinit var folderInput: EditText
     private lateinit var searchInput: EditText
+    private lateinit var knowledgeGraph: KnowledgeGraphView
 
     private val folderPickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -113,6 +114,13 @@ class ObsidianActivity : AppCompatActivity() {
         contentInput   = findViewById(R.id.obsidianContentInput)
         folderInput    = findViewById(R.id.obsidianFolderInput)
         searchInput    = findViewById(R.id.obsidianSearchInput)
+        knowledgeGraph = findViewById(R.id.obsidianKnowledgeGraph)
+        knowledgeGraph.accentColor = Prefs.getAccentColor(this)
+        knowledgeGraph.onNodeTap = { node ->
+            resultText.text = "📄 Note « ${node.label} » (${node.folder})\n${node.path}"
+            runAsync { ObsidianController.readNote(this@ObsidianActivity, node.label) }
+        }
+        refreshKnowledgeGraph()
 
         // Afficher chemin du vault
         val root = ObsidianController.getVaultRoot(this)
@@ -129,6 +137,7 @@ class ObsidianActivity : AppCompatActivity() {
             // Afficher stats au démarrage
             CoroutineScope(Dispatchers.Main).launch {
                 resultText.text = withContext(Dispatchers.IO) { ObsidianController.getVaultStats(this@ObsidianActivity) }
+                refreshKnowledgeGraph()
             }
         }
 
@@ -147,7 +156,11 @@ class ObsidianActivity : AppCompatActivity() {
                 Toast.makeText(this, "Entrez un titre pour la note", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            runAsync { ObsidianController.createNote(this, title, content, folder) }
+            runAsync {
+                val r = ObsidianController.createNote(this, title, content, folder)
+                runOnUiThread { refreshKnowledgeGraph() }
+                r
+            }
             noteInput.text.clear()
             contentInput.text.clear()
         }
@@ -179,6 +192,10 @@ class ObsidianActivity : AppCompatActivity() {
         }
 
         // ── Init / Réparer Vault ────────────────────────────────────────────
+        findViewById<TextView>(R.id.btnRefreshGraph).setOnClickListener {
+            refreshKnowledgeGraph()
+        }
+
         findViewById<TextView>(R.id.btnInitVault).setOnClickListener {
             runAsync {
                 val result = ObsidianController.initVault(this)
@@ -218,6 +235,25 @@ class ObsidianActivity : AppCompatActivity() {
         // fichiers Obsidian — vider le vault ne les touche jamais.
         findViewById<TextView>(R.id.btnResetCalendarNicknames).setOnClickListener {
             runAsync { CalendarController.resetCalendarNicknames(this) }
+        }
+    }
+
+    private fun refreshKnowledgeGraph() {
+        CoroutineScope(Dispatchers.Main).launch {
+            val graph = withContext(Dispatchers.IO) {
+                ObsidianController.buildKnowledgeGraph(this@ObsidianActivity)
+            }
+            if (graph.nodes.isEmpty()) {
+                knowledgeGraph.setEmptyMessage("Aucune note — crée-en ou initialise le vault")
+                knowledgeGraph.setGraph(emptyList(), emptyList())
+            } else {
+                knowledgeGraph.setGraph(
+                    graph.nodes.map {
+                        KnowledgeGraphView.GraphNode(it.id, it.label, it.folder)
+                    },
+                    graph.edges.map { KnowledgeGraphView.GraphEdge(it.from, it.to) }
+                )
+            }
         }
     }
 
