@@ -527,6 +527,21 @@ object Prefs {
         prefs(context).edit().putBoolean("wake_word_enabled", enabled).apply()
     }
 
+    /** Seuil de détection openWakeWord (0.3 = sensible, 0.7 = strict). Défaut 0.5. */
+    fun getWakeWordThreshold(context: Context): Float =
+        prefs(context).getFloat("wake_word_threshold", 0.5f)
+
+    fun saveWakeWordThreshold(context: Context, value: Float) {
+        prefs(context).edit().putFloat("wake_word_threshold", value.coerceIn(0.25f, 0.85f)).apply()
+    }
+
+    /** Liste des mots-clés supportés (affichage réglages). */
+    fun getSupportedWakeWords(): List<String> = listOf(
+        "jarvis", "hey jarvis", "alexa", "mycroft", "hey mycroft",
+        "computer", "ordinateur", "porcupine", "terminator", "blueberry", "bumblebee"
+    )
+
+
     /** Clé d'accès gratuite Picovoice (console.picovoice.ai) pour le moteur de détection dédié. */
     fun getPicovoiceKey(context: Context): String =
         prefs(context).getString("picovoice_key", "") ?: ""

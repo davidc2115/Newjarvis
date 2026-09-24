@@ -48,16 +48,36 @@
             android:layout_marginBottom="6dp"
             android:background="#0A0E16" />
 
-        <TextView
-            android:id="@+id/btnRefreshGraph"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:background="@drawable/bg_input"
-            android:gravity="center"
-            android:text="↻ Actualiser le graphe (nœuds + liens)"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:layout_marginBottom="16dp" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/btnRefreshGraph"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:text="↻ Actualiser"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnFullscreenGraph"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_mic_button"
+                android:gravity="center"
+                android:text="💥 Astre plein écran"
+                android:textColor="@color/background_dark"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <!-- Boutons rapides -->
         <LinearLayout

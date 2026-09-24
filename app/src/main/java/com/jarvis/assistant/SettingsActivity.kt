@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
+import android.widget.SeekBar
 import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
@@ -452,6 +453,44 @@ class SettingsActivity : AppCompatActivity() {
         picovoiceKeyInput.setText(Prefs.getPicovoiceKey(this))
         updateWakeWordButtonLabel(toggleWakeWordButton)
 
+        // Suggestions de mots-clés supportés (cliquables via texte affiché)
+        val suggestions = findViewById<TextView>(R.id.wakeWordSuggestions)
+        val supported = try {
+            WakeWordService.supportedKeywords()
+        } catch (_: Exception) {
+            Prefs.getSupportedWakeWords()
+        }
+        suggestions.text = "Mots supportés (tape pour choisir) :\n" + supported.joinToString(" · ")
+        suggestions.setOnClickListener {
+            // Cycle simple : propose le prochain mot de la liste
+            val current = wakeWordInput.text.toString().trim().lowercase()
+            val idx = supported.indexOfFirst { it.equals(current, true) }
+            val next = supported[(idx + 1).coerceAtLeast(0) % supported.size]
+            wakeWordInput.setText(next)
+            Prefs.saveWakeWord(this, next)
+            Toast.makeText(this, "Mot-clé : $next", Toast.LENGTH_SHORT).show()
+        }
+
+        // Sensibilité openWakeWord
+        val sensitivityBar = findViewById<SeekBar>(R.id.wakeWordSensitivity)
+        val sensitivityValue = findViewById<TextView>(R.id.wakeWordSensitivityValue)
+        // SeekBar 0..60 → threshold 0.25..0.85
+        val initialT = Prefs.getWakeWordThreshold(this)
+        sensitivityBar.progress = ((initialT - 0.25f) / 0.01f).toInt().coerceIn(0, 60)
+        sensitivityValue.text = "%.2f".format(initialT)
+        sensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val tVal = 0.25f + progress * 0.01f
+                sensitivityValue.text = "%.2f".format(tVal)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                val tVal = 0.25f + (seekBar?.progress ?: 25) * 0.01f
+                Prefs.saveWakeWordThreshold(this@SettingsActivity, tVal)
+                Toast.makeText(this@SettingsActivity, "Sensibilité enregistrée : %.2f".format(tVal), Toast.LENGTH_SHORT).show()
+            }
+        })
+
         // ── Accès SMB (voir SmbController) — demandé explicitement, absent des Paramètres
         // jusqu'ici (seule la commande chat smb_configure existait pour le régler).
         val smbHostInput     = findViewById<EditText>(R.id.smbHostInput)
@@ -546,8 +585,10 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         toggleWakeWordButton.setOnClickListener {
-            Prefs.saveWakeWord(this, wakeWordInput.text.toString().trim())
+            Prefs.saveWakeWord(this, wakeWordInput.text.toString().trim().lowercase())
             Prefs.savePicovoiceKey(this, picovoiceKeyInput.text.toString().trim())
+            val sens = findViewById<SeekBar>(R.id.wakeWordSensitivity)
+            Prefs.saveWakeWordThreshold(this, 0.25f + sens.progress * 0.01f)
             val nowEnabled = !Prefs.isWakeWordEnabled(this)
             Prefs.saveWakeWordEnabled(this, nowEnabled)
 

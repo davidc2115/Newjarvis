@@ -195,6 +195,9 @@ class ObsidianActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.btnRefreshGraph).setOnClickListener {
             refreshKnowledgeGraph()
         }
+        findViewById<TextView>(R.id.btnFullscreenGraph).setOnClickListener {
+            startActivity(Intent(this, KnowledgeGraphFullscreenActivity::class.java))
+        }
 
         findViewById<TextView>(R.id.btnInitVault).setOnClickListener {
             runAsync {

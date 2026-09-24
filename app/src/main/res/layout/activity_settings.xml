@@ -445,7 +445,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Mot-clé d'activation"
+                android:text="Mot-clé d'activation (tape ou choisis ci-dessous)"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -460,7 +460,50 @@
                 android:hint="jarvis"
                 android:textColorHint="@color/text_secondary"
                 android:layout_marginTop="4dp"
-                android:layout_marginBottom="12dp" />
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:id="@+id/wakeWordSuggestions"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Mots supportés : jarvis · hey jarvis · alexa · mycroft · computer · terminator…"
+                android:textColor="@color/cyan_accent"
+                android:textSize="11sp"
+                android:lineSpacingExtra="4dp"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sensibilité (0.3 = détecte plus facilement, 0.7 = plus strict)"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="12dp">
+
+                <SeekBar
+                    android:id="@+id/wakeWordSensitivity"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="60"
+                    android:progress="25" />
+
+                <TextView
+                    android:id="@+id/wakeWordSensitivityValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="0.50"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp" />
+            </LinearLayout>
 
             <TextView
                 android:layout_width="wrap_content"

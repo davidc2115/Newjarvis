@@ -146,6 +146,13 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".KnowledgeGraphFullscreenActivity"
+            android:exported="false"
+            android:label="Mémoire — Astre"
+            android:theme="@style/Theme.Jarvis"
+            android:screenOrientation="unspecified" />
+
+        <activity
             android:name=".SmartHomeActivity"
             android:exported="false"
             android:label="☰ Menu JARVIS"

@@ -96,6 +96,10 @@ class WakeWordService : Service() {
             context.startService(Intent(context, WakeWordService::class.java).apply { action = ACTION_RESUME })
         }
 
+        /** Tous les mots-clés utilisables (Porcupine + openWakeWord), pour l'UI réglages. */
+        fun supportedKeywords(): List<String> =
+            (BUILT_IN_KEYWORDS.keys + OWW_KEYWORDS.keys).map { it }.distinct().sorted()
+
         /** Mots-clés intégrés Porcupine (moteur 1 — nécessite une clé Picovoice). */
         private val BUILT_IN_KEYWORDS = mapOf(
             "jarvis" to Porcupine.BuiltInKeyword.JARVIS,
@@ -224,7 +228,7 @@ class WakeWordService : Service() {
             owwEngine?.release()
             val engine = WakeWordEngine(
                 context = this,
-                models = listOf(WakeWordModel(label, modelFile, threshold = OWW_THRESHOLD)),
+                models = listOf(WakeWordModel(label, modelFile, threshold = Prefs.getWakeWordThreshold(this))),
                 detectionMode = DetectionMode.SINGLE_BEST,
                 detectionCooldownMs = 2500L,
                 scope = serviceScope

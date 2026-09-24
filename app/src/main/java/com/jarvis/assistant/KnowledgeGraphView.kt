@@ -37,6 +37,17 @@ class KnowledgeGraphView @JvmOverloads constructor(
     var accentColor: Int = Prefs.DEFAULT_ACCENT_COLOR
         set(value) { field = value; invalidate() }
 
+    /** Plein écran : rotation plus rapide, plus de liens visibles, labels plus nombreux. */
+    var explodeMode: Boolean = false
+        set(value) {
+            field = value
+            animator.duration = if (value) 22_000L else 40_000L
+            invalidate()
+        }
+
+    private var explodeProgress = 1f // 0 = centre, 1 = sphère déployée
+    private var explodeAnimator: ValueAnimator? = null
+
     private var nodes3d = listOf<Node3D>()
     private var edges = listOf<GraphEdge>()
     private var selectedId: String? = null
@@ -69,7 +80,7 @@ class KnowledgeGraphView @JvmOverloads constructor(
         repeatCount = ValueAnimator.INFINITE
         interpolator = LinearInterpolator()
         addUpdateListener {
-            rotationY += 0.008f
+            rotationY += if (explodeMode) 0.014f else 0.008f
             project()
             invalidate()
         }
@@ -83,7 +94,6 @@ class KnowledgeGraphView @JvmOverloads constructor(
             degree[e.to] = (degree[e.to] ?: 0) + 1
         }
         val enriched = nodes.map { it.copy(degree = degree[it.id] ?: 0) }
-        // Fibonacci sphere
         val n = enriched.size.coerceAtLeast(1)
         val golden = Math.PI * (3.0 - sqrt(5.0))
         nodes3d = enriched.mapIndexed { i, node ->
@@ -93,9 +103,26 @@ class KnowledgeGraphView @JvmOverloads constructor(
             Node3D(node, cos(theta) * r, y, sin(theta) * r)
         }
         selectedId = null
+        explodeProgress = if (explodeMode) 0f else 1f
         project()
         invalidate()
         if (!animator.isStarted) animator.start()
+    }
+
+    /** Animation d'explosion : les nœuds partent du centre et se déploient en sphère. */
+    fun triggerExplosion() {
+        explodeAnimator?.cancel()
+        explodeProgress = 0f
+        explodeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1600L
+            interpolator = android.view.animation.OvershootInterpolator(1.1f)
+            addUpdateListener {
+                explodeProgress = it.animatedValue as Float
+                project()
+                invalidate()
+            }
+            start()
+        }
     }
 
     fun setEmptyMessage(msg: String) {
@@ -104,15 +131,16 @@ class KnowledgeGraphView @JvmOverloads constructor(
     }
 
     private fun project() {
+        if (width == 0 || height == 0) return
         val cx = width / 2f
         val cy = height / 2f
-        val scale = (minOf(width, height) * 0.38f).coerceAtLeast(80f)
+        val baseScale = if (explodeMode) 0.44f else 0.38f
+        val scale = (minOf(width, height) * baseScale * explodeProgress.coerceAtLeast(0.02f)).coerceAtLeast(40f)
         val cosY = cos(rotationY)
         val sinY = sin(rotationY)
         val cosX = cos(rotationX)
         val sinX = sin(rotationX)
         nodes3d.forEach { p ->
-            // rotate Y then X
             var x = p.x * cosY - p.z * sinY
             var z = p.x * sinY + p.z * cosY
             var y = p.y * cosX - z * sinX
@@ -195,7 +223,7 @@ class KnowledgeGraphView @JvmOverloads constructor(
             nodePaint.alpha = (140 + depthNorm * 115).toInt().coerceIn(120, 255)
             canvas.drawCircle(p.sx, p.sy, radius, nodePaint)
 
-            if (selected || p.node.degree >= 3 || nodes3d.size <= 18) {
+            if (selected || p.node.degree >= 2 || nodes3d.size <= 24 || (explodeMode && depthNorm > 0.45f)) {
                 labelPaint.alpha = if (selected) 255 else (100 + depthNorm * 100).toInt()
                 labelPaint.textSize = if (selected) 32f else 22f
                 val label = p.node.label.take(22)
