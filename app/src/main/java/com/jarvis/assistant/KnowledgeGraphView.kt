@@ -25,7 +25,7 @@ class KnowledgeGraphView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
-    data class GraphNode(val id: String, val label: String, val folder: String, var degree: Int = 0)
+    data class GraphNode(val id: String, val label: String, val folder: String, var degree: Int = 0, val path: String = "")
     data class GraphEdge(val from: String, val to: String)
 
     private data class Node3D(

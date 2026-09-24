@@ -252,7 +252,7 @@ class ObsidianActivity : AppCompatActivity() {
             } else {
                 knowledgeGraph.setGraph(
                     graph.nodes.map {
-                        KnowledgeGraphView.GraphNode(it.id, it.label, it.folder)
+                        KnowledgeGraphView.GraphNode(it.id, it.label, it.folder, path = it.path)
                     },
                     graph.edges.map { KnowledgeGraphView.GraphEdge(it.from, it.to) }
                 )

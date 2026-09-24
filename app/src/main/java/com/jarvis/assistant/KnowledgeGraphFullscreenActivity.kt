@@ -62,7 +62,7 @@ class KnowledgeGraphFullscreenActivity : AppCompatActivity() {
                 subtitle.text = "Aucune note"
             } else {
                 graph.setGraph(
-                    g.nodes.map { KnowledgeGraphView.GraphNode(it.id, it.label, it.folder) },
+                    g.nodes.map { KnowledgeGraphView.GraphNode(it.id, it.label, it.folder, path = it.path) },
                     g.edges.map { KnowledgeGraphView.GraphEdge(it.from, it.to) }
                 )
                 graph.triggerExplosion()
