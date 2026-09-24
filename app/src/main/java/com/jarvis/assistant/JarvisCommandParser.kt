@@ -285,6 +285,12 @@ object JarvisCommandParser {
                 else CalendarController.nameCalendar(context, calendarRef, nickname)
             }
             "reset_calendar_nicknames" -> CalendarController.resetCalendarNicknames(context)
+            "set_preferred_calendar" -> {
+                val calendarRef = json.optString("calendar", "").ifBlank { json.optString("name", "") }
+                if (calendarRef.isBlank()) "❌ Précise quel calendrier utiliser par défaut (nom, surnom ou ID)."
+                else CalendarController.setPreferredCalendar(context, calendarRef)
+            }
+            "clear_preferred_calendar" -> CalendarController.clearPreferredCalendar(context)
             "sync_calendar" -> {
                 val calendarRef = json.optString("calendar", "")
                 if (calendarRef.isBlank()) "❌ Précise quel calendrier synchroniser (nom, compte, ID — voir list_calendars)."

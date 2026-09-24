@@ -9,6 +9,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -78,30 +79,30 @@ object ImageGenController {
             return Result("❌ Aucune description d'image fournie.", null, null)
         }
 
-        // Diagnostic collecté au fil des tentatives — auparavant, un échec HTTP sur un
-        // provider CONFIGURÉ (mauvaise clé, quota, erreur serveur...) était avalé
-        // silencieusement pour passer au suivant ; si tous échouaient, l'utilisateur ne
-        // voyait qu'un message générique "configure une clé" même quand une clé était
-        // bel et bien configurée mais rejetée pour une raison précise (ex: HTTP 400/403).
         val diagnostics = mutableListOf<String>()
 
-        // 1. Google Gemini, si une clé est configurée.
-        tryGemini(context, prompt, diagnostics)?.let { return it }
+        // Enrichit le prompt court via Gemini texte (anglais, détaillé) pour de meilleurs
+        // résultats Horde/SD — si Gemini indisponible, on garde le prompt d'origine.
+        val enriched = enrichPromptForImage(context, prompt)
+        val finalPrompt = enriched ?: prompt
+        if (enriched != null && enriched != prompt) {
+            diagnostics.add("Prompt enrichi par Gemini pour la génération")
+        }
 
-        // 2. OpenAI DALL-E 3, si une clé est configurée.
-        tryOpenAI(context, prompt, diagnostics)?.let { return it }
+        // 1. Google Gemini image (Nano Banana), si une clé est configurée.
+        tryGemini(context, finalPrompt, diagnostics)?.let { return it }
 
-        // 3. Stable Diffusion via Hugging Face, si un jeton est configuré.
-        tryHuggingFace(context, prompt, diagnostics)?.let { return it }
+        // 2. OpenAI gpt-image, si une clé est configurée.
+        tryOpenAI(context, finalPrompt, diagnostics)?.let { return it }
 
-        // 4. Stable Diffusion embarqué sur le téléphone, si un modèle est importé.
-        tryOnDeviceStableDiffusion(context, prompt, diagnostics)?.let { return it }
+        // 3. Hugging Face SD
+        tryHuggingFace(context, finalPrompt, diagnostics)?.let { return it }
 
-        // 5. AI Horde (gratuit, sans clé — accès anonyme officiel) — en tout dernier
-        // recours seulement : c'est un cluster communautaire, les requêtes anonymes
-        // passent en dernière priorité et peuvent prendre plusieurs minutes selon la
-        // charge. Remplace Pollinations (qualité jugée insuffisante par l'utilisateur).
-        tryAiHorde(context, prompt, diagnostics)?.let { return it }
+        // 4. SD embarqué
+        tryOnDeviceStableDiffusion(context, finalPrompt, diagnostics)?.let { return it }
+
+        // 5. AI Horde — gratuit, prompt complet (enrichi si possible)
+        tryAiHorde(context, finalPrompt, diagnostics)?.let { return it }
 
         val detail = if (diagnostics.isNotEmpty()) {
             "\n\nDétail des échecs :\n" + diagnostics.joinToString("\n") { "• $it" }
@@ -117,6 +118,54 @@ object ImageGenController {
     }
 
     // ─── 4. Stable Diffusion EMBARQUÉ (stable-diffusion.cpp natif) ─────────────
+
+
+    /**
+     * Transforme une demande courte FR/EN en prompt image détaillé EN (style, lumière, qualité)
+     * via Gemini texte — améliore nettement AI Horde / SD. Échec silencieux → null.
+     */
+    private fun enrichPromptForImage(context: Context, userPrompt: String): String? {
+        val keys = Prefs.getApiKeysFor(context, Provider.GEMINI)
+        if (keys.isEmpty()) return null
+        val apiKey = keys.first()
+        return try {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=$apiKey"
+            val body = JSONObject()
+                .put(
+                    "contents",
+                    JSONArray().put(
+                        JSONObject().put(
+                            "parts",
+                            JSONArray().put(
+                                JSONObject().put(
+                                    "text",
+                                    "Rewrite this image request as a single detailed English Stable Diffusion prompt. " +
+                                        "Include subject, style, lighting, composition, quality tags (sharp focus, highly detailed). " +
+                                        "No quotes, no explanation, only the prompt.\n\nUser request: $userPrompt"
+                                )
+                            )
+                        )
+                    )
+                )
+                .toString()
+                .toRequestBody(JSON)
+            val request = Request.Builder().url(url).post(body).addHeader("Content-Type", "application/json").build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val json = JSONObject(response.body?.string() ?: return null)
+                val text = json.optJSONArray("candidates")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("content")
+                    ?.optJSONArray("parts")
+                    ?.optJSONObject(0)
+                    ?.optString("text")
+                    ?.trim()
+                if (text.isNullOrBlank() || text.length < 8) null else text.take(800)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun tryOnDeviceStableDiffusion(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         val modelPath = Prefs.getLocalSdModelPath(context)
@@ -185,22 +234,23 @@ object ImageGenController {
 
     private suspend fun tryAiHorde(context: Context, prompt: String, diagnostics: MutableList<String>): Result? {
         return try {
+            // Prompt complet (éventuellement enrichi par Gemini) + params qualité raisonnables
+            // pour workers anonymes (trop haut = peu de workers acceptent la job).
             val submitBody = JSONObject()
-                .put("prompt", prompt)
+                .put("prompt", "$prompt, highly detailed, sharp focus")
                 .put(
                     "params",
                     JSONObject()
-                        .put("width", 512)
-                        .put("height", 512)
-                        .put("steps", 20)
-                        .put("cfg_scale", 7)
-                        .put("sampler_name", "k_euler")
+                        .put("width", 768)
+                        .put("height", 768)
+                        .put("steps", 25)
+                        .put("cfg_scale", 7.5)
+                        .put("sampler_name", "k_euler_a")
                         .put("n", 1)
                 )
                 .put("nsfw", false)
-                // r2=false : demande le résultat directement encodé en base64 dans la réponse
-                // de statut, sans passer par un second téléchargement depuis un lien externe.
                 .put("r2", false)
+                .put("trusted_workers", false)
                 .toString()
                 .toRequestBody(JSON)
 
@@ -232,8 +282,8 @@ object ImageGenController {
             var done = false
             var faulted = false
             var attempts = 0
-            while (attempts < 40 && !done && !faulted) {
-                delay(3000)
+            while (attempts < 60 && !done && !faulted) {
+                delay(4000)
                 val checkRequest = Request.Builder()
                     .url("https://aihorde.net/api/v2/generate/check/$jobId")
                     .get().build()

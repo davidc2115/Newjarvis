@@ -185,9 +185,13 @@ object CalendarController {
     }
 
     private fun calendarLabelSuffix(context: Context, calendarRef: String?): String {
-        if (calendarRef.isNullOrBlank()) return ""
-        val id = findCalendarId(context, calendarRef) ?: return ""
-        val name = buildCalendarNameMap(context)[id] ?: return ""
+        val id = when {
+            !calendarRef.isNullOrBlank() -> findCalendarId(context, calendarRef)
+            Prefs.getPreferredCalendarId(context) > 0 -> Prefs.getPreferredCalendarId(context)
+            else -> null
+        } ?: return ""
+        val name = buildCalendarNameMap(context)[id]
+            ?: Prefs.getPreferredCalendarLabel(context).ifBlank { return "" }
         return " — $name"
     }
 
@@ -238,10 +242,18 @@ object CalendarController {
         val calendarNames = buildCalendarNameMap(context)
 
         var filterCalendarId: Long? = null
+        var effectiveRef = calendarRef
         if (!calendarRef.isNullOrBlank()) {
             filterCalendarId = findCalendarId(context, calendarRef)
             if (filterCalendarId == null) {
-                return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les calendriers disponibles, puis donne-lui un surnom avec name_calendar si besoin."
+                return "❌ Calendrier « $calendarRef » introuvable. Dis « liste mes calendriers », puis « appelle le calendrier X Ent PV » pour lui donner un surnom simple."
+            }
+        } else {
+            // Filtre préféré permanent (ex: après "affiche seulement le planning Ent PV")
+            val preferredId = Prefs.getPreferredCalendarId(context)
+            if (preferredId > 0) {
+                filterCalendarId = preferredId
+                effectiveRef = Prefs.getPreferredCalendarLabel(context).ifBlank { preferredId.toString() }
             }
         }
 
@@ -705,8 +717,29 @@ object CalendarController {
         val id = findCalendarId(context, calendarRef)
             ?: return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars pour voir les noms/comptes disponibles."
         Prefs.saveCalendarNickname(context, id, nickname)
+        // Enregistrer aussi comme planning par défaut : la demande "appelle-le X / seulement ce planning"
+        // implique presque toujours "utilise celui-là ensuite".
+        Prefs.savePreferredCalendar(context, id, nickname)
         val currentName = buildCalendarNameMap(context)[id] ?: calendarRef
-        return "✅ Le calendrier « $currentName » s'appellera désormais « $nickname »."
+        return "✅ Le calendrier « $currentName » s'appelle désormais « $nickname ». " +
+            "Les prochaines demandes de planning (aujourd'hui, semaine…) n'afficheront que celui-là. " +
+            "Dis « affiche tous les calendriers » pour annuler ce filtre."
+    }
+
+    /** Définit le calendrier utilisé par défaut pour today/upcoming/week/day sans paramètre calendar. */
+    fun setPreferredCalendar(context: Context, calendarRef: String): String {
+        val id = findCalendarId(context, calendarRef)
+            ?: return "❌ Calendrier « $calendarRef » introuvable. Utilise list_calendars."
+        val label = Prefs.getCalendarNickname(context, id).ifBlank {
+            buildCalendarNameMap(context)[id] ?: calendarRef
+        }
+        Prefs.savePreferredCalendar(context, id, label)
+        return "✅ Planning par défaut : « $label ». Les prochaines demandes n'afficheront que ce calendrier."
+    }
+
+    fun clearPreferredCalendar(context: Context): String {
+        Prefs.clearPreferredCalendar(context)
+        return "✅ Filtre de planning annulé — les prochains affichages montreront tous les calendriers Google."
     }
 
     /**
@@ -748,7 +781,7 @@ object CalendarController {
         // Extraire un éventuel email entre parenthèses : "Nom (email@x.com)"
         val emailInParens = Regex("\\(([^)]+@[^)]+)\\)").find(raw)?.groupValues?.getOrNull(1)?.lowercase()
         val refWithoutEmail = normalizeCalRef(raw.replace(Regex("\\([^)]*@[^)]*\\)"), " "))
-        val refTokens = refWithoutEmail.split(" ").filter { it.length >= 3 }
+        val refTokens = refWithoutEmail.split(" ").filter { it.length >= 2 }
 
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
@@ -791,7 +824,7 @@ object CalendarController {
             }
         }
         // Seuil minimal pour éviter un faux positif sur un mot trop générique
-        return if (bestScore >= 30) bestId else null
+        return if (bestScore >= 20) bestId else null
     }
 
     /** Comme [findCalendarId], mais une référence vide/absente renvoie le calendrier par défaut de l'appareil. */

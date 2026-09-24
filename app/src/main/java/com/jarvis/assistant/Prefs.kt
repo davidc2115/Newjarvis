@@ -537,6 +537,31 @@ object Prefs {
 
     // ─── Surnoms de calendriers (pour distinguer plusieurs agendas similaires) ──
 
+
+    // Calendrier préféré pour today_events/upcoming/week/day quand aucun "calendar" n'est précisé
+    private const val KEY_PREFERRED_CALENDAR_ID = "preferred_calendar_id"
+    private const val KEY_PREFERRED_CALENDAR_LABEL = "preferred_calendar_label"
+
+    fun getPreferredCalendarId(context: Context): Long =
+        prefs(context).getLong(KEY_PREFERRED_CALENDAR_ID, -1L)
+
+    fun getPreferredCalendarLabel(context: Context): String =
+        prefs(context).getString(KEY_PREFERRED_CALENDAR_LABEL, "") ?: ""
+
+    fun savePreferredCalendar(context: Context, calendarId: Long, label: String) {
+        prefs(context).edit()
+            .putLong(KEY_PREFERRED_CALENDAR_ID, calendarId)
+            .putString(KEY_PREFERRED_CALENDAR_LABEL, label)
+            .apply()
+    }
+
+    fun clearPreferredCalendar(context: Context) {
+        prefs(context).edit()
+            .remove(KEY_PREFERRED_CALENDAR_ID)
+            .remove(KEY_PREFERRED_CALENDAR_LABEL)
+            .apply()
+    }
+
     fun getCalendarNickname(context: Context, calendarId: Long): String =
         prefs(context).getString("calendar_nickname_$calendarId", "") ?: ""
 
